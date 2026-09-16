@@ -6,6 +6,7 @@
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
 #include "config.hpp"
+#include "mode_tuning.hpp"
 #include "smoothing.hpp"
 
 #include <atomic>
@@ -82,6 +83,7 @@ namespace
     std::atomic<uint64_t> g_frames{0};
     std::atomic<uint64_t> g_clamped{0};
     std::atomic<double> g_lag_sum{0.0};
+    std::atomic<uint64_t> g_view_updates{0}; // GetCameraView calls for the player's camera: the camera is updating
     std::atomic<uint64_t> g_calls_timed{0}; // smooth_view calls, and QPC ticks spent in them
     std::atomic<uint64_t> g_ticks_spent{0};
 
@@ -267,8 +269,9 @@ namespace
     void __fastcall get_camera_view_hook(void* self, float delta_time, void* desired_view)
     {
         g_original(self, delta_time, desired_view);
-        if (!g_enabled.load(std::memory_order_relaxed)) return;
         if (self != g_player_camera.load(std::memory_order_relaxed)) return;
+        g_view_updates.fetch_add(1, std::memory_order_relaxed);
+        if (!g_enabled.load(std::memory_order_relaxed)) return;
         if (!g_log_stats.load(std::memory_order_relaxed))
         {
             smooth_view(desired_view, delta_time);
@@ -322,7 +325,7 @@ class DWSmoothCam : public CppUserModBase
     DWSmoothCam() : CppUserModBase()
     {
         ModName = STR("DWSmoothCam");
-        ModVersion = STR("0.6.1");
+        ModVersion = STR("0.7.1");
         ModDescription = STR("Frame-interpolated third-person camera");
         ModAuthors = STR("littleRabbit6");
 
@@ -334,6 +337,7 @@ class DWSmoothCam : public CppUserModBase
 
     ~DWSmoothCam() override
     {
+        m_tuner.restore();
         // The DLL can be unloaded (hot reload): the vtable must not point into it afterwards.
         if (g_vtable_entry && g_original)
         {
@@ -357,7 +361,11 @@ class DWSmoothCam : public CppUserModBase
         m_callbacks.push_back(Hook::RegisterBeginPlayPostCallback([this](auto&, AActor* actor) { on_begin_play(actor); }, options));
         m_callbacks.push_back(Hook::RegisterEndPlayPostCallback([this](auto&, AActor* actor, EEndPlayReason) { on_end_play(actor); }, options));
         m_callbacks.push_back(Hook::RegisterLoadMapPreCallback(
-                [this](auto&, UEngine*, FWorldContext&, FURL, UPendingNetGame*, FString&) { forget_player(); }, options));
+                [this](auto&, UEngine*, FWorldContext&, FURL, UPendingNetGame*, FString&) {
+                    forget_player();
+                    m_tuner.forget();
+                    m_position_applied_generation = 0; // re-apply in the next world
+                }, options));
         m_callbacks.push_back(Hook::RegisterEngineTickPostCallback([this](auto&, UEngine*, float, bool) { on_engine_tick(); }, options));
 
         bind(m_toggle_key, STR("toggle_key"), [this]() {
@@ -369,6 +377,7 @@ class DWSmoothCam : public CppUserModBase
             request_banner(now ? STR("SmoothCam: On") : STR("SmoothCam: Off"));
         });
         bind(m_preset_key, STR("preset_key"), [this]() { cycle_preset(); });
+        bind(m_shoulder_key, STR("shoulder_key"), [this]() { swap_shoulder(); });
 
         m_last_report = m_last_poll = std::chrono::steady_clock::now();
     }
@@ -409,7 +418,14 @@ class DWSmoothCam : public CppUserModBase
     std::mutex m_file_mutex;     // settings file, presets file and m_settings: UE4SS thread and key callbacks
     dwsc::Settings m_settings{};
     uint64_t m_settings_stamp = 0;
-    std::string m_toggle_key, m_preset_key;
+    std::string m_toggle_key, m_preset_key, m_shoulder_key;
+
+    // Camera position: settings published under m_position_mutex, applied from the engine tick.
+    dwsc::ModeTuner m_tuner; // game thread only
+    std::mutex m_position_mutex;
+    dwsc::PositionTuning m_position{};
+    std::atomic<uint64_t> m_position_generation{1};
+    uint64_t m_position_applied_generation = 0; // game thread only
     size_t m_preset_cursor = 0;
 
     std::chrono::steady_clock::time_point m_last_report{}, m_last_poll{};
@@ -515,6 +531,46 @@ class DWSmoothCam : public CppUserModBase
         g_log_stats.store(m_settings.log_stats);
         m_show_banner.store(m_settings.show_banner);
         g_reset.store(true);
+
+        auto position = dwsc::position_of(m_settings);
+        std::lock_guard guard(m_position_mutex);
+        if (!(position == m_position))
+        {
+            m_position = position;
+            m_position_generation.fetch_add(1);
+        }
+    }
+
+    // Flips which shoulder the camera sits over, in every mode that has a side, and saves it to the ini.
+    auto swap_shoulder() -> void
+    {
+        std::lock_guard guard(m_file_mutex);
+        m_settings.shoulder_swap = !m_settings.shoulder_swap;
+        if (auto content = dwsc::read_file(SETTINGS_PATH))
+        {
+            dwsc::Values values{{"shoulder_swap", m_settings.shoulder_swap ? 1.0 : 0.0}};
+            if (dwsc::write_file(SETTINGS_PATH, dwsc::rewrite_numbers(*content, values))) m_settings_stamp = last_write(SETTINGS_PATH);
+        }
+        publish_locked();
+        Output::send<LogLevel::Normal>(STR("[DWSmoothCam] shoulder {}\n"), m_settings.shoulder_swap ? STR("swapped") : STR("as the game has it"));
+        request_banner(m_settings.shoulder_swap ? STR("SmoothCam: Shoulder swapped") : STR("SmoothCam: Shoulder default"));
+    }
+
+    // Game thread: applies camera position once a player camera exists and the settings moved.
+    auto apply_position() -> void
+    {
+        m_tuner.tick(g_view_updates.load());
+        auto* camera = static_cast<UObject*>(g_player_camera.load());
+        if (!camera) return;
+        auto generation = m_position_generation.load();
+        if (generation == m_position_applied_generation) return;
+        dwsc::PositionTuning position;
+        {
+            std::lock_guard guard(m_position_mutex);
+            position = m_position;
+        }
+        m_tuner.apply(position, camera);
+        m_position_applied_generation = generation;
     }
 
     // Reads smoothcam.ini, runs a pending menu save or load, writes the file back if either ran, publishes.
@@ -536,6 +592,7 @@ class DWSmoothCam : public CppUserModBase
         {
             m_toggle_key = m_settings.toggle_key;
             m_preset_key = m_settings.preset_key;
+            m_shoulder_key = m_settings.shoulder_key;
         }
 
         dwsc::Values writes;
@@ -688,6 +745,7 @@ class DWSmoothCam : public CppUserModBase
     auto on_engine_tick() -> void
     {
         show_pending_banner();
+        apply_position();
         if (!m_controller && m_find_requested.exchange(false))
         {
             m_controller = UObjectGlobals::FindFirstOf(STR("BP_PlayerController_C"));
@@ -726,6 +784,7 @@ class DWSmoothCam : public CppUserModBase
 
         g_player_root.store(root);
         g_player_camera.store(camera);
+        m_position_applied_generation = 0; // a new pawn: its modes get the current position
         Output::send<LogLevel::Normal>(STR("[DWSmoothCam] following {}\n"), pawn->GetName());
     }
 

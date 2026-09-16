@@ -29,6 +29,7 @@ namespace dwsc
         bool enabled = true;
         std::string toggle_key = "O";
         std::string preset_key = "V";
+        std::string shoulder_key = "N";
 
         double follow_rate_h = 8.0;       // 1/s: how fast the camera catches the character horizontally
         double follow_rate_v = 10.0;      // 1/s: vertically
@@ -48,6 +49,18 @@ namespace dwsc
         double reset_gap = 0.25;          // s without a view update (cutscene, photo mode, load) before it snaps
 
         bool show_banner = true;          // announce presets and the toggle with the game's region banner
+
+        // Camera position: written into the game's camera modes (mode_tuning.hpp). Neutral values leave them as shipped.
+        bool camera_tuning = true;
+        double exploration_distance = 100, exploration_height = 0, exploration_shoulder = 0, exploration_fov = 0;
+        double sprint_distance = 100, sprint_height = 0, sprint_shoulder = 0, sprint_fov = 0;
+        double combat_distance = 100, combat_height = 0, combat_shoulder = 0, combat_fov = 0;
+        double aiming_distance = 100, aiming_height = 0, aiming_shoulder = 0, aiming_fov = 0;
+        double traversal_distance = 100, traversal_height = 0, traversal_fov = 0;
+        double game_lag_scale = 1;        // multiplies the game's own lag speeds: higher is tighter
+        bool shoulder_swap = false;
+        double pitch_min = -60, pitch_max = 40;
+        double position_transition = 0.5; // s a position change glides over; 0 snaps
 
         int preset_load = 0;              // menu action: 101-103 built-in, 1-6 slot; the mod sets it back to 0
         int preset_save = 0;              // menu action: 1-6 slot; the mod sets it back to 0
@@ -100,6 +113,32 @@ namespace dwsc
         else if (key == "reset_distance") number(s.reset_distance);
         else if (key == "reset_gap") number(s.reset_gap);
         else if (key == "show_banner") flag(s.show_banner);
+        else if (key == "shoulder_key") s.shoulder_key = value;
+        else if (key == "camera_tuning") flag(s.camera_tuning);
+        else if (key == "shoulder_swap") flag(s.shoulder_swap);
+        else if (key == "position_transition") number(s.position_transition);
+        else if (key == "exploration_distance") number(s.exploration_distance);
+        else if (key == "exploration_height") number(s.exploration_height);
+        else if (key == "exploration_shoulder") number(s.exploration_shoulder);
+        else if (key == "exploration_fov") number(s.exploration_fov);
+        else if (key == "sprint_distance") number(s.sprint_distance);
+        else if (key == "sprint_height") number(s.sprint_height);
+        else if (key == "sprint_shoulder") number(s.sprint_shoulder);
+        else if (key == "sprint_fov") number(s.sprint_fov);
+        else if (key == "combat_distance") number(s.combat_distance);
+        else if (key == "combat_height") number(s.combat_height);
+        else if (key == "combat_shoulder") number(s.combat_shoulder);
+        else if (key == "combat_fov") number(s.combat_fov);
+        else if (key == "aiming_distance") number(s.aiming_distance);
+        else if (key == "aiming_height") number(s.aiming_height);
+        else if (key == "aiming_shoulder") number(s.aiming_shoulder);
+        else if (key == "aiming_fov") number(s.aiming_fov);
+        else if (key == "traversal_distance") number(s.traversal_distance);
+        else if (key == "traversal_height") number(s.traversal_height);
+        else if (key == "traversal_fov") number(s.traversal_fov);
+        else if (key == "game_lag_scale") number(s.game_lag_scale);
+        else if (key == "pitch_min") number(s.pitch_min);
+        else if (key == "pitch_max") number(s.pitch_max);
         else if (key == "preset_load") integer(s.preset_load);
         else if (key == "preset_save") integer(s.preset_save);
         else if (key == "log_stats") flag(s.log_stats);
@@ -118,6 +157,18 @@ namespace dwsc
         s.rotation_rate = std::max(s.rotation_rate, 0.0);
         s.reset_distance = std::max(s.reset_distance, 1.0);
         s.reset_gap = std::max(s.reset_gap, 0.0);
+        for (double* d : {&s.exploration_distance, &s.sprint_distance, &s.combat_distance, &s.aiming_distance, &s.traversal_distance})
+        {
+            *d = std::clamp(*d, 25.0, 300.0);
+        }
+        for (double* f : {&s.exploration_fov, &s.sprint_fov, &s.combat_fov, &s.aiming_fov, &s.traversal_fov})
+        {
+            *f = std::clamp(*f, -40.0, 40.0);
+        }
+        s.game_lag_scale = std::clamp(s.game_lag_scale, 0.1, 20.0);
+        s.pitch_min = std::clamp(s.pitch_min, -89.0, -10.0);
+        s.pitch_max = std::clamp(s.pitch_max, 10.0, 89.0);
+        s.position_transition = std::clamp(s.position_transition, 0.0, 3.0);
     }
 
     // key = value lines; ';' and '#' start comments. Sections are ignored.
