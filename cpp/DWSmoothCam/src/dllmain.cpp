@@ -82,6 +82,8 @@ namespace
     std::atomic<uint64_t> g_frames{0};
     std::atomic<uint64_t> g_clamped{0};
     std::atomic<double> g_lag_sum{0.0};
+    std::atomic<uint64_t> g_calls_timed{0}; // smooth_view calls, and QPC ticks spent in them
+    std::atomic<uint64_t> g_ticks_spent{0};
 
     // Kept free of C++ objects: __try needs a plain frame.
     auto guarded_read(void* from, void* to, size_t bytes) -> bool
@@ -267,7 +269,17 @@ namespace
         g_original(self, delta_time, desired_view);
         if (!g_enabled.load(std::memory_order_relaxed)) return;
         if (self != g_player_camera.load(std::memory_order_relaxed)) return;
+        if (!g_log_stats.load(std::memory_order_relaxed))
+        {
+            smooth_view(desired_view, delta_time);
+            return;
+        }
+        LARGE_INTEGER start{}, stop{};
+        QueryPerformanceCounter(&start);
         smooth_view(desired_view, delta_time);
+        QueryPerformanceCounter(&stop);
+        g_calls_timed.fetch_add(1, std::memory_order_relaxed);
+        g_ticks_spent.fetch_add(static_cast<uint64_t>(stop.QuadPart - start.QuadPart), std::memory_order_relaxed);
     }
 
     auto parse_key(const std::string& name) -> int
@@ -310,7 +322,7 @@ class DWSmoothCam : public CppUserModBase
     DWSmoothCam() : CppUserModBase()
     {
         ModName = STR("DWSmoothCam");
-        ModVersion = STR("0.6.0");
+        ModVersion = STR("0.6.1");
         ModDescription = STR("Frame-interpolated third-person camera");
         ModAuthors = STR("littleRabbit6");
 
@@ -378,8 +390,12 @@ class DWSmoothCam : public CppUserModBase
         auto frames = g_frames.exchange(0);
         auto clamped = g_clamped.exchange(0);
         auto lag = g_lag_sum.exchange(0.0);
-        Output::send<LogLevel::Normal>(STR("[DWSmoothCam] {:.1f} smoothed frames/s, mean shown lag {:.1f} cm, wall clamp {:.0f}%\n"),
-                                       frames / elapsed, frames ? lag / frames : 0.0, frames ? 100.0 * clamped / frames : 0.0);
+        auto timed = g_calls_timed.exchange(0);
+        auto ticks = g_ticks_spent.exchange(0);
+        double micros = timed ? 1e6 * static_cast<double>(ticks) / static_cast<double>(g_qpc_frequency.QuadPart) / timed : 0.0;
+        Output::send<LogLevel::Normal>(
+                STR("[DWSmoothCam] {:.1f} smoothed frames/s, mean shown lag {:.1f} cm, wall clamp {:.0f}%, {:.1f} us per frame in the hook\n"),
+                frames / elapsed, frames ? lag / frames : 0.0, frames ? 100.0 * clamped / frames : 0.0, micros);
     }
 
   private:
