@@ -1,7 +1,7 @@
 """Build the SmoothCam - UE4SS (DWSmoothCam) archive for Nexus.
 
-Output: dist/SmoothCam-UE4SS-<version>.zip. The archive carries the ue4ss/Mods/DWSmoothCam/ path, so
-extracting it into Dawnwalker\Binaries\Win64 installs the mod:
+Output: release/dist/SmoothCam-UE4SS-<version>.zip. The archive carries the ue4ss/Mods/DWSmoothCam/
+path, so extracting it into Dawnwalker\Binaries\Win64 installs the mod:
 
     ue4ss/Mods/DWSmoothCam/dlls/main.dll
     ue4ss/Mods/DWSmoothCam/enabled.txt
@@ -11,22 +11,22 @@ extracting it into Dawnwalker\Binaries\Win64 installs the mod:
 
 No PDB and no presets folder: the mod creates config/presets/ at startup.
 
-Optional file: dist/SmoothCam-Example-Preset-<version>.zip, the commented example in example-preset/ at
-ue4ss/Mods/DWSmoothCam/config/presets/<file name>.
+Optional file: release/dist/SmoothCam-Example-Preset-<version>.zip, the commented example in
+release/example-preset/ at ue4ss/Mods/DWSmoothCam/config/presets/<file name>.
 
-Source: ue4ss/DWSmoothCam/ in this repo; main.dll is the git-ignored build output of cpp/DWSmoothCam.
-Version: ModVersion in dllmain.cpp. The build fails if:
+Source: mod/ in this repo; mod/dlls/main.dll is the git-ignored build output of src/.
+Version: ModVersion in src/dllmain.cpp. The build fails if:
   - ModVersion, mod_settings.ini [Mod] Version and the newest entry in the changelog block of
     nexus-page-metadata.md disagree;
   - a ConfigKey in mod_settings.ini is missing from smoothcam.ini or present more than once (either
     stops the Mod Menu page opening);
   - a shipped smoothcam.ini value is outside its setting's Minimum/Maximum or not in its PresetValues;
-  - main.dll is older than the newest file in cpp/DWSmoothCam/src (rebuild first);
-  - the mod folder has a scripts/ subfolder (UE4SS would log a red main.lua error on every start);
+  - main.dll is older than the newest file in src/ (rebuild first);
+  - mod/ has a scripts/ subfolder (UE4SS would log a red main.lua error on every start);
   - the example preset lacks a name line or a key from PRESET_KEYS (config.hpp), holds an unknown or
     repeated key, or has a value outside its Mod Menu range, off its Step, or not in PresetValues.
 
-Usage: python Build-Package.py
+Usage: python release/Build-Package.py (from any directory)
 """
 from __future__ import annotations
 
@@ -36,9 +36,9 @@ import zipfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parent.parent
-MOD = REPO / "ue4ss" / "DWSmoothCam"
-SRC = REPO / "cpp" / "DWSmoothCam" / "src"
+REPO = HERE.parent
+MOD = REPO / "mod"
+SRC = REPO / "src"
 SHEET = HERE / "nexus-page-metadata.md"
 EXAMPLE_DIR = HERE / "example-preset"
 DIST = HERE / "dist"
@@ -201,7 +201,7 @@ def main() -> int:
     settings = check_settings(sections, ini_values(ini))
     check_dll_fresh(dll)
     if (MOD / "scripts").exists():
-        fail("ue4ss/DWSmoothCam/scripts exists: UE4SS would start a Lua mod and log a red main.lua error")
+        fail("mod/scripts exists: UE4SS would start a Lua mod and log a red main.lua error")
     examples = sorted(EXAMPLE_DIR.glob("*.ini"))
     if len(examples) != 1:
         fail(f"expected one example preset in {EXAMPLE_DIR}, found {len(examples)}")

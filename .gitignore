@@ -1,0 +1,8 @@
+mod/dlls/
+release/dist/
+release/art/
+__pycache__/
+build/
+out/
+.vs/
+CMakeUserPresets.json

@@ -1,14 +1,14 @@
 # Nexus page metadata for SmoothCam - UE4SS
 
 Game page: https://www.nexusmods.com/thebloodofdawnwalker (game id 9719, domain
-`thebloodofdawnwalker`). Source: `cpp/DWSmoothCam/src/` (DLL) and `ue4ss/DWSmoothCam/` (mod folder).
+`thebloodofdawnwalker`). Source: `src/` (DLL) and `mod/` (mod folder).
 Archive: `Build-Package.py` (version from `ModVersion` in `dllmain.cpp`).
 
 Not posted yet. Nexus strips backslashes in the Files-tab description; use forward slashes there.
 
-Reference page: FreeCam - UE4SS (mod 350, `release/nexus-dwfreecam/`), category Utilities, tags
-Utilities for Modders, Utilities for Players, Camera, Quality of Life, AI-Generated Content (read
-2026-09-16).
+Reference page: FreeCam - UE4SS (mod 350),
+category Utilities, tags Utilities for Modders, Utilities for Players, Camera, Quality of Life,
+AI-Generated Content (read 2026-09-16).
 
 ## Page fields
 
@@ -66,7 +66,7 @@ Credit field: `GPL-3.0-or-later. Built on UE4SS by the UE4SS-RE team (MIT). Runs
 
 | Image | Status |
 |---|---|
-| Header, 1600x900 | Not made. `release/nexus-dwfreecam/Make-Header.py` is marked retired; capture in game (Steam F12) |
+| Header, 1600x900 | Not made. FreeCam's header script is marked retired; capture in game (Steam F12) |
 | Gallery | Wanted: the same spot on Balanced and on Cinematic; a sprint with distance raised; aiming over the other shoulder |
 
 ## Changelog tab
@@ -94,7 +94,7 @@ differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 - `Build-Package.py` fails when a `ConfigKey` in `mod_settings.ini` is missing from `smoothcam.ini`
   or appears twice, or a shipped value is outside `Minimum`/`Maximum` or not in `PresetValues`. Any
   of those stops the Mod Menu page opening at all, not just one row.
-- It also fails when `main.dll` is older than the newest file in `cpp/DWSmoothCam/src`. A `git
+- It also fails when `main.dll` is older than the newest file in `src/`. A `git
   checkout` touches source mtimes, so after switching branches rebuild before packaging.
 - The description's Settings spoiler lists the shipped defaults by hand; after changing a default
   in `smoothcam.ini`, update it.
@@ -103,9 +103,9 @@ differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
   slot leaves the mod inactive rather than crashing; the build, the page requirements and the Known
   limits line then need the new build number.
 - Loader: a new UE4SS release on mod 18 or mod 283 means checking its UE4SS commit (the UE4SS.log
-  banner, or the DLL's build time against RE-UE4SS CI runs), rebuilding against it
-  (`.modding/tools/RE-UE4SS-src`) and retesting on it, then updating the Requirements rows and the
-  description. If the two packages move to different commits, ship one main file per loader.
+  banner, or the DLL's build time against RE-UE4SS CI runs), rebuilding against it (the RE-UE4SS
+  checkout named by `DW_RE_UE4SS_SOURCE_DIR`) and retesting on it, then updating the Requirements rows
+  and the description. If the two packages move to different commits, ship one main file per loader.
   Framecore's Performance profile turns off BeginPlay, EndPlay and LoadMap; the player discovery in
   `docs/design.md` "Loader profiles" is what makes that work.
 - The config lives in `config/`, not `scripts/config/`: UE4SS starts a Lua mod for any mod folder with a

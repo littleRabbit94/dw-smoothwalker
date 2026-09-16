@@ -1,5 +1,5 @@
 // DWSmoothCam: lags the character pivot the game's camera view is built around (GetCameraView, vtable
-// slot 214). Design and measurements: docs/design.md "DWSmoothCam", docs/design.md "The gameplay camera".
+// slot 214). Design and measurements: docs/design.md.
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
 #include "config.hpp"
