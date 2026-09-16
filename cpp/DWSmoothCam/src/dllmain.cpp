@@ -11,6 +11,7 @@
 #include <chrono>
 #include <format>
 #include <string>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <algorithm>
@@ -28,8 +29,11 @@
 #include <Unreal/UFunction.hpp>
 #include <Unreal/NameTypes.hpp>
 #include <Unreal/UClass.hpp>
+#include <Unreal/UEngine.hpp>
 #include <Unreal/UObject.hpp>
+#include <Unreal/UObjectArray.hpp>
 #include <Unreal/UObjectGlobals.hpp>
+#include <Unreal/UnrealInitializer.hpp>
 
 using namespace RC;
 using namespace RC::Unreal;
@@ -37,15 +41,21 @@ using namespace RC::Unreal;
 namespace
 {
     constexpr size_t GET_CAMERA_VIEW_SLOT = 214;
-    constexpr const char* SETTINGS_PATH = "ue4ss/Mods/DWSmoothCam/scripts/config/smoothcam.ini";
-    constexpr const char* PRESETS_PATH = "ue4ss/Mods/DWSmoothCam/scripts/config/presets.ini";
+    // Not under scripts/: UE4SS makes a Lua mod of any folder with a scripts subfolder and logs a missing main.lua.
+    constexpr const char* SETTINGS_PATH = "ue4ss/Mods/DWSmoothCam/config/smoothcam.ini";
+    constexpr const char* PENDING_PATH = "ue4ss/Mods/DWSmoothCam/config/smoothcam.pending";
+    constexpr const char* PRESETS_DIR = "ue4ss/Mods/DWSmoothCam/config/presets";
+    constexpr const wchar_t* PRESETS_DIR_W = L"ue4ss\\Mods\\DWSmoothCam\\config\\presets";
+    constexpr const char* MANIFEST_PATH = "ue4ss/Mods/DWSmoothCam/mod_settings.ini";
 
-    // Prefix of UE 5.5 FMinimalViewInfo.
+    // Prefix of UE 5.5 FMinimalViewInfo: Location, Rotation, FOV.
     struct ViewHead
     {
         double location[3];
         double rotation[3];
+        float fov;
     };
+    constexpr size_t VIEW_BYTES = offsetof(ViewHead, fov) + sizeof(float); // not the padding over DesiredFOV
 
     // Numbers only, so the hook's copy allocates nothing on a worker thread.
     struct Tuning
@@ -55,12 +65,14 @@ namespace
         double catchup_distance, min_rate_scale, max_lag_h, max_lag_v;
         bool soft_leash, rotation_smoothing, wall_clamp;
         double rotation_rate, reset_distance, reset_gap;
+        double transition;   // position_transition: the crossfade after a change
+        uint64_t generation; // bumped by every publish
     };
 
     auto tuning_of(const dwsc::Settings& s) -> Tuning
     {
         return {s.follow_rate_h, s.follow_rate_v, s.curve_h, s.curve_v, s.catchup_distance, s.min_rate_scale, s.max_lag_h, s.max_lag_v,
-                s.soft_leash, s.rotation_smoothing, s.wall_clamp, s.rotation_rate, s.reset_distance, s.reset_gap};
+                s.soft_leash, s.rotation_smoothing, s.wall_clamp, s.rotation_rate, s.reset_distance, s.reset_gap, s.position_transition, 0};
     }
 
     using GetCameraViewFn = void(__fastcall*)(void* self, float delta_time, void* desired_view);
@@ -74,7 +86,9 @@ namespace
 
     // Published by the game thread, read by the hook. Pointers are only compared or read under SEH.
     std::atomic<bool> g_enabled{true};
-    std::atomic<bool> g_reset{true};
+    std::atomic<bool> g_reset{true}; // a hard cut: snap, no crossfade
+    std::atomic<uint64_t> g_toggle_generation{0};   // O
+    std::atomic<uint64_t> g_position_generation{0}; // mode writes; their FOV lands on the next camera update
     std::atomic<bool> g_log_stats{false};
     std::atomic<void*> g_player_camera{nullptr};
     std::atomic<void*> g_player_root{nullptr};
@@ -124,6 +138,20 @@ namespace
         dwsc::Quat rotation_smoothed{};
         double nominal_distance = 0.0;
         LARGE_INTEGER last_call{};
+
+        // Last view handed to the game, relative to the game's own view that frame. The arm is rebuilt from the
+        // game's camera each frame, so a fade follows moving and turning even with rotation smoothing on.
+        bool out_valid = false;
+        dwsc::Vec3 out_offset{};   // shown lag: pivot + arm under the output rotation - output location
+        dwsc::Quat out_rotation{}; // output rotation * inverse(game rotation)
+        float out_fov = NAN;
+
+        bool blending = false;
+        double blend_elapsed = 0.0, blend_duration = 0.0;
+        dwsc::Vec3 from_offset{};
+        dwsc::Quat from_rotation{};
+        float from_fov = NAN;
+        uint64_t seen_tuning = 0, seen_toggle = 0, seen_position = 0;
     };
     Follow g_follow;
     LARGE_INTEGER g_qpc_frequency{};
@@ -145,7 +173,15 @@ namespace
         return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
     }
 
-    auto smooth_view(void* desired_view, float delta_time) -> void
+    auto lose_view() -> void
+    {
+        g_follow.valid = false;
+        g_follow.out_valid = false;
+        g_follow.blending = false;
+    }
+
+    // enabled false still runs while a crossfade to the game's own view (O off) is under way.
+    auto update_view(void* desired_view, float delta_time, bool enabled) -> void
     {
         AcquireSRWLockShared(&g_tuning_lock);
         const Tuning t = g_tuning;
@@ -159,9 +195,9 @@ namespace
         double pivot_raw[3]{};
         ViewHead view{};
         if (!root || offset < 0 || !guarded_read(static_cast<uint8_t*>(root) + offset, pivot_raw, sizeof(pivot_raw)) ||
-            !guarded_read(desired_view, &view, sizeof(view)))
+            !guarded_read(desired_view, &view, VIEW_BYTES))
         {
-            g_follow.valid = false;
+            lose_view();
             return;
         }
 
@@ -170,113 +206,186 @@ namespace
         if (!finite(pivot) || !finite(camera) || !std::isfinite(view.rotation[0]) || !std::isfinite(view.rotation[1]) ||
             !std::isfinite(view.rotation[2]))
         {
-            g_follow.valid = false;
+            lose_view();
             return;
         }
         dwsc::Quat rotation = dwsc::from_rotator(view.rotation[0], view.rotation[1], view.rotation[2]);
 
-        // Snap after a toggle, a settings change, a gap (cutscene, photo mode, load) or a teleport.
-        bool snap = g_reset.exchange(false, std::memory_order_relaxed) || !g_follow.valid ||
-                    seconds_between(g_follow.last_call, now) > t.reset_gap || !(dwsc::length(pivot - g_follow.pivot_last) <= t.reset_distance);
+        // Settings, O and mode writes crossfade; a hard cut (player or world change, a gap, a teleport) snaps.
+        auto toggle = g_toggle_generation.load(std::memory_order_relaxed);
+        auto position = g_position_generation.load(std::memory_order_relaxed);
+        bool changed = t.generation != g_follow.seen_tuning || toggle != g_follow.seen_toggle || position != g_follow.seen_position;
+        g_follow.seen_tuning = t.generation;
+        g_follow.seen_toggle = toggle;
+        g_follow.seen_position = position;
+        bool cut = g_reset.exchange(false, std::memory_order_relaxed) || seconds_between(g_follow.last_call, now) > t.reset_gap ||
+                   !(dwsc::length(pivot - g_follow.pivot_last) <= t.reset_distance);
         g_follow.last_call = now;
         g_follow.pivot_last = pivot;
-        if (snap)
+
+        // The world delta: 0 while paused, so a paused frame holds the lag and the crossfade.
+        double dt = std::clamp(static_cast<double>(delta_time), 0.0, 0.1);
+
+        dwsc::Vec3 result = camera;
+        dwsc::Quat result_rotation = rotation;
+        if (!enabled)
+        {
+            g_follow.valid = false; // switched back on, the follow restarts from the capsule
+        }
+        else if (cut || !g_follow.valid)
         {
             g_follow.valid = true;
             g_follow.pivot_smoothed = pivot;
             g_follow.rotation_smoothed = rotation;
             g_follow.nominal_distance = dwsc::length(camera - pivot);
-            return;
-        }
-
-        // The world delta: 0 while paused, so a paused frame holds the lag instead of settling it.
-        double dt = std::clamp(static_cast<double>(delta_time), 0.0, 0.1);
-
-        dwsc::Vec3& ps = g_follow.pivot_smoothed;
-        double inner_h = t.soft_leash ? 3.0 * t.max_lag_h : t.max_lag_h;
-        double inner_v = t.soft_leash ? 3.0 * t.max_lag_v : t.max_lag_v;
-
-        double lag_hx = pivot.x - ps.x, lag_hy = pivot.y - ps.y;
-        double lag_h = std::sqrt(lag_hx * lag_hx + lag_hy * lag_hy);
-        double a_h = dwsc::follow_alpha(t.follow_rate_h, t.curve_h, lag_h, t.catchup_distance, t.min_rate_scale, dt);
-        ps.x += lag_hx * a_h;
-        ps.y += lag_hy * a_h;
-        lag_hx = pivot.x - ps.x;
-        lag_hy = pivot.y - ps.y;
-        lag_h = std::sqrt(lag_hx * lag_hx + lag_hy * lag_hy);
-        if (lag_h > inner_h && lag_h > 0.0)
-        {
-            double k = inner_h / lag_h;
-            ps.x = pivot.x - lag_hx * k;
-            ps.y = pivot.y - lag_hy * k;
-            lag_hx *= k;
-            lag_hy *= k;
-            lag_h = inner_h;
-        }
-
-        double lag_v = pivot.z - ps.z;
-        double a_v = dwsc::follow_alpha(t.follow_rate_v, t.curve_v, std::abs(lag_v), t.catchup_distance, t.min_rate_scale, dt);
-        ps.z += lag_v * a_v;
-        lag_v = pivot.z - ps.z;
-        if (std::abs(lag_v) > inner_v)
-        {
-            lag_v = std::copysign(inner_v, lag_v);
-            ps.z = pivot.z - lag_v;
-        }
-
-        double shown_h = leash(lag_h, t.max_lag_h, t.soft_leash);
-        double scale_h = lag_h > 0.0 ? shown_h / lag_h : 0.0;
-        double shown_v = std::copysign(leash(std::abs(lag_v), t.max_lag_v, t.soft_leash), lag_v);
-        dwsc::Vec3 shown_pivot{pivot.x - lag_hx * scale_h, pivot.y - lag_hy * scale_h, pivot.z - shown_v};
-
-        // The arm swings with the smoothed rotation so the camera still orbits the pivot.
-        dwsc::Vec3 arm = camera - pivot;
-        if (t.rotation_smoothing)
-        {
-            double a_r = 1.0 - std::exp(-std::max(t.rotation_rate, 0.0) * dt);
-            g_follow.rotation_smoothed = dwsc::slerp(g_follow.rotation_smoothed, rotation, a_r);
-            dwsc::Quat delta = dwsc::multiply(g_follow.rotation_smoothed, dwsc::conjugate(rotation));
-            arm = dwsc::rotate(delta, arm);
-            dwsc::to_rotator(g_follow.rotation_smoothed, view.rotation[0], view.rotation[1], view.rotation[2]);
         }
         else
         {
-            g_follow.rotation_smoothed = rotation;
-        }
+            dwsc::Vec3& ps = g_follow.pivot_smoothed;
+            double inner_h = t.soft_leash ? 3.0 * t.max_lag_h : t.max_lag_h;
+            double inner_v = t.soft_leash ? 3.0 * t.max_lag_v : t.max_lag_v;
 
-        dwsc::Vec3 result = shown_pivot + arm;
-
-        // The game has already pulled its camera in front of walls. While it sits closer than usual, the
-        // smoothed camera may not be farther out than the game's.
-        double game_distance = dwsc::length(arm);
-        double settle = 1.0 - std::exp(-1.0 * dt);
-        g_follow.nominal_distance = std::max(game_distance, g_follow.nominal_distance + (game_distance - g_follow.nominal_distance) * settle);
-        if (t.wall_clamp && game_distance < 0.85 * g_follow.nominal_distance)
-        {
-            dwsc::Vec3 out = result - pivot;
-            double out_distance = dwsc::length(out);
-            if (out_distance > game_distance && out_distance > 0.0)
+            double lag_hx = pivot.x - ps.x, lag_hy = pivot.y - ps.y;
+            double lag_h = std::sqrt(lag_hx * lag_hx + lag_hy * lag_hy);
+            double a_h = dwsc::follow_alpha(t.follow_rate_h, t.curve_h, lag_h, t.catchup_distance, t.min_rate_scale, dt);
+            ps.x += lag_hx * a_h;
+            ps.y += lag_hy * a_h;
+            lag_hx = pivot.x - ps.x;
+            lag_hy = pivot.y - ps.y;
+            lag_h = std::sqrt(lag_hx * lag_hx + lag_hy * lag_hy);
+            if (lag_h > inner_h && lag_h > 0.0)
             {
-                result = pivot + out * (game_distance / out_distance);
-                g_clamped.fetch_add(1, std::memory_order_relaxed);
+                double k = inner_h / lag_h;
+                ps.x = pivot.x - lag_hx * k;
+                ps.y = pivot.y - lag_hy * k;
+                lag_hx *= k;
+                lag_hy *= k;
+                lag_h = inner_h;
+            }
+
+            double lag_v = pivot.z - ps.z;
+            double a_v = dwsc::follow_alpha(t.follow_rate_v, t.curve_v, std::abs(lag_v), t.catchup_distance, t.min_rate_scale, dt);
+            ps.z += lag_v * a_v;
+            lag_v = pivot.z - ps.z;
+            if (std::abs(lag_v) > inner_v)
+            {
+                lag_v = std::copysign(inner_v, lag_v);
+                ps.z = pivot.z - lag_v;
+            }
+
+            double shown_h = leash(lag_h, t.max_lag_h, t.soft_leash);
+            double scale_h = lag_h > 0.0 ? shown_h / lag_h : 0.0;
+            double shown_v = std::copysign(leash(std::abs(lag_v), t.max_lag_v, t.soft_leash), lag_v);
+            dwsc::Vec3 shown_pivot{pivot.x - lag_hx * scale_h, pivot.y - lag_hy * scale_h, pivot.z - shown_v};
+
+            // The arm swings with the smoothed rotation so the camera still orbits the pivot.
+            dwsc::Vec3 arm = camera - pivot;
+            if (t.rotation_smoothing)
+            {
+                double a_r = 1.0 - std::exp(-std::max(t.rotation_rate, 0.0) * dt);
+                g_follow.rotation_smoothed = dwsc::slerp(g_follow.rotation_smoothed, rotation, a_r);
+                dwsc::Quat delta = dwsc::multiply(g_follow.rotation_smoothed, dwsc::conjugate(rotation));
+                arm = dwsc::rotate(delta, arm);
+                dwsc::to_rotator(g_follow.rotation_smoothed, view.rotation[0], view.rotation[1], view.rotation[2]);
+                result_rotation = g_follow.rotation_smoothed;
+            }
+            else
+            {
+                g_follow.rotation_smoothed = rotation;
+            }
+
+            result = shown_pivot + arm;
+
+            // The game has already pulled its camera in front of walls. While it sits closer than usual, the
+            // smoothed camera may not be farther out than the game's.
+            double game_distance = dwsc::length(arm);
+            double settle = 1.0 - std::exp(-1.0 * dt);
+            g_follow.nominal_distance = std::max(game_distance, g_follow.nominal_distance + (game_distance - g_follow.nominal_distance) * settle);
+            if (t.wall_clamp && game_distance < 0.85 * g_follow.nominal_distance)
+            {
+                dwsc::Vec3 out = result - pivot;
+                double out_distance = dwsc::length(out);
+                if (out_distance > game_distance && out_distance > 0.0)
+                {
+                    result = pivot + out * (game_distance / out_distance);
+                    g_clamped.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+
+            if (g_log_stats.load(std::memory_order_relaxed))
+            {
+                g_frames.fetch_add(1, std::memory_order_relaxed);
+                g_lag_sum.store(g_lag_sum.load(std::memory_order_relaxed) + dwsc::length(pivot - shown_pivot), std::memory_order_relaxed);
             }
         }
 
-        if (!finite(result) || !std::isfinite(view.rotation[0]) || !std::isfinite(view.rotation[1]) || !std::isfinite(view.rotation[2]))
+        // A new lag limit, rotation smoothing or FOV would otherwise jump when it lands mid-motion.
+        bool fov_ok = std::isfinite(view.fov) && view.fov > 1.0f && view.fov < 179.0f;
+        if (cut)
         {
-            g_follow.valid = false; // leave the game's view as it built it
-            return;
+            g_follow.blending = false;
         }
-        view.location[0] = result.x;
-        view.location[1] = result.y;
-        view.location[2] = result.z;
-        if (!guarded_write(desired_view, &view, sizeof(view))) g_follow.valid = false;
+        else if (t.transition <= 0.0)
+        {
+            g_follow.blending = false; // set to 0 mid-fade: the user's choice is no fade
+        }
+        else if (changed && g_follow.out_valid)
+        {
+            g_follow.blending = true;
+            g_follow.blend_elapsed = 0.0;
+            g_follow.blend_duration = t.transition;
+            g_follow.from_offset = g_follow.out_offset;
+            g_follow.from_rotation = g_follow.out_rotation;
+            g_follow.from_fov = g_follow.out_fov;
+        }
+        bool blended = g_follow.blending;
+        if (blended)
+        {
+            g_follow.blend_elapsed += dt;
+            double s = std::min(g_follow.blend_elapsed / g_follow.blend_duration, 1.0);
+            double w = s * s * (3.0 - 2.0 * s);
+            dwsc::Vec3 game_arm = camera - pivot;
+            dwsc::Quat target = dwsc::multiply(result_rotation, dwsc::conjugate(rotation));
+            dwsc::Quat d = dwsc::slerp(g_follow.from_rotation, target, w);
+            dwsc::Vec3 lag = pivot + dwsc::rotate(target, game_arm) - result;
+            result = pivot - (g_follow.from_offset + (lag - g_follow.from_offset) * w) + dwsc::rotate(d, game_arm);
+            result_rotation = dwsc::multiply(d, rotation);
+            dwsc::to_rotator(result_rotation, view.rotation[0], view.rotation[1], view.rotation[2]);
+            if (fov_ok && std::isfinite(g_follow.from_fov)) view.fov = g_follow.from_fov + static_cast<float>((view.fov - g_follow.from_fov) * w);
+            if (s >= 1.0) g_follow.blending = false;
 
-        if (g_log_stats.load(std::memory_order_relaxed))
-        {
-            g_frames.fetch_add(1, std::memory_order_relaxed);
-            g_lag_sum.store(g_lag_sum.load(std::memory_order_relaxed) + dwsc::length(pivot - shown_pivot), std::memory_order_relaxed);
+            // The faded part of the lag was never clamped: keep it in front of a wall the game pulled in for.
+            double game_distance = dwsc::length(game_arm);
+            // The O-off fade too: it ends at the game's view, so clamping to the game's distance never moves the endpoint.
+            if ((!enabled || g_follow.valid) && t.wall_clamp && g_follow.nominal_distance > 0.0 &&
+                game_distance < 0.85 * g_follow.nominal_distance)
+            {
+                dwsc::Vec3 out = result - pivot;
+                double out_distance = dwsc::length(out);
+                if (out_distance > game_distance && out_distance > 0.0) result = pivot + out * (game_distance / out_distance);
+            }
         }
+
+        if (enabled || blended)
+        {
+            if (!finite(result) || !std::isfinite(view.rotation[0]) || !std::isfinite(view.rotation[1]) || !std::isfinite(view.rotation[2]))
+            {
+                lose_view(); // leave the game's view as it built it
+                return;
+            }
+            view.location[0] = result.x;
+            view.location[1] = result.y;
+            view.location[2] = result.z;
+            if (!guarded_write(desired_view, &view, VIEW_BYTES))
+            {
+                lose_view();
+                return;
+            }
+        }
+        g_follow.out_rotation = dwsc::multiply(result_rotation, dwsc::conjugate(rotation));
+        g_follow.out_offset = pivot + dwsc::rotate(g_follow.out_rotation, camera - pivot) - result;
+        g_follow.out_fov = fov_ok ? view.fov : NAN;
+        g_follow.out_valid = true;
     }
 
     struct InHook
@@ -294,15 +403,22 @@ namespace
         LARGE_INTEGER stamp{};
         QueryPerformanceCounter(&stamp);
         g_last_view_qpc.store(stamp.QuadPart, std::memory_order_relaxed);
-        if (!g_enabled.load(std::memory_order_relaxed)) return;
+        bool enabled = g_enabled.load(std::memory_order_relaxed);
+        // Off and settled: the game's view untouched, as before. The next O press starts from a fresh output.
+        if (!enabled && !g_follow.blending && g_toggle_generation.load(std::memory_order_relaxed) == g_follow.seen_toggle)
+        {
+            g_follow.valid = false;
+            g_follow.out_valid = false;
+            return;
+        }
         if (!g_log_stats.load(std::memory_order_relaxed))
         {
-            smooth_view(desired_view, delta_time);
+            update_view(desired_view, delta_time, enabled);
             return;
         }
         LARGE_INTEGER start{}, stop{};
         QueryPerformanceCounter(&start);
-        smooth_view(desired_view, delta_time);
+        update_view(desired_view, delta_time, enabled);
         QueryPerformanceCounter(&stop);
         g_calls_timed.fetch_add(1, std::memory_order_relaxed);
         g_ticks_spent.fetch_add(static_cast<uint64_t>(stop.QuadPart - start.QuadPart), std::memory_order_relaxed);
@@ -357,13 +473,17 @@ class DWSmoothCam : public CppUserModBase
     DWSmoothCam() : CppUserModBase()
     {
         ModName = STR("DWSmoothCam");
-        ModVersion = STR("0.7.4");
+        ModVersion = STR("0.8.0");
         ModDescription = STR("Frame-interpolated third-person camera");
         ModAuthors = STR("littleRabbit6");
 
         QueryPerformanceFrequency(&g_qpc_frequency);
         std::lock_guard guard(m_file_mutex);
+        load_presets_locked();
         reload_settings_locked(true);
+        // Once, without the camera_live() gate: no Mod Menu page can be open this early (docs/design.md, "Startup
+        // flush"). Fixes a preset id the regenerated manifest may not list yet, before the page can fail on it.
+        if (m_flush_pending.load()) flush_locked(std::chrono::steady_clock::now());
         Output::send<LogLevel::Normal>(STR("[DWSmoothCam] v{} loaded, {}\n"), ModVersion, g_enabled.load() ? STR("on") : STR("off"));
     }
 
@@ -394,26 +514,52 @@ class DWSmoothCam : public CppUserModBase
 
         if (!install_hook()) return;
 
+        // UE4SS only installs BeginPlay, EndPlay and LoadMap when [Hooks] enables them (off in a "Performance"
+        // profile); StaticConstructObject is always installed. Registering on an uninstalled hook logs an error,
+        // so each optional hook is guarded by its flag; the engine tick covers world change, liveness and lookup.
         Hook::FCallbackOptions options{false, true, STR("DWSmoothCam"), STR("")};
-        m_callbacks.push_back(Hook::RegisterBeginPlayPostCallback([this](auto&, AActor* actor) { on_begin_play(actor); }, options));
-        m_callbacks.push_back(Hook::RegisterEndPlayPostCallback([this](auto&, AActor* actor, EEndPlayReason) { on_end_play(actor); }, options));
-        m_callbacks.push_back(Hook::RegisterLoadMapPreCallback(
-                [this](auto&, UEngine*, FWorldContext&, FURL, UPendingNetGame*, FString&) {
-                    forget_player();
-                    m_tuner.forget();
-                    m_position_applied_generation = 0; // re-apply in the next world
+        auto& hooks = UnrealInitializer::StaticStorage::GlobalConfig;
+        auto add = [&](Hook::GlobalCallbackId id) {
+            if (id != Hook::ERROR_ID) m_callbacks.push_back(id);
+            return id != Hook::ERROR_ID;
+        };
+        bool begin_play = hooks.bHookBeginPlay &&
+                          add(Hook::RegisterBeginPlayPostCallback([this](auto&, AActor* actor) { on_begin_play(actor); }, options));
+        bool end_play = hooks.bHookEndPlay &&
+                        add(Hook::RegisterEndPlayPostCallback([this](auto&, AActor* actor, EEndPlayReason) { on_end_play(actor); }, options));
+        bool load_map = hooks.bHookLoadMap && add(Hook::RegisterLoadMapPreCallback(
+                                                      [this](auto&, UEngine*, FWorldContext&, FURL, UPendingNetGame*, FString&) { forget_world(); },
+                                                      options));
+        // Runs on whatever thread constructs the object (async loading threads too): only a flag test, an FName
+        // compare and, on a match, an index read and a locked hand-off into m_new_controller.
+        bool new_object = add(Hook::RegisterStaticConstructObjectPostCallback(
+                [this](auto& info, const FStaticConstructObjectParameters& params) {
+                    if (static_cast<uint32_t>(params.SetFlags) & static_cast<uint32_t>(RF_ClassDefaultObject | RF_ArchetypeObject)) return;
+                    auto* cls = const_cast<UClass*>(params.Class);
+                    if (!cls || cls->GetNamePrivate() != m_player_controller_name) return;
+                    auto* object = info.GetCurrentResolvedReturnValue();
+                    if (!object) return;
+                    std::lock_guard guard(m_new_controller_mutex);
+                    m_new_controller = dwsc::LiveRef::of(object);
+                    m_new_controller_pending.store(true);
                 }, options));
-        m_callbacks.push_back(Hook::RegisterEngineTickPostCallback([this](auto&, UEngine*, float, bool) { on_engine_tick(); }, options));
+        bool engine_tick =
+                hooks.bHookEngineTick && add(Hook::RegisterEngineTickPostCallback([this](auto&, UEngine* engine, float, bool) { on_engine_tick(engine); }, options));
+        auto state = [](bool on) { return on ? STR("on") : STR("off"); };
+        Output::send<LogLevel::Normal>(STR("[DWSmoothCam] player discovery: new-object callback {}, BeginPlay {}, EndPlay {}, LoadMap {}; engine tick "
+                                           "checks world and liveness, FindFirstOf fallback from 2 s backing off to 60 s without a controller\n"),
+                                       state(new_object), state(begin_play), state(end_play), state(load_map));
+        if (!engine_tick) Output::send<LogLevel::Warning>(STR("[DWSmoothCam] UE4SS EngineTick hook is off: the camera cannot find the player\n"));
 
         bind(m_toggle_key, STR("toggle_key"), [this]() {
             bool now = !g_enabled.load();
-            g_reset.store(true);
+            g_toggle_generation.fetch_add(1); // before the store: a hook frame between the two must still fade
             g_enabled.store(now);
             Output::send<LogLevel::Normal>(STR("[DWSmoothCam] smoothing {}\n"), now ? STR("on") : STR("off"));
             request_banner(now ? STR("SmoothCam: On") : STR("SmoothCam: Off"));
         });
-        // V and N write smoothcam.ini. The Mod Menu (which pauses) refuses an Apply once its file changed
-        // behind it, so both keys only act while the camera is live.
+        // V and N change live settings that flush_locked later writes to smoothcam.ini; both act only while the
+        // camera is live, since a paused Mod Menu page would refuse its next Apply once the file changed under it.
         bind(m_preset_key, STR("preset_key"), [this]() {
             if (!camera_live())
             {
@@ -444,6 +590,12 @@ class DWSmoothCam : public CppUserModBase
             std::lock_guard guard(m_file_mutex);
             if (last_write(SETTINGS_PATH) != m_settings_stamp) reload_settings_locked(false);
         }
+        // After the poll, so a file change is applied before the live values are written over it.
+        if (m_flush_pending.load() && now >= m_next_flush && camera_live())
+        {
+            std::lock_guard guard(m_file_mutex);
+            flush_locked(now);
+        }
 
         if (!g_log_stats.load()) return;
         auto elapsed = std::chrono::duration<double>(now - m_last_report).count();
@@ -463,14 +615,30 @@ class DWSmoothCam : public CppUserModBase
   private:
     std::vector<Hook::GlobalCallbackId> m_callbacks;
     FName m_player_controller_name{};
-    UObject* m_controller = nullptr; // game thread only
-    UObject* m_pawn = nullptr;
+    // Game thread only, each checked against the object array every engine tick before use.
+    dwsc::LiveRef m_controller, m_pawn, m_camera, m_root;
+    std::atomic<bool> m_player_known{false}; // m_controller held; read by request_banner on the UE4SS update thread
     int32_t m_pawn_offset = -1; // AController::Pawn, same class every map
     std::atomic<bool> m_find_requested{false};
+    std::chrono::steady_clock::time_point m_next_find{};
+    std::chrono::seconds m_find_interval{2}; // FindFirstOf fallback: 2 s, doubling to 60 s while nothing is found
+    std::mutex m_new_controller_mutex;          // m_new_controller: written by the new-object callback on any thread
+    dwsc::LiveRef m_new_controller;
+    std::atomic<bool> m_new_controller_pending{false};
+    int32_t m_viewport_offset = -1, m_world_offset = -1; // UEngine::GameViewport, UGameViewportClient::World; -2 absent
+    UObject* m_world = nullptr;                 // compared only, never followed
+    bool m_world_seen = false;
 
-    std::mutex m_file_mutex; // both ini files and m_settings; the engine tick never takes it
+    std::mutex m_file_mutex; // the config files, m_settings, m_baseline, m_presets, m_loaded_id; the engine tick never takes it
     dwsc::Settings m_settings{};
-    uint64_t m_settings_stamp = 0;
+    uint64_t m_settings_stamp = 0;                // write time of the smoothcam.ini last read or written
+    std::map<std::string, double> m_baseline;     // each numeric key as last known to be in smoothcam.ini
+    int m_loaded_id = 0;                          // last preset loaded or cycled; shown while it still matches
+    std::vector<dwsc::Preset> m_presets;          // built-ins, slots, drop-ins, in cycle order; scanned once per session
+    std::string m_pending_file;                   // content last written to smoothcam.pending; empty when none
+    std::atomic<bool> m_flush_pending{false};     // live settings differ from m_baseline
+    bool m_flush_failing = false;                 // a write-back failed; warned once until one succeeds
+    std::chrono::steady_clock::time_point m_next_flush{};
     std::string m_toggle_key, m_preset_key, m_shoulder_key;
 
     dwsc::ModeTuner m_tuner; // game thread only
@@ -478,9 +646,9 @@ class DWSmoothCam : public CppUserModBase
     dwsc::PositionTuning m_position{};
     std::atomic<uint64_t> m_position_generation{1};
     uint64_t m_position_applied_generation = 0; // game thread only
-    size_t m_preset_cursor = 0;
 
     std::chrono::steady_clock::time_point m_last_report{}, m_last_poll{};
+    uint64_t m_tuning_generation = 0; // under g_tuning_lock
 
     std::mutex m_banner_mutex; // m_banner_text, m_banner_due, m_banner_pending
     std::wstring m_banner_text;
@@ -495,9 +663,10 @@ class DWSmoothCam : public CppUserModBase
     UObject* m_banner_library = nullptr;
 
     // Debounced: a burst of presses shows one banner, with the last text.
+    // Dropped without a player: a banner queued at the main menu would show minutes later, after a load.
     auto request_banner(std::wstring text) -> void
     {
-        if (!m_show_banner.load()) return;
+        if (!m_show_banner.load() || !m_player_known.load()) return;
         std::lock_guard guard(m_banner_mutex);
         m_banner_text = std::move(text);
         m_banner_due = std::chrono::steady_clock::now() + BANNER_SETTLE;
@@ -593,7 +762,7 @@ class DWSmoothCam : public CppUserModBase
 
     auto show_pending_banner() -> void
     {
-        if (!m_controller) return;
+        if (!m_controller.object) return; // checked live this tick
         std::wstring line;
         {
             std::lock_guard guard(m_banner_mutex);
@@ -607,7 +776,7 @@ class DWSmoothCam : public CppUserModBase
         drop_stale_banners(UObjectGlobals::FindFirstOf(STR("NotificationSubsystem")));
         FText text(line.c_str());
         uint8_t params[BANNER_PARAMS_SIZE]{};
-        memcpy(params + BANNER_WORLD, &m_controller, sizeof(m_controller));
+        memcpy(params + BANNER_WORLD, &m_controller.object, sizeof(m_controller.object));
         text.CopyBorrowedTo(params + BANNER_DATA + BANNER_TEXT);
         params[BANNER_FLAG] = 0; // not newly discovered: no discovery reward
         m_banner_library->ProcessEvent(m_banner_function, params);
@@ -633,12 +802,13 @@ class DWSmoothCam : public CppUserModBase
 
     auto publish_locked() -> void
     {
+        // No g_reset: the hook crossfades on the new generation instead of snapping the lag away mid-motion.
         AcquireSRWLockExclusive(&g_tuning_lock);
         g_tuning = tuning_of(m_settings);
+        g_tuning.generation = ++m_tuning_generation;
         ReleaseSRWLockExclusive(&g_tuning_lock);
         g_log_stats.store(m_settings.log_stats);
         m_show_banner.store(m_settings.show_banner);
-        g_reset.store(true);
 
         auto position = dwsc::position_of(m_settings);
         std::lock_guard guard(m_position_mutex);
@@ -649,17 +819,14 @@ class DWSmoothCam : public CppUserModBase
         }
     }
 
-    // Saved to the ini so the Mod Menu page shows it.
+    // Written back to the ini by flush_locked, so the Mod Menu page shows it.
     auto swap_shoulder() -> void
     {
         std::lock_guard guard(m_file_mutex);
         m_settings.shoulder_swap = !m_settings.shoulder_swap;
-        if (auto content = dwsc::read_file(SETTINGS_PATH))
-        {
-            dwsc::Values values{{"shoulder_swap", m_settings.shoulder_swap ? 1.0 : 0.0}};
-            if (dwsc::write_file(SETTINGS_PATH, dwsc::rewrite_numbers(*content, values))) m_settings_stamp = last_write(SETTINGS_PATH);
-        }
+        update_active_locked();
         publish_locked();
+        mark_pending_locked();
         // No banner: the camera moving to the other shoulder is the feedback.
         Output::send<LogLevel::Normal>(STR("[DWSmoothCam] shoulder {}\n"), m_settings.shoulder_swap ? STR("swapped") : STR("as the game has it"));
     }
@@ -679,9 +846,11 @@ class DWSmoothCam : public CppUserModBase
         }
         m_tuner.apply(position, camera);
         m_position_applied_generation = generation;
+        g_position_generation.fetch_add(1); // mode FOV lands on the next camera update: crossfade it
     }
 
-    // Runs a pending menu save or load and writes the picker back to 0.
+    // Startup parses every value; a later change applies only keys whose number moved since the file was last
+    // seen, so a live V/N/preset change survives an Apply of the rest. Only flush_locked writes smoothcam.ini.
     auto reload_settings_locked(bool startup) -> void
     {
         // Stamp first: a write landing between the two is then seen by the next poll.
@@ -707,95 +876,356 @@ class DWSmoothCam : public CppUserModBase
             return;
         }
         m_settings_stamp = stamp;
+        auto file = dwsc::parse_numbers(*content);
 
-        auto previous_enabled = m_settings.enabled;
-        m_settings = dwsc::parse_settings(*content);
         if (startup)
         {
+            m_settings = dwsc::parse_settings(*content);
             m_toggle_key = m_settings.toggle_key;
             m_preset_key = m_settings.preset_key;
             m_shoulder_key = m_settings.shoulder_key;
+            m_baseline = std::move(file);
+            apply_pending_file_locked();
+            // Not a load request: only which of several matching presets to show. A pending save is dropped.
+            m_loaded_id = m_settings.preset;
+            m_settings.preset_save = 0;
+            update_active_locked();
+            publish_locked();
+            g_enabled.store(m_settings.enabled);
+            mark_pending_locked();
+            return;
         }
 
-        dwsc::Values writes;
-        if (m_settings.preset_save >= 1 && m_settings.preset_save <= 6)
+        dwsc::Values edits;
+        for (auto& [key, value] : file)
         {
-            auto slots = dwsc::read_slots(PRESETS_PATH);
-            slots[m_settings.preset_save] = dwsc::preset_of(m_settings);
-            bool ok = dwsc::write_slots(PRESETS_PATH, slots);
+            auto known = m_baseline.find(key);
+            if (known == m_baseline.end() || known->second != value) edits.emplace_back(key, value);
+            m_baseline[key] = value;
+        }
+        if (edits.empty())
+        {
+            mark_pending_locked(); // numbers unchanged; the stamp still moved
+            return;
+        }
+        auto edited = [&](const char* key) {
+            return std::any_of(edits.begin(), edits.end(), [&](auto& edit) { return edit.first == key; });
+        };
+
+        // (a) Ordinary edits onto the live settings. O's state changes only if the file's enabled did.
+        dwsc::apply_values(m_settings, edits);
+        if (edited("enabled") && g_enabled.load() != m_settings.enabled)
+        {
+            g_toggle_generation.fetch_add(1); // fade like O, bumped before the store
+            g_enabled.store(m_settings.enabled);
+        }
+
+        // (b) Save runs before a load in the same Apply. The slot file is written now: the menu does not watch it.
+        if (edited("preset_save") && m_settings.preset_save >= 1 && m_settings.preset_save <= dwsc::MAX_SLOTS)
+        {
+            bool ok = save_slot_locked(m_settings.preset_save, dwsc::preset_of(m_settings));
             Output::send<LogLevel::Normal>(STR("[DWSmoothCam] saved slot {}{}\n"), m_settings.preset_save, ok ? STR("") : STR(": write failed"));
-            if (ok) request_banner(std::format(STR("SmoothCam: saved to Slot {}"), m_settings.preset_save));
-        }
-        if (m_settings.preset_save != 0) writes.emplace_back("preset_save", 0);
-
-        if (m_settings.preset_load != 0)
-        {
-            if (auto preset = find_preset(m_settings.preset_load))
+            if (ok)
             {
-                dwsc::apply_values(m_settings, preset->second);
-                auto applied = dwsc::preset_of(m_settings);
-                writes.insert(writes.end(), applied.begin(), applied.end());
-                Output::send<LogLevel::Normal>(STR("[DWSmoothCam] loaded preset {}\n"), widen(preset->first));
-                request_banner(STR("SmoothCam: ") + widen(preset->first));
+                m_loaded_id = m_settings.preset_save; // the slot holds the live values; a load in this Apply still wins
+                request_banner(std::format(STR("SmoothCam: saved to Slot {}"), m_settings.preset_save));
+            }
+        }
+        m_settings.preset_save = 0;
+
+        // (c) A changed picker loads that preset. Preset keys edited in the same Apply win over it.
+        if (edited("preset") && m_settings.preset != 0 && load_preset_locked(m_settings.preset))
+        {
+            dwsc::Values own;
+            for (auto& edit : edits)
+            {
+                if (dwsc::is_preset_key(edit.first)) own.push_back(edit);
+            }
+            dwsc::apply_values(m_settings, own);
+        }
+
+        update_active_locked();
+        publish_locked();
+        mark_pending_locked();
+        Output::send<LogLevel::Normal>(STR("[DWSmoothCam] settings applied\n"));
+    }
+
+    // Once per session, in the constructor, before anything reads presets or the Mod Menu reads mod_settings.ini:
+    // built-ins, slots 1..MAX_SLOTS ("Slot N.ini"), then other presets-folder *.ini as drop-ins (201+, by name).
+    // On a failed manifest rewrite drop-ins stay off, so the indicator never shows an id the page lacks.
+    auto load_presets_locked() -> void
+    {
+        m_presets.clear();
+        for (auto& p : dwsc::builtin_presets()) m_presets.push_back({p.id, p.name, p.values});
+        CreateDirectoryW(PRESETS_DIR_W, nullptr); // so it is there to drop files into; fails harmlessly if present
+
+        auto files = dwsc::list_preset_files(PRESETS_DIR_W);
+        auto read_preset = [&](const std::wstring& name) -> std::optional<std::pair<std::string, dwsc::Values>> {
+            auto content = dwsc::read_small_file(std::wstring(PRESETS_DIR_W) + L"\\" + name, dwsc::MAX_PRESET_FILE);
+            if (!content)
+            {
+                Output::send<LogLevel::Warning>(STR("[DWSmoothCam] presets/{}: unreadable or over 64 KiB, skipped\n"), name);
+                return std::nullopt;
+            }
+            auto parsed = dwsc::parse_preset_file(std::move(*content));
+            if (parsed.second.empty())
+            {
+                Output::send<LogLevel::Warning>(STR("[DWSmoothCam] presets/{}: no preset settings, skipped\n"), name);
+                return std::nullopt;
+            }
+            return parsed;
+        };
+
+        for (auto& [slot, name] : files.slots)
+        {
+            if (auto parsed = read_preset(name)) m_presets.push_back({slot, "Slot " + std::to_string(slot), dwsc::normalize_preset(parsed->second)});
+        }
+
+        std::vector<dwsc::Preset> dropins;
+        size_t over_limit = 0;
+        for (auto& name : files.dropins)
+        {
+            if (dropins.size() >= static_cast<size_t>(dwsc::MAX_DROPINS))
+            {
+                ++over_limit;
+                continue;
+            }
+            auto parsed = read_preset(name);
+            if (!parsed) continue;
+            int id = dwsc::FIRST_DROPIN_ID + static_cast<int>(dropins.size());
+            auto stem = dwsc::utf8_of(name.substr(0, name.size() - 4)).value_or("");
+            dropins.push_back({id, dwsc::display_name(parsed->first, stem, id), dwsc::normalize_preset(parsed->second)});
+        }
+        if (over_limit)
+        {
+            Output::send<LogLevel::Warning>(STR("[DWSmoothCam] {} presets over the limit of {} skipped\n"), over_limit, dwsc::MAX_DROPINS);
+        }
+
+        std::string values = "0|101|102|103", labels = "Custom|Tight|Balanced|Cinematic";
+        for (int n = 1; n <= dwsc::MAX_SLOTS; ++n)
+        {
+            values += "|" + std::to_string(n);
+            labels += "|Slot " + std::to_string(n);
+        }
+        for (auto& p : dropins)
+        {
+            values += "|" + std::to_string(p.id);
+            labels += "|" + p.name;
+        }
+        bool listed = false;
+        if (auto manifest = dwsc::read_file(MANIFEST_PATH))
+        {
+            if (auto updated = dwsc::with_preset_choices(*manifest, values, labels))
+            {
+                listed = *updated == *manifest || dwsc::write_file(MANIFEST_PATH, *updated);
+                if (!listed) Output::send<LogLevel::Warning>(STR("[DWSmoothCam] could not write mod_settings.ini\n"));
             }
             else
             {
-                Output::send<LogLevel::Warning>(STR("[DWSmoothCam] preset {} is empty, nothing loaded\n"), m_settings.preset_load);
+                Output::send<LogLevel::Warning>(STR("[DWSmoothCam] mod_settings.ini: [Setting.preset] PresetValues or PresetLabels missing\n"));
             }
-            writes.emplace_back("preset_load", 0);
         }
-        m_settings.preset_save = m_settings.preset_load = 0;
-
-        if (!writes.empty())
+        else
         {
-            if (dwsc::write_file(SETTINGS_PATH, dwsc::rewrite_numbers(*content, writes))) m_settings_stamp = last_write(SETTINGS_PATH);
-            else Output::send<LogLevel::Warning>(STR("[DWSmoothCam] could not write smoothcam.ini\n"));
+            Output::send<LogLevel::Warning>(STR("[DWSmoothCam] mod_settings.ini not found\n"));
         }
-
-        publish_locked();
-        if (startup || m_settings.enabled != previous_enabled) g_enabled.store(m_settings.enabled);
-        if (!startup) Output::send<LogLevel::Normal>(STR("[DWSmoothCam] settings applied\n"));
+        if (!listed && !dropins.empty())
+        {
+            Output::send<LogLevel::Warning>(STR("[DWSmoothCam] {} presets from the presets folder off for this session: the Mod Menu page could not list them\n"),
+                                            dropins.size());
+            dropins.clear();
+        }
+        for (auto& p : dropins)
+        {
+            Output::send<LogLevel::Normal>(STR("[DWSmoothCam] preset {} from the presets folder: {}\n"), p.id, dwsc::to_wide(p.name));
+        }
+        size_t slots = m_presets.size() - dwsc::builtin_presets().size();
+        m_presets.insert(m_presets.end(), std::make_move_iterator(dropins.begin()), std::make_move_iterator(dropins.end()));
+        Output::send<LogLevel::Normal>(STR("[DWSmoothCam] presets: {} saved slots, {} from the presets folder\n"), slots,
+                                       m_presets.size() - slots - dwsc::builtin_presets().size());
     }
 
-    auto find_preset(int id) -> std::optional<std::pair<std::string, dwsc::Values>>
+    auto save_slot_locked(int slot, dwsc::Values values) -> bool
     {
-        for (auto& p : dwsc::builtin_presets())
+        values = dwsc::normalize_preset(values);
+        CreateDirectoryA(PRESETS_DIR, nullptr);
+        auto path = std::string(PRESETS_DIR) + "/Slot " + std::to_string(slot) + ".ini";
+        if (!dwsc::write_file(path, dwsc::slot_file_content(slot, values))) return false;
+        if (auto* known = find_preset(slot))
         {
-            if (p.id == id) return std::make_pair(std::string(p.name), p.values);
+            known->values = std::move(values);
+            return true;
         }
-        if (id >= 1 && id <= 6)
-        {
-            auto slots = dwsc::read_slots(PRESETS_PATH);
-            if (auto it = slots.find(id); it != slots.end() && !it->second.empty())
-            {
-                return std::make_pair("Slot " + std::to_string(id), it->second);
-            }
-        }
-        return std::nullopt;
+        auto is_after = [&](const dwsc::Preset& p) { return (p.id >= 1 && p.id <= dwsc::MAX_SLOTS && p.id > slot) || p.id >= dwsc::FIRST_DROPIN_ID; };
+        m_presets.insert(std::find_if(m_presets.begin(), m_presets.end(), is_after), dwsc::Preset{slot, "Slot " + std::to_string(slot), std::move(values)});
+        return true;
     }
 
-    // Written into smoothcam.ini so the Mod Menu page shows the loaded values.
+    auto find_preset(int id) -> dwsc::Preset*
+    {
+        auto it = std::find_if(m_presets.begin(), m_presets.end(), [&](const dwsc::Preset& p) { return p.id == id; });
+        return it != m_presets.end() ? &*it : nullptr;
+    }
+
+    // Applies only the keys the preset holds; a hand-edited file may hold fewer.
+    auto load_preset_locked(int id) -> bool
+    {
+        auto* preset = find_preset(id);
+        if (!preset)
+        {
+            Output::send<LogLevel::Warning>(STR("[DWSmoothCam] preset {} is empty, nothing loaded\n"), id);
+            return false;
+        }
+        dwsc::apply_values(m_settings, preset->values);
+        m_loaded_id = id;
+        auto name = dwsc::to_wide(preset->name);
+        Output::send<LogLevel::Normal>(STR("[DWSmoothCam] loaded preset {}\n"), name);
+        request_banner(STR("SmoothCam: ") + name);
+        return true;
+    }
+
+    // m_settings.preset becomes the preset the live settings match, preferring the last one loaded, else 0 (Custom).
+    auto update_active_locked() -> void
+    {
+        auto matches = [&](const dwsc::Preset& p) {
+            return !p.values.empty() && std::all_of(p.values.begin(), p.values.end(), [&](auto& entry) {
+                return std::abs(dwsc::number_of(m_settings, entry.first) - entry.second) <= 1e-4;
+            });
+        };
+        int active = 0;
+        if (auto* loaded = m_loaded_id != 0 ? find_preset(m_loaded_id) : nullptr; loaded && matches(*loaded)) active = m_loaded_id;
+        for (auto& p : m_presets)
+        {
+            if (!active && matches(p)) active = p.id;
+        }
+        m_settings.preset = active;
+    }
+
+    // Built-ins, saved slots, then drop-ins, starting after the active preset (at the first from Custom).
     auto cycle_preset() -> void
     {
         std::lock_guard guard(m_file_mutex);
-        std::vector<int> order;
-        for (auto& p : dwsc::builtin_presets()) order.push_back(p.id);
-        for (auto& [slot, values] : dwsc::read_slots(PRESETS_PATH))
+        auto at = std::find_if(m_presets.begin(), m_presets.end(), [&](const dwsc::Preset& p) { return p.id == m_settings.preset; });
+        size_t next = m_settings.preset == 0 || at == m_presets.end() ? 0 : (static_cast<size_t>(at - m_presets.begin()) + 1) % m_presets.size();
+        if (!load_preset_locked(m_presets[next].id)) return;
+        update_active_locked();
+        publish_locked();
+        mark_pending_locked();
+    }
+
+    // The live numbers that differ from the file: preset holds the active preset and preset_save 0 (both kept so
+    // in m_settings). Compared as written (%.6g), so a value the file cannot hold exactly does not rewrite forever.
+    auto pending_writes_locked() -> dwsc::Values
+    {
+        dwsc::Values writes;
+        for (auto* key : dwsc::NUMERIC_KEYS)
         {
-            if (!values.empty()) order.push_back(slot);
+            double value = dwsc::number_of(m_settings, key);
+            auto known = m_baseline.find(key);
+            if (known == m_baseline.end() || dwsc::format_number(known->second) != dwsc::format_number(value)) writes.emplace_back(key, value);
         }
-        auto preset = find_preset(order[m_preset_cursor++ % order.size()]);
-        if (!preset) return;
+        return writes;
+    }
+
+    // After any change to the live settings, the baseline or the stamp. Marks the write-back and mirrors it into
+    // smoothcam.pending (which the Mod Menu does not read), so a preset loaded from a paused menu survives an exit
+    // or hot reload before the camera goes live. The side file is rewritten only when its content changes.
+    auto mark_pending_locked() -> void
+    {
+        auto writes = pending_writes_locked();
+        m_flush_pending.store(!writes.empty());
+        std::string content;
+        if (!writes.empty())
+        {
+            content = "; DWSmoothCam: settings not yet written to smoothcam.ini. Applied at the next start only while\n"
+                      "; smoothcam.ini's write time still equals stamp.\n"
+                      "stamp = " + std::to_string(m_settings_stamp) + "\n";
+            char buffer[64];
+            for (auto& [key, value] : writes)
+            {
+                std::snprintf(buffer, sizeof(buffer), "%.17g", value);
+                content += key + " = " + buffer + "\n";
+            }
+        }
+        if (content == m_pending_file) return;
+        if (content.empty())
+        {
+            DeleteFileA(PENDING_PATH);
+        }
+        else if (!dwsc::write_file(PENDING_PATH, content))
+        {
+            Output::send<LogLevel::Warning>(STR("[DWSmoothCam] could not write smoothcam.pending\n"));
+            return;
+        }
+        m_pending_file = std::move(content);
+    }
+
+    // A write-back the last session missed. Applied only if smoothcam.ini still has the stamped write time.
+    auto apply_pending_file_locked() -> void
+    {
+        auto content = dwsc::read_file(PENDING_PATH);
+        if (!content) return;
+        DeleteFileA(PENDING_PATH);
+
+        std::optional<uint64_t> stamp;
+        std::istringstream in(*content);
+        std::string line;
+        while (std::getline(in, line))
+        {
+            if (auto cut = line.find_first_of(";#"); cut != std::string::npos) line.resize(cut);
+            auto eq = line.find('=');
+            if (eq == std::string::npos || dwsc::trim(line.substr(0, eq)) != "stamp") continue;
+            try
+            {
+                stamp = std::stoull(dwsc::trim(line.substr(eq + 1)));
+            }
+            catch (...)
+            {
+            }
+        }
+        if (!stamp || *stamp != m_settings_stamp)
+        {
+            Output::send<LogLevel::Normal>(STR("[DWSmoothCam] smoothcam.pending ignored: smoothcam.ini changed since\n"));
+            return;
+        }
+        auto numbers = dwsc::parse_numbers(*content);
+        dwsc::apply_values(m_settings, dwsc::Values(numbers.begin(), numbers.end()));
+        Output::send<LogLevel::Normal>(STR("[DWSmoothCam] applied {} settings the last session had not written yet\n"), numbers.size());
+    }
+
+    // Runs only while the camera is live, so no Mod Menu page is open to refuse its next Apply over the change.
+    auto flush_locked(std::chrono::steady_clock::time_point now) -> void
+    {
+        // The file changed since last read (or is gone): let the poll handle it first, throttled so a deleted
+        // file is not queried every tick.
+        if (last_write(SETTINGS_PATH) != m_settings_stamp)
+        {
+            m_next_flush = now + std::chrono::milliseconds(250);
+            return;
+        }
+
+        auto writes = pending_writes_locked();
+        if (writes.empty())
+        {
+            mark_pending_locked();
+            return;
+        }
 
         auto content = dwsc::read_file(SETTINGS_PATH);
-        dwsc::apply_values(m_settings, preset->second);
-        if (content && dwsc::write_file(SETTINGS_PATH, dwsc::rewrite_numbers(*content, dwsc::preset_of(m_settings))))
+        auto updated = content ? dwsc::rewrite_numbers(*content, writes) : std::string{};
+        bool changed = content && updated != *content;
+        if (!content || (changed && !dwsc::write_file(SETTINGS_PATH, updated)))
         {
-            m_settings_stamp = last_write(SETTINGS_PATH);
+            if (!m_flush_failing) Output::send<LogLevel::Warning>(STR("[DWSmoothCam] could not write smoothcam.ini, retrying\n"));
+            m_flush_failing = true;
+            m_next_flush = now + std::chrono::milliseconds(250);
+            return;
         }
-        publish_locked();
-        Output::send<LogLevel::Normal>(STR("[DWSmoothCam] preset {}\n"), widen(preset->first));
-        request_banner(STR("SmoothCam: ") + widen(preset->first));
+        if (changed) m_settings_stamp = last_write(SETTINGS_PATH);
+        // A key missing from the file counts as written too, so it is not retried every tick.
+        for (auto& [key, value] : writes) m_baseline[key] = std::stod(dwsc::format_number(value));
+        m_flush_failing = false;
+        mark_pending_locked(); // nothing left: clears the flag and deletes smoothcam.pending
     }
 
     auto install_hook() -> bool
@@ -835,77 +1265,179 @@ class DWSmoothCam : public CppUserModBase
         g_player_camera.store(nullptr);
         g_player_root.store(nullptr);
         g_reset.store(true);
-        m_controller = nullptr;
-        m_pawn = nullptr;
+        m_controller = m_pawn = m_camera = m_root = {};
+        m_player_known.store(false);
     }
 
+    // A level change, called from the LoadMap pre hook and the engine tick; harmless if run twice for one load.
+    auto forget_world() -> void
+    {
+        forget_player();
+        m_tuner.forget();
+        m_position_applied_generation = 0; // re-apply in the next world
+    }
+
+    // A duplicate of the new-object path where UE4SS installs BeginPlay. Game thread.
     auto on_begin_play(AActor* actor) -> void
     {
         auto* object = static_cast<UObject*>(actor);
-        if (!object || m_controller) return;
+        if (!object || m_controller.alive()) return;
         auto* cls = object->GetClassPrivate();
-        if (cls && cls->GetNamePrivate() == m_player_controller_name)
-        {
-            m_controller = object;
-            m_pawn = nullptr;
-        }
+        if (cls && cls->GetNamePrivate() == m_player_controller_name) adopt_controller(dwsc::LiveRef::of(object));
     }
 
     auto on_end_play(AActor* actor) -> void
     {
         auto* object = static_cast<UObject*>(actor);
-        if (object && object == m_controller) forget_player();
-        else if (object && object == m_pawn)
+        if (object && object == m_controller.object) forget_player();
+        else if (object && object == m_pawn.object) forget_pawn();
+    }
+
+    auto forget_pawn() -> void
+    {
+        g_player_camera.store(nullptr);
+        g_player_root.store(nullptr);
+        g_reset.store(true);
+        m_pawn = m_camera = m_root = {};
+    }
+
+    auto adopt_controller(dwsc::LiveRef controller) -> void
+    {
+        forget_player();
+        m_controller = controller;
+        m_player_known.store(true);
+        Output::send<LogLevel::Normal>(STR("[DWSmoothCam] player controller found\n"));
+    }
+
+    // GEngine->GameViewport->World, both reflected properties (not hard offsets); compared only, never followed.
+    auto check_world(UEngine* engine) -> void
+    {
+        auto* object = static_cast<UObject*>(engine);
+        if (!object || m_viewport_offset == -2 || m_world_offset == -2) return;
+        auto offset_of = [](UObject* owner, const TCHAR* name) -> int32_t {
+            auto** slot = owner->GetValuePtrByPropertyNameInChain<UObject*>(name);
+            return slot ? static_cast<int32_t>(reinterpret_cast<uint8_t*>(slot) - reinterpret_cast<uint8_t*>(owner)) : -2;
+        };
+        if (m_viewport_offset < 0) m_viewport_offset = offset_of(object, STR("GameViewport"));
+        if (m_viewport_offset < 0)
         {
-            g_player_camera.store(nullptr);
-            g_player_root.store(nullptr);
-            m_pawn = nullptr;
+            Output::send<LogLevel::Warning>(STR("[DWSmoothCam] UEngine has no GameViewport property: level changes rely on the LoadMap hook\n"));
+            return;
+        }
+        auto* viewport = *reinterpret_cast<UObject**>(reinterpret_cast<uint8_t*>(object) + m_viewport_offset);
+        UObject* world = nullptr;
+        if (viewport)
+        {
+            if (m_world_offset < 0) m_world_offset = offset_of(viewport, STR("World"));
+            if (m_world_offset < 0)
+            {
+                Output::send<LogLevel::Warning>(STR("[DWSmoothCam] GameViewportClient has no World property: level changes rely on the LoadMap hook\n"));
+                return;
+            }
+            world = *reinterpret_cast<UObject**>(reinterpret_cast<uint8_t*>(viewport) + m_world_offset);
+        }
+        if (m_world_seen && world == m_world) return;
+        bool first = !m_world_seen;
+        m_world_seen = true;
+        m_world = world;
+        if (first) return;
+        forget_world();
+        rescan_now(); // the new world's controller: look now if the new-object hand-off missed it
+    }
+
+    auto rescan_now() -> void
+    {
+        m_next_find = {};
+        m_find_interval = std::chrono::seconds(2);
+    }
+
+    // The new-object hand-off (installed by every UE4SS profile) is primary; FindFirstOf is the fallback for a hot
+    // reload or a missed hand-off, backing off per m_find_interval so the main menu is not scanned every tick.
+    // Candidates are adopted only if the object array still holds them.
+    auto discover_controller() -> void
+    {
+        if (m_new_controller_pending.exchange(false))
+        {
+            dwsc::LiveRef candidate;
+            {
+                std::lock_guard guard(m_new_controller_mutex);
+                candidate = std::exchange(m_new_controller, {});
+            }
+            if (!m_controller.alive() && candidate.alive()) adopt_controller(candidate);
+        }
+        if (m_controller.object) return;
+
+        auto now = std::chrono::steady_clock::now();
+        bool requested = m_find_requested.exchange(false);
+        if (!requested && now < m_next_find) return;
+        m_next_find = now + m_find_interval;
+        m_find_interval = std::min(m_find_interval * 2, std::chrono::seconds(60));
+        auto candidate = dwsc::LiveRef::of(UObjectGlobals::FindFirstOf(STR("BP_PlayerController_C")));
+        if (candidate.object && !candidate.object->HasAnyFlags(static_cast<EObjectFlags>(RF_ClassDefaultObject | RF_ArchetypeObject)) &&
+            candidate.alive())
+        {
+            adopt_controller(candidate);
+        }
+        else if (requested)
+        {
+            Output::send<LogLevel::Normal>(STR("[DWSmoothCam] player controller not found yet\n"));
         }
     }
 
-    // Every tick: one pointer read unless the pawn changed.
-    auto on_engine_tick() -> void
+    // Pointer reads and object array lookups only, before anything reads through a possibly-freed held pointer.
+    auto on_engine_tick(UEngine* engine) -> void
     {
+        check_world(engine);
+        if (m_controller.object && !m_controller.alive())
+        {
+            Output::send<LogLevel::Normal>(STR("[DWSmoothCam] player controller gone\n"));
+            forget_player();
+            rescan_now();
+        }
+        else if (m_pawn.object && !(m_pawn.alive() && (!m_camera.object || m_camera.alive()) && (!m_root.object || m_root.alive())))
+        {
+            forget_pawn();
+        }
+        discover_controller();
+
         show_pending_banner();
         apply_position();
-        if (!m_controller && m_find_requested.exchange(false))
-        {
-            m_controller = UObjectGlobals::FindFirstOf(STR("BP_PlayerController_C"));
-            Output::send<LogLevel::Normal>(STR("[DWSmoothCam] player controller {}\n"), m_controller ? STR("found") : STR("not found"));
-        }
-        if (!m_controller) return;
+        if (!m_controller.object) return;
 
         // Name lookup once per controller class, then a plain read.
         if (m_pawn_offset < 0)
         {
-            auto** slot = m_controller->GetValuePtrByPropertyNameInChain<UObject*>(STR("Pawn"));
+            auto** slot = m_controller.object->GetValuePtrByPropertyNameInChain<UObject*>(STR("Pawn"));
             if (!slot)
             {
                 Output::send<LogLevel::Warning>(STR("[DWSmoothCam] controller has no Pawn property\n"));
-                m_controller = nullptr;
+                m_controller = {};
+                m_player_known.store(false);
                 return;
             }
-            m_pawn_offset = static_cast<int32_t>(reinterpret_cast<uint8_t*>(slot) - reinterpret_cast<uint8_t*>(m_controller));
+            m_pawn_offset = static_cast<int32_t>(reinterpret_cast<uint8_t*>(slot) - reinterpret_cast<uint8_t*>(m_controller.object));
         }
-        auto* pawn = *reinterpret_cast<UObject**>(reinterpret_cast<uint8_t*>(m_controller) + m_pawn_offset);
-        if (pawn == m_pawn) return;
-        m_pawn = pawn;
-        g_player_camera.store(nullptr);
-        g_player_root.store(nullptr);
-        g_reset.store(true);
-        if (!pawn) return;
+        auto* pawn = *reinterpret_cast<UObject**>(reinterpret_cast<uint8_t*>(m_controller.object) + m_pawn_offset);
+        if (pawn == m_pawn.object) return;
+        forget_pawn();
+        m_pawn = dwsc::LiveRef::of(pawn);
+        // Controller.Pawn can point at a Garbage pawn until GC; re-adopting it would warn every tick.
+        if (!m_pawn.alive()) return;
 
-        auto* camera = object_ptr(pawn, STR("FollowCamera"));
-        auto* root = object_ptr(pawn, STR("RootComponent"));
-        if (!camera || !root)
+        auto camera = dwsc::LiveRef::of(object_ptr(pawn, STR("FollowCamera")));
+        auto root = dwsc::LiveRef::of(object_ptr(pawn, STR("RootComponent")));
+        // m_pawn stays set on failure, so a pawn without them is reported once, not every tick.
+        if (!camera.alive() || !root.alive())
         {
             Output::send<LogLevel::Warning>(STR("[DWSmoothCam] pawn {} has no FollowCamera or RootComponent\n"), pawn->GetName());
             return;
         }
-        if (g_translation_offset.load() < 0 && !find_translation_offset(root)) return;
+        if (g_translation_offset.load() < 0 && !find_translation_offset(root.object)) return;
 
-        g_player_root.store(root);
-        g_player_camera.store(camera);
+        m_camera = camera;
+        m_root = root;
+        g_player_root.store(root.object);
+        g_player_camera.store(camera.object);
         m_position_applied_generation = 0; // a new pawn: its modes get the current position
         Output::send<LogLevel::Normal>(STR("[DWSmoothCam] following {}\n"), pawn->GetName());
     }

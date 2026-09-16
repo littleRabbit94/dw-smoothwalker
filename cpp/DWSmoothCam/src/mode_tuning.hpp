@@ -22,12 +22,39 @@
 #include <Unreal/UClass.hpp>
 #include <Unreal/UFunction.hpp>
 #include <Unreal/UObject.hpp>
+#include <Unreal/UObjectArray.hpp>
 #include <Unreal/UObjectGlobals.hpp>
 
 namespace dwsc
 {
     using namespace RC;
     using namespace RC::Unreal;
+
+    // A UObject pointer kept across ticks, with the object array index it had when taken from a live object.
+    // alive() reads only GUObjectArray, never the object: true while the slot still holds the same pointer and
+    // is neither Unreachable (1 << 28) nor Garbage (1 << 21, UE 5.5.4 ObjectMacros.h), catching a GC even with no
+    // EndPlay or LoadMap hook. UE4SS's FUObjectItem::IsPendingKill tests bit 29, which UE 5 reuses, so it is not
+    // used. The class is compared too: a freed object replaced by another class at the same address and index
+    // must not pass, or a cached property offset reads the wrong layout. Game thread only.
+    struct LiveRef
+    {
+        UObject* object = nullptr;
+        int32_t index = -1;
+        UClass* cls = nullptr;
+
+        static auto of(UObject* live) -> LiveRef
+        {
+            return live ? LiveRef{live, live->GetInternalIndex(), live->GetClassPrivate()} : LiveRef{};
+        }
+
+        auto alive() const -> bool
+        {
+            if (!object || index < 0) return false;
+            static constexpr auto DEAD = static_cast<EInternalObjectFlags>((1 << 28) | (1 << 21));
+            auto* item = FUObjectArray::IndexToObject(index);
+            return item && item->GetUObject() == object && !item->HasAnyFlags(DEAD) && object->GetClassPrivate() == cls;
+        }
+    };
 
     enum Group : int
     {
@@ -119,6 +146,7 @@ namespace dwsc
         auto capture() -> void
         {
             if (!m_layout_ok && !resolve_layout()) return;
+            drop_dead_classes();
             for (auto& mode : m_modes)
             {
                 if (mode.captured || !mode.usable) continue;
@@ -148,7 +176,23 @@ namespace dwsc
                 }
                 mode.cdo = cdo;
                 mode.cls = cdo->GetClassPrivate();
+                mode.cdo_ref = LiveRef::of(cdo);
+                mode.cls_ref = LiveRef::of(mode.cls);
                 mode.captured = true;
+            }
+        }
+
+        // Without a LoadMap hook, forget() may not run before a class unloads; every use of a captured CDO or
+        // class pointer is preceded by this check: capture(), for_each_instance() (hence set_blend()).
+        auto drop_dead_classes() -> void
+        {
+            for (auto& mode : m_modes)
+            {
+                if (!mode.captured || (mode.cdo_ref.alive() && mode.cls_ref.alive())) continue;
+                mode.captured = false;
+                mode.cdo = nullptr;
+                mode.cls = nullptr;
+                mode.cdo_ref = mode.cls_ref = {};
             }
         }
 
@@ -160,6 +204,7 @@ namespace dwsc
                 mode.captured = false;
                 mode.cdo = nullptr;
                 mode.cls = nullptr;
+                mode.cdo_ref = mode.cls_ref = {};
             }
             m_flip_stage = Idle;
             m_flip_again = false;
@@ -277,6 +322,7 @@ namespace dwsc
             ModeClassSpec spec;
             UObject* cdo = nullptr;
             UClass* cls = nullptr;
+            LiveRef cdo_ref, cls_ref; // checked before cdo or cls is used
             bool captured = false;
             bool has_original = false;
             bool usable = true;
@@ -402,6 +448,7 @@ namespace dwsc
         template <typename Visit>
         auto for_each_instance(Visit&& visit) -> void
         {
+            drop_dead_classes();
             std::vector<UObject*> instances;
             UObjectGlobals::FindAllOf(STR("RebelCameraModeTPP"), instances);
             for (auto* instance : instances)

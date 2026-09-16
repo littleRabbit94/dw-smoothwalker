@@ -1,5 +1,6 @@
-// Settings (smoothcam.ini, rewritten in place by the Dawnwalker Mod Menu and re-read on change) and presets
-// (presets.ini, written only by the mod). Key names are read at startup: the menu can only move numbers.
+// Settings (smoothcam.ini, rewritten in place by the Dawnwalker Mod Menu and re-read on change, written back by
+// the mod while the camera is live) and presets (config/presets/*.ini: slot files written by the mod,
+// drop-ins added by hand). Key names are read at startup: the menu can only move numbers.
 #pragma once
 
 #define WIN32_LEAN_AND_MEAN
@@ -10,6 +11,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <map>
@@ -21,6 +23,9 @@
 
 namespace dwsc
 {
+    // Saved preset slots, ids 1..MAX_SLOTS (60 ceiling: see MAX_DROPINS); mod_settings.ini lists them by hand.
+    inline constexpr int MAX_SLOTS = 10;
+
     struct Settings
     {
         bool enabled = true;
@@ -59,22 +64,47 @@ namespace dwsc
         double pitch_min = -60, pitch_max = 40;
         double position_transition = 0.5; // s; 0 snaps
 
-        int preset_load = 0;              // menu action, reset to 0: 101-103 built-in, 1-6 slot
-        int preset_save = 0;              // menu action, reset to 0: 1-6 slot
+        int preset = 102;                 // the preset the live settings match: 0 Custom, 101-103 built-in, 1-MAX_SLOTS slot
+        int preset_save = 0;              // menu action, reset to 0: 1-MAX_SLOTS slot
 
         bool log_stats = false;
     };
 
-    // A preset carries the feel only, not switches, keys, safety limits or camera position.
-    inline const std::array<const char*, 12> PRESET_KEYS{"follow_rate_h", "follow_rate_v", "curve_h", "curve_v",
-                                                          "catchup_distance", "min_rate_scale", "max_lag_h", "max_lag_v",
-                                                          "soft_leash", "rotation_smoothing", "rotation_rate", "wall_clamp"};
+    // A preset carries follow, turning, safety and camera position; not the switches (enabled, camera_tuning,
+    // shoulder_swap, show_banner, log_stats), the key names, or preset/preset_save.
+    inline const std::array<const char*, 37> PRESET_KEYS{
+            "follow_rate_h", "follow_rate_v", "curve_h", "curve_v", "catchup_distance", "min_rate_scale", "max_lag_h", "max_lag_v",
+            "soft_leash", "rotation_smoothing", "rotation_rate", "wall_clamp", "reset_distance", "reset_gap", "game_lag_scale",
+            "position_transition", "pitch_min", "pitch_max", "exploration_distance", "exploration_height", "exploration_shoulder",
+            "exploration_fov", "sprint_distance", "sprint_height", "sprint_shoulder", "sprint_fov", "combat_distance", "combat_height",
+            "combat_shoulder", "combat_fov", "aiming_distance", "aiming_height", "aiming_shoulder", "aiming_fov", "traversal_distance",
+            "traversal_height", "traversal_fov"};
+
+    // Every numeric setting: the ones the Mod Menu can move and the mod writes back.
+    inline const std::array<const char*, 44> NUMERIC_KEYS{
+            "enabled", "follow_rate_h", "follow_rate_v", "curve_h", "curve_v", "catchup_distance", "min_rate_scale", "max_lag_h",
+            "max_lag_v", "soft_leash", "rotation_smoothing", "rotation_rate", "wall_clamp", "reset_distance", "reset_gap", "show_banner",
+            "camera_tuning", "exploration_distance", "exploration_height", "exploration_shoulder", "exploration_fov", "sprint_distance",
+            "sprint_height", "sprint_shoulder", "sprint_fov", "combat_distance", "combat_height", "combat_shoulder", "combat_fov",
+            "aiming_distance", "aiming_height", "aiming_shoulder", "aiming_fov", "traversal_distance", "traversal_height", "traversal_fov",
+            "game_lag_scale", "shoulder_swap", "pitch_min", "pitch_max", "position_transition", "preset", "preset_save", "log_stats"};
+
+    inline auto is_preset_key(const std::string& key) -> bool
+    {
+        return std::find_if(PRESET_KEYS.begin(), PRESET_KEYS.end(), [&](const char* k) { return key == k; }) != PRESET_KEYS.end();
+    }
+
+    inline auto is_numeric_key(const std::string& key) -> bool
+    {
+        return std::find_if(NUMERIC_KEYS.begin(), NUMERIC_KEYS.end(), [&](const char* k) { return key == k; }) != NUMERIC_KEYS.end();
+    }
 
     using Values = std::vector<std::pair<std::string, double>>;
 
     inline auto trim(std::string v) -> std::string
     {
-        auto not_space = [](unsigned char c) { return !std::isspace(c); };
+        // ASCII whitespace only: std::isspace depends on the C locale, and UTF-8 bytes must survive.
+        auto not_space = [](unsigned char c) { return c != ' ' && c != '\t' && c != '\r' && c != '\n' && c != '\v' && c != '\f'; };
         v.erase(v.begin(), std::find_if(v.begin(), v.end(), not_space));
         v.erase(std::find_if(v.rbegin(), v.rend(), not_space).base(), v.end());
         return v;
@@ -151,12 +181,12 @@ namespace dwsc
         else if (key == "game_lag_scale") number(s.game_lag_scale);
         else if (key == "pitch_min") number(s.pitch_min);
         else if (key == "pitch_max") number(s.pitch_max);
-        else if (key == "preset_load") integer(s.preset_load);
+        else if (key == "preset") integer(s.preset);
         else if (key == "preset_save") integer(s.preset_save);
         else if (key == "log_stats") flag(s.log_stats);
     }
 
-    // The Mod Menu's ranges (mod_settings.ini). Presets are written back into the file, and a value outside
+    // The Mod Menu's ranges (mod_settings.ini). Live values are written back into the file, and a value outside
     // its range stops the whole page from opening.
     inline auto sanitize(Settings& s) -> void
     {
@@ -211,8 +241,36 @@ namespace dwsc
         return s;
     }
 
+    // The file's numeric keys as written, unsanitized: the baseline a later change is diffed against. Non-finite
+    // values are left out; a repeated key keeps its last value, matching parse_settings.
+    inline auto parse_numbers(const std::string& content) -> std::map<std::string, double>
+    {
+        std::map<std::string, double> out;
+        std::istringstream in(content);
+        std::string line;
+        while (std::getline(in, line))
+        {
+            if (auto cut = line.find_first_of(";#"); cut != std::string::npos) line.resize(cut);
+            auto eq = line.find('=');
+            if (eq == std::string::npos) continue;
+            auto key = trim(line.substr(0, eq));
+            if (!is_numeric_key(key)) continue;
+            try
+            {
+                double v = std::stod(trim(line.substr(eq + 1)));
+                if (std::isfinite(v)) out[key] = v;
+            }
+            catch (...)
+            {
+            }
+        }
+        return out;
+    }
+
     inline auto number_of(const Settings& s, const std::string& key) -> double
     {
+        auto flag = [](bool b) { return b ? 1.0 : 0.0; };
+        if (key == "enabled") return flag(s.enabled);
         if (key == "follow_rate_h") return s.follow_rate_h;
         if (key == "follow_rate_v") return s.follow_rate_v;
         if (key == "curve_h") return s.curve_h;
@@ -221,10 +279,41 @@ namespace dwsc
         if (key == "min_rate_scale") return s.min_rate_scale;
         if (key == "max_lag_h") return s.max_lag_h;
         if (key == "max_lag_v") return s.max_lag_v;
-        if (key == "soft_leash") return s.soft_leash ? 1 : 0;
-        if (key == "rotation_smoothing") return s.rotation_smoothing ? 1 : 0;
+        if (key == "soft_leash") return flag(s.soft_leash);
+        if (key == "rotation_smoothing") return flag(s.rotation_smoothing);
         if (key == "rotation_rate") return s.rotation_rate;
-        if (key == "wall_clamp") return s.wall_clamp ? 1 : 0;
+        if (key == "wall_clamp") return flag(s.wall_clamp);
+        if (key == "reset_distance") return s.reset_distance;
+        if (key == "reset_gap") return s.reset_gap;
+        if (key == "show_banner") return flag(s.show_banner);
+        if (key == "camera_tuning") return flag(s.camera_tuning);
+        if (key == "exploration_distance") return s.exploration_distance;
+        if (key == "exploration_height") return s.exploration_height;
+        if (key == "exploration_shoulder") return s.exploration_shoulder;
+        if (key == "exploration_fov") return s.exploration_fov;
+        if (key == "sprint_distance") return s.sprint_distance;
+        if (key == "sprint_height") return s.sprint_height;
+        if (key == "sprint_shoulder") return s.sprint_shoulder;
+        if (key == "sprint_fov") return s.sprint_fov;
+        if (key == "combat_distance") return s.combat_distance;
+        if (key == "combat_height") return s.combat_height;
+        if (key == "combat_shoulder") return s.combat_shoulder;
+        if (key == "combat_fov") return s.combat_fov;
+        if (key == "aiming_distance") return s.aiming_distance;
+        if (key == "aiming_height") return s.aiming_height;
+        if (key == "aiming_shoulder") return s.aiming_shoulder;
+        if (key == "aiming_fov") return s.aiming_fov;
+        if (key == "traversal_distance") return s.traversal_distance;
+        if (key == "traversal_height") return s.traversal_height;
+        if (key == "traversal_fov") return s.traversal_fov;
+        if (key == "game_lag_scale") return s.game_lag_scale;
+        if (key == "shoulder_swap") return flag(s.shoulder_swap);
+        if (key == "pitch_min") return s.pitch_min;
+        if (key == "pitch_max") return s.pitch_max;
+        if (key == "position_transition") return s.position_transition;
+        if (key == "preset") return s.preset;
+        if (key == "preset_save") return s.preset_save;
+        if (key == "log_stats") return flag(s.log_stats);
         return 0.0;
     }
 
@@ -242,9 +331,15 @@ namespace dwsc
         return buffer;
     }
 
+    // Full precision, so a value applied from the file compares equal to it.
     inline auto apply_values(Settings& s, const Values& values) -> void
     {
-        for (auto& [key, value] : values) set_value(s, key, format_number(value));
+        char buffer[64];
+        for (auto& [key, value] : values)
+        {
+            std::snprintf(buffer, sizeof(buffer), "%.17g", value);
+            set_value(s, key, buffer);
+        }
         sanitize(s);
     }
 
@@ -295,17 +390,23 @@ namespace dwsc
         return buffer.str();
     }
 
-    // Temp file plus rename, so the Mod Menu never reads a half-written file.
+    // Temp file plus rename, so the Mod Menu never reads a half-written file. A failed write removes the temp file.
     inline auto write_file(const std::string& path, const std::string& content) -> bool
     {
         auto tmp = path + ".dwsc.tmp";
+        bool written = false;
         {
             std::ofstream file(tmp, std::ios::binary | std::ios::trunc);
-            if (!file) return false;
-            file << content;
-            if (!file) return false;
+            if (file)
+            {
+                file << content;
+                file.flush();
+                written = static_cast<bool>(file);
+            }
         }
-        return MoveFileExA(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+        if (written && MoveFileExA(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
+        DeleteFileA(tmp.c_str());
+        return false;
     }
 
     struct NamedPreset
@@ -315,67 +416,270 @@ namespace dwsc
         Values values;
     };
 
-    // Menu ids 101-103, in cycle order. Balanced matches the shipped defaults.
+    // Menu ids 101-103, in cycle order, each with all PRESET_KEYS. Balanced matches the shipped defaults on
+    // every key. Every value must sit inside its Mod Menu range and on its slider step.
     inline auto builtin_presets() -> const std::vector<NamedPreset>&
     {
         static const std::vector<NamedPreset> presets{
                 {101, "Tight", {{"follow_rate_h", 18}, {"follow_rate_v", 20}, {"curve_h", 0}, {"curve_v", 0}, {"catchup_distance", 100},
                                 {"min_rate_scale", 0.5}, {"max_lag_h", 25}, {"max_lag_v", 20}, {"soft_leash", 1},
-                                {"rotation_smoothing", 0}, {"rotation_rate", 20}, {"wall_clamp", 1}}},
+                                {"rotation_smoothing", 0}, {"rotation_rate", 20}, {"wall_clamp", 1},
+                                {"reset_distance", 500}, {"reset_gap", 0.25}, {"game_lag_scale", 2}, {"position_transition", 0.4},
+                                {"pitch_min", -60}, {"pitch_max", 40},
+                                {"exploration_distance", 90}, {"exploration_height", 0}, {"exploration_shoulder", 0}, {"exploration_fov", 0},
+                                {"sprint_distance", 90}, {"sprint_height", 0}, {"sprint_shoulder", 0}, {"sprint_fov", 0},
+                                {"combat_distance", 95}, {"combat_height", 0}, {"combat_shoulder", 0}, {"combat_fov", 0},
+                                {"aiming_distance", 100}, {"aiming_height", 0}, {"aiming_shoulder", 0}, {"aiming_fov", 0},
+                                {"traversal_distance", 95}, {"traversal_height", 0}, {"traversal_fov", 0}}},
                 {102, "Balanced", {{"follow_rate_h", 8}, {"follow_rate_v", 10}, {"curve_h", 2}, {"curve_v", 0}, {"catchup_distance", 150},
                                    {"min_rate_scale", 0.35}, {"max_lag_h", 70}, {"max_lag_v", 50}, {"soft_leash", 1},
-                                   {"rotation_smoothing", 0}, {"rotation_rate", 20}, {"wall_clamp", 1}}},
+                                   {"rotation_smoothing", 0}, {"rotation_rate", 20}, {"wall_clamp", 1},
+                                   {"reset_distance", 500}, {"reset_gap", 0.25}, {"game_lag_scale", 1}, {"position_transition", 0.5},
+                                   {"pitch_min", -60}, {"pitch_max", 40},
+                                   {"exploration_distance", 100}, {"exploration_height", 0}, {"exploration_shoulder", 0}, {"exploration_fov", 0},
+                                   {"sprint_distance", 100}, {"sprint_height", 0}, {"sprint_shoulder", 0}, {"sprint_fov", 0},
+                                   {"combat_distance", 100}, {"combat_height", 0}, {"combat_shoulder", 0}, {"combat_fov", 0},
+                                   {"aiming_distance", 100}, {"aiming_height", 0}, {"aiming_shoulder", 0}, {"aiming_fov", 0},
+                                   {"traversal_distance", 100}, {"traversal_height", 0}, {"traversal_fov", 0}}},
                 {103, "Cinematic", {{"follow_rate_h", 4}, {"follow_rate_v", 6}, {"curve_h", 3}, {"curve_v", 2}, {"catchup_distance", 200},
                                     {"min_rate_scale", 0.25}, {"max_lag_h", 120}, {"max_lag_v", 80}, {"soft_leash", 1},
-                                    {"rotation_smoothing", 1}, {"rotation_rate", 25}, {"wall_clamp", 1}}},
+                                    {"rotation_smoothing", 1}, {"rotation_rate", 25}, {"wall_clamp", 1},
+                                    {"reset_distance", 500}, {"reset_gap", 0.25}, {"game_lag_scale", 1}, {"position_transition", 0.8},
+                                    {"pitch_min", -70}, {"pitch_max", 55},
+                                    {"exploration_distance", 125}, {"exploration_height", 10}, {"exploration_shoulder", 10}, {"exploration_fov", 5},
+                                    {"sprint_distance", 120}, {"sprint_height", 10}, {"sprint_shoulder", 10}, {"sprint_fov", 5},
+                                    {"combat_distance", 110}, {"combat_height", 0}, {"combat_shoulder", 0}, {"combat_fov", 0},
+                                    {"aiming_distance", 100}, {"aiming_height", 0}, {"aiming_shoulder", 0}, {"aiming_fov", 0},
+                                    {"traversal_distance", 115}, {"traversal_height", 0}, {"traversal_fov", 5}}},
         };
         return presets;
     }
 
-    inline auto read_slots(const std::string& path) -> std::map<int, Values>
+    // One preset of this session: a built-in (101-103), a slot (1..MAX_SLOTS) or a drop-in (201 on).
+    struct Preset
     {
-        std::map<int, Values> slots;
-        auto content = read_file(path);
-        if (!content) return slots;
-        std::istringstream in(*content);
+        int id;
+        std::string name; // UTF-8
+        Values values;
+    };
+
+    inline constexpr int FIRST_DROPIN_ID = 201;
+    // The Mod Menu takes at most 64 values in a picker: Custom, the 3 built-ins, the slots, then drop-ins.
+    inline constexpr int MAX_DROPINS = 64 - 4 - MAX_SLOTS;
+    inline constexpr size_t MAX_PRESET_FILE = 64 * 1024;
+    inline constexpr size_t MAX_LABEL_BYTES = 48;
+
+    inline auto utf8_of(const std::wstring& w) -> std::optional<std::string>
+    {
+        if (w.empty()) return std::string{};
+        int size = static_cast<int>(w.size());
+        int n = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, w.data(), size, nullptr, 0, nullptr, nullptr);
+        if (n <= 0) return std::nullopt;
+        std::string out(static_cast<size_t>(n), '\0');
+        WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, w.data(), size, out.data(), n, nullptr, nullptr);
+        return out;
+    }
+
+    // Strict: nullopt for invalid UTF-8, which would make the Mod Menu skip the whole manifest.
+    inline auto wide_of_utf8(const std::string& s) -> std::optional<std::wstring>
+    {
+        if (s.empty()) return std::wstring{};
+        int size = static_cast<int>(s.size());
+        int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), size, nullptr, 0);
+        if (n <= 0) return std::nullopt;
+        std::wstring out(static_cast<size_t>(n), L'\0');
+        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), size, out.data(), n);
+        return out;
+    }
+
+    // For log and banner text: invalid bytes become U+FFFD.
+    inline auto to_wide(const std::string& s) -> std::wstring
+    {
+        if (s.empty()) return {};
+        int size = static_cast<int>(s.size());
+        int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), size, nullptr, 0);
+        if (n <= 0) return {};
+        std::wstring out(static_cast<size_t>(n), L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, s.data(), size, out.data(), n);
+        return out;
+    }
+
+    // PresetLabels is '|'-separated and must be valid UTF-8 without control characters (else the menu skips the page).
+    inline auto clean_label(const std::string& raw) -> std::string
+    {
+        std::string s;
+        for (unsigned char c : raw)
+        {
+            if (c >= 0x20 && c != 0x7F && c != '|') s += static_cast<char>(c);
+        }
+        s = trim(s);
+        if (s.size() > MAX_LABEL_BYTES)
+        {
+            size_t cut = MAX_LABEL_BYTES;
+            while (cut > 0 && (static_cast<unsigned char>(s[cut]) & 0xC0) == 0x80) --cut;
+            s = trim(s.substr(0, cut));
+        }
+        return wide_of_utf8(s) ? s : std::string{};
+    }
+
+    inline auto display_name(const std::string& name, const std::string& stem, int id) -> std::string
+    {
+        auto label = clean_label(name);
+        if (label.empty()) label = clean_label(stem);
+        if (label.empty()) label = "Preset " + std::to_string(id);
+        return label;
+    }
+
+    // Values come back raw; normalize_preset clamps them.
+    inline auto parse_preset_file(std::string content) -> std::pair<std::string, Values>
+    {
+        if (content.starts_with("\xEF\xBB\xBF")) content.erase(0, 3);
+        std::string name;
+        Values values;
+        std::istringstream in(content);
         std::string line;
-        int current = 0;
         while (std::getline(in, line))
         {
             if (auto cut = line.find_first_of(";#"); cut != std::string::npos) line.resize(cut);
-            line = trim(line);
-            if (line.size() >= 7 && line.front() == '[' && line.back() == ']' && line.compare(1, 4, "Slot") == 0)
+            auto eq = line.find('=');
+            if (eq == std::string::npos) continue;
+            auto key = trim(line.substr(0, eq));
+            auto value = trim(line.substr(eq + 1));
+            if (key == "name")
             {
-                current = std::atoi(line.c_str() + 5);
-                if (current < 1 || current > 6) current = 0;
+                name = value;
                 continue;
             }
-            auto eq = line.find('=');
-            if (!current || eq == std::string::npos) continue;
-            // A hand-edited slot must not carry preset_load, which would re-trigger the load forever.
-            auto key = trim(line.substr(0, eq));
-            if (std::find_if(PRESET_KEYS.begin(), PRESET_KEYS.end(), [&](const char* k) { return key == k; }) == PRESET_KEYS.end()) continue;
+            if (!is_preset_key(key)) continue;
             try
             {
-                double v = std::stod(trim(line.substr(eq + 1)));
-                if (std::isfinite(v)) slots[current].emplace_back(key, v);
+                double v = std::stod(value);
+                if (!std::isfinite(v)) continue;
+                auto known = std::find_if(values.begin(), values.end(), [&](auto& entry) { return entry.first == key; });
+                if (known != values.end()) known->second = v;
+                else values.emplace_back(key, v);
             }
             catch (...)
             {
             }
         }
-        return slots;
+        return {name, values};
     }
 
-    inline auto write_slots(const std::string& path, const std::map<int, Values>& slots) -> bool
+    // Values as they'll be live after loading and as a flush writes them: applied through the normal path (clamps,
+    // rounding, flags), then round-tripped through %.6g so a loaded preset still matches its own picker entry.
+    inline auto normalize_preset(const Values& values) -> Values
     {
-        std::string out = "; DWSmoothCam saved presets. Written by the mod when you save a slot from the Mod Menu.\n"
-                          "; Load a slot from the menu, or cycle presets in game with preset_key.\n";
-        for (auto& [slot, values] : slots)
+        Settings s;
+        apply_values(s, values);
+        Values out;
+        for (auto& [key, value] : values) out.emplace_back(key, std::stod(format_number(number_of(s, key))));
+        return out;
+    }
+
+    inline auto slot_file_content(int slot, const Values& values) -> std::string
+    {
+        auto n = std::to_string(slot);
+        std::string out = "; DWSmoothCam Slot " + n + ", written by the mod when you save to it from the Mod Menu.\n"
+                          "; To make a drop-in preset from it, copy this file, give the copy any other name, and change name below.\n";
+        out += "name = Slot " + n + "\n";
+        for (auto& [key, value] : values) out += key + " = " + format_number(value) + "\n";
+        return out;
+    }
+
+    struct PresetFiles
+    {
+        std::map<int, std::wstring> slots;  // slot number -> file name
+        std::vector<std::wstring> dropins;  // file names, sorted case-insensitively
+    };
+
+    // The game path and drop-in file names may be non-ASCII.
+    inline auto list_preset_files(const std::wstring& dir) -> PresetFiles
+    {
+        PresetFiles out;
+        WIN32_FIND_DATAW data{};
+        HANDLE find = FindFirstFileW((dir + L"\\*.ini").c_str(), &data);
+        if (find == INVALID_HANDLE_VALUE) return out;
+        do
         {
-            out += "\n[Slot" + std::to_string(slot) + "]\n";
-            for (auto& [key, value] : values) out += key + " = " + format_number(value) + "\n";
+            if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+            std::wstring name = data.cFileName;
+            // "*.ini" also matches longer extensions through 8.3 short names.
+            if (name.size() < 5 || CompareStringOrdinal(name.c_str() + name.size() - 4, 4, L".ini", 4, TRUE) != CSTR_EQUAL) continue;
+            // The Mod Menu's manifest scan is recursive: a mod_settings.ini here would be read as a page too.
+            if (CompareStringOrdinal(name.c_str(), -1, L"mod_settings.ini", -1, TRUE) == CSTR_EQUAL) continue;
+            int slot = 0;
+            for (int n = 1; n <= MAX_SLOTS && !slot; ++n)
+            {
+                auto expected = L"Slot " + std::to_wstring(n) + L".ini";
+                if (CompareStringOrdinal(name.c_str(), -1, expected.c_str(), -1, TRUE) == CSTR_EQUAL) slot = n;
+            }
+            if (slot) out.slots[slot] = name;
+            else out.dropins.push_back(name);
+        } while (FindNextFileW(find, &data));
+        FindClose(find);
+        std::sort(out.dropins.begin(), out.dropins.end(),
+                  [](const std::wstring& a, const std::wstring& b) { return CompareStringOrdinal(a.c_str(), -1, b.c_str(), -1, TRUE) == CSTR_LESS_THAN; });
+        return out;
+    }
+
+    inline auto read_small_file(const std::wstring& path, size_t limit) -> std::optional<std::string>
+    {
+        std::ifstream file(path, std::ios::binary | std::ios::ate);
+        if (!file) return std::nullopt;
+        auto size = static_cast<std::streamoff>(file.tellg());
+        if (size < 0 || static_cast<uint64_t>(size) > limit) return std::nullopt;
+        file.seekg(0);
+        std::string out(static_cast<size_t>(size), '\0');
+        if (size > 0 && !file.read(out.data(), size)) return std::nullopt;
+        return out;
+    }
+
+    // nullopt if the section or either line is missing.
+    inline auto with_preset_choices(const std::string& manifest, const std::string& values, const std::string& labels)
+            -> std::optional<std::string>
+    {
+        std::string out;
+        out.reserve(manifest.size() + values.size() + labels.size());
+        bool in_section = false, found_values = false, found_labels = false;
+        size_t pos = 0;
+        while (pos < manifest.size())
+        {
+            auto end = manifest.find('\n', pos);
+            auto stop = end == std::string::npos ? manifest.size() : end;
+            std::string line = manifest.substr(pos, stop - pos);
+            bool cr = !line.empty() && line.back() == '\r';
+            if (cr) line.pop_back();
+            auto t = trim(line);
+            if (!t.empty() && t.front() == '[' && t.back() == ']')
+            {
+                in_section = t == "[Setting.preset]";
+            }
+            else if (in_section && !t.empty() && t[0] != ';' && t[0] != '#')
+            {
+                if (auto eq = line.find('='); eq != std::string::npos)
+                {
+                    auto key = trim(line.substr(0, eq));
+                    auto start = line.find_first_not_of(" \t", eq + 1);
+                    if (start == std::string::npos) start = line.size();
+                    if (key == "PresetValues")
+                    {
+                        line = line.substr(0, start) + values;
+                        found_values = true;
+                    }
+                    else if (key == "PresetLabels")
+                    {
+                        line = line.substr(0, start) + labels;
+                        found_labels = true;
+                    }
+                }
+            }
+            out += line;
+            if (cr) out += '\r';
+            if (end != std::string::npos) out += '\n';
+            pos = stop + 1;
         }
-        return write_file(path, out);
+        if (!found_values || !found_labels) return std::nullopt;
+        return out;
     }
 } // namespace dwsc
