@@ -7,9 +7,12 @@ extracting it into Dawnwalker\Binaries\Win64 installs the mod:
     ue4ss/Mods/DWSmoothCam/enabled.txt
     ue4ss/Mods/DWSmoothCam/LICENSE
     ue4ss/Mods/DWSmoothCam/mod_settings.ini
-    ue4ss/Mods/DWSmoothCam/scripts/config/smoothcam.ini
+    ue4ss/Mods/DWSmoothCam/config/smoothcam.ini
 
-No PDB, and no presets.ini: the mod creates it on the first slot save.
+No PDB and no presets folder: the mod creates config/presets/ at startup.
+
+Optional file: dist/SmoothCam-Example-Preset-<version>.zip, the commented example in example-preset/ at
+ue4ss/Mods/DWSmoothCam/config/presets/<file name>.
 
 Source: ue4ss/DWSmoothCam/ in this repo; main.dll is the git-ignored build output of cpp/DWSmoothCam.
 Version: ModVersion in dllmain.cpp. The build fails if:
@@ -18,7 +21,10 @@ Version: ModVersion in dllmain.cpp. The build fails if:
   - a ConfigKey in mod_settings.ini is missing from smoothcam.ini or present more than once (either
     stops the Mod Menu page opening);
   - a shipped smoothcam.ini value is outside its setting's Minimum/Maximum or not in its PresetValues;
-  - main.dll is older than the newest file in cpp/DWSmoothCam/src (rebuild first).
+  - main.dll is older than the newest file in cpp/DWSmoothCam/src (rebuild first);
+  - the mod folder has a scripts/ subfolder (UE4SS would log a red main.lua error on every start);
+  - the example preset lacks a name line or a key from PRESET_KEYS (config.hpp), holds an unknown or
+    repeated key, or has a value outside its Mod Menu range, off its Step, or not in PresetValues.
 
 Usage: python Build-Package.py
 """
@@ -34,6 +40,7 @@ REPO = HERE.parent.parent
 MOD = REPO / "ue4ss" / "DWSmoothCam"
 SRC = REPO / "cpp" / "DWSmoothCam" / "src"
 SHEET = HERE / "nexus-page-metadata.md"
+EXAMPLE_DIR = HERE / "example-preset"
 DIST = HERE / "dist"
 MOD_NAME = "DWSmoothCam"
 
@@ -130,6 +137,48 @@ def check_settings(sections: dict[str, dict[str, str]], values: dict[str, list[s
     return count
 
 
+def preset_keys() -> list[str]:
+    text = (SRC / "config.hpp").read_text(encoding="utf-8")
+    m = re.search(r"PRESET_KEYS\{(.*?)\};", text, re.S)
+    if not m:
+        fail("PRESET_KEYS not found in config.hpp")
+    return re.findall(r'"(\w+)"', m.group(1))
+
+
+def check_example(path: Path, sections: dict[str, dict[str, str]]) -> None:
+    """The mod would clamp a bad value silently; the example is a template, so it must be exact."""
+    if re.fullmatch(r"(?i)(slot \d+|mod_settings)\.ini", path.name):
+        fail(f"example file name {path.name!r} collides with a save slot or the manifest")
+    values = ini_values(path)
+    names = values.pop("name", [])
+    if len(names) != 1 or not names[0]:
+        fail(f"{path.name}: needs exactly one non-empty name line")
+    if len(names[0].encode("utf-8")) > 48 or re.search(r"[|;#\x00-\x1f\x7f]", names[0]):
+        fail(f"{path.name}: name {names[0]!r} is over 48 bytes or holds | ; # or a control character")
+    by_key = {s["ConfigKey"]: s for s in sections.values() if "ConfigKey" in s}
+    keys = preset_keys()
+    errors = [f"{k} missing" for k in keys if k not in values]
+    for key, got in values.items():
+        if key not in keys:
+            errors.append(f"{key} is not a preset key")
+            continue
+        if len(got) != 1:
+            errors.append(f"{key} appears {len(got)} times")
+            continue
+        sec = by_key[key]
+        v = float(got[0])
+        if "PresetValues" in sec:
+            if v not in [float(x) for x in sec["PresetValues"].split("|")]:
+                errors.append(f"{key} = {got[0]} not in {sec['PresetValues']}")
+            continue
+        lo, hi, step = float(sec["Minimum"]), float(sec["Maximum"]), float(sec.get("Step", "1"))
+        steps = (v - lo) / step
+        if not lo <= v <= hi or abs(steps - round(steps)) > 1e-6:
+            errors.append(f"{key} = {got[0]} outside {lo:g}..{hi:g} or off step {step:g}")
+    if errors:
+        fail(f"{path.name}:\n  " + "\n  ".join(errors))
+
+
 def check_dll_fresh(dll: Path) -> None:
     if not dll.is_file():
         fail(f"{dll} missing; build it:\n  {BUILD_HINT}")
@@ -140,7 +189,7 @@ def check_dll_fresh(dll: Path) -> None:
 
 def main() -> int:
     manifest = MOD / "mod_settings.ini"
-    ini = MOD / "scripts" / "config" / "smoothcam.ini"
+    ini = MOD / "config" / "smoothcam.ini"
     dll = MOD / "dlls" / "main.dll"
     for p in (manifest, ini, MOD / "LICENSE", MOD / "enabled.txt"):
         if not p.is_file():
@@ -151,6 +200,12 @@ def main() -> int:
     check_versions(ver, sections)
     settings = check_settings(sections, ini_values(ini))
     check_dll_fresh(dll)
+    if (MOD / "scripts").exists():
+        fail("ue4ss/DWSmoothCam/scripts exists: UE4SS would start a Lua mod and log a red main.lua error")
+    examples = sorted(EXAMPLE_DIR.glob("*.ini"))
+    if len(examples) != 1:
+        fail(f"expected one example preset in {EXAMPLE_DIR}, found {len(examples)}")
+    check_example(examples[0], sections)
 
     DIST.mkdir(exist_ok=True)
     out = DIST / f"SmoothCam-UE4SS-{ver}.zip"
@@ -160,11 +215,18 @@ def main() -> int:
         z.writestr(prefix + "enabled.txt", "")
         z.write(MOD / "LICENSE", prefix + "LICENSE")
         z.write(manifest, prefix + "mod_settings.ini")
-        z.write(ini, prefix + "scripts/config/smoothcam.ini")
+        z.write(ini, prefix + "config/smoothcam.ini")
     print(f"version {ver}")
     print(f"{settings} Mod Menu settings checked against smoothcam.ini")
     print(out, f"{out.stat().st_size:,} bytes")
     for i in zipfile.ZipFile(out).infolist():
+        print(f"  {i.file_size:>9,} {i.filename}")
+
+    example_zip = DIST / f"SmoothCam-Example-Preset-{ver}.zip"
+    with zipfile.ZipFile(example_zip, "w", zipfile.ZIP_DEFLATED) as z:
+        z.write(examples[0], prefix + "config/presets/" + examples[0].name)
+    print(example_zip, f"{example_zip.stat().st_size:,} bytes")
+    for i in zipfile.ZipFile(example_zip).infolist():
         print(f"  {i.file_size:>9,} {i.filename}")
     return 0
 
