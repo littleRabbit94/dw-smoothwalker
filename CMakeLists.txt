@@ -5,7 +5,10 @@ project(DWSmoothCam)
 # built from: Vercadi rc6 is 97b7e501 (docs/design.md, "Loader: Vercadi rc6"). Config: Game__Shipping__Win64.
 # Not named UE4SS_SOURCE_DIR: project(UE4SS) caches that name as <src>/UE4SS, so a re-configure would
 # add_subdirectory the UE4SS folder directly and fail with "Unknown CMake command organize_targets".
-set(DW_RE_UE4SS_SOURCE_DIR "C:/path/to/RE-UE4SS-src" CACHE PATH "RE-UE4SS checkout at the installed commit")
+set(DW_RE_UE4SS_SOURCE_DIR "" CACHE PATH "RE-UE4SS checkout at the installed commit")
+if(NOT EXISTS "${DW_RE_UE4SS_SOURCE_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "Set -DDW_RE_UE4SS_SOURCE_DIR=<RE-UE4SS checkout at 97b7e501>")
+endif()
 
 add_subdirectory("${DW_RE_UE4SS_SOURCE_DIR}" RE-UE4SS)
 

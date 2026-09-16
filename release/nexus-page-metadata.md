@@ -31,7 +31,7 @@ AI-Generated Content (read 2026-09-16).
 | File name | `SmoothCam - UE4SS` |
 | Version | `0.8.0` |
 | Category | Main Files |
-| File | `dist/SmoothCam-UE4SS-0.8.0.zip`, 266,930 bytes, built 2026-09-16 |
+| File | `dist/SmoothCam-UE4SS-0.8.0.zip`, 267,099 bytes, built 2026-09-16 |
 | Description | `Close the game, then extract into the folder that holds the ue4ss folder (Dawnwalker/Binaries/Win64, the one with Dawnwalker.exe). The archive carries the folder path, so the mod lands in ue4ss/Mods/DWSmoothCam on its own. Needs UE4SS (mod 18 or mod 283) and Steam build 25232147. No mods.txt edit.` |
 
 Optional file:
@@ -41,7 +41,7 @@ Optional file:
 | File name | `SmoothCam Example Preset` |
 | Version | `0.8.0` |
 | Category | Optional Files |
-| File | `dist/SmoothCam-Example-Preset-0.8.0.zip`, 1,345 bytes, built 2026-09-16 |
+| File | `dist/SmoothCam-Example-Preset-0.8.0.zip`, 1,355 bytes, built 2026-09-16 |
 | Description | `One preset, Over the Shoulder: a closer camera further out over the shoulder. Every key is commented with its range and default, so it doubles as a template for your own. Extract into Dawnwalker/Binaries/Win64 like the main file; it lands in ue4ss/Mods/DWSmoothCam/config/presets. Restart the game, then pick it with V or from the Mod Menu. Needs the main file.` |
 
 Source: `example-preset/`. The build checks it holds a name and all 37 preset keys, each once, inside
