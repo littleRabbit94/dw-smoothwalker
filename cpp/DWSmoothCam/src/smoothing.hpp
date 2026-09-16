@@ -1,5 +1,4 @@
-// DWSmoothCam smoothing math: plain values in, plain values out. No Unreal or UE4SS types, so it is
-// safe on the task-graph worker threads that call GetCameraView.
+// Smoothing math with no Unreal or UE4SS types, safe on the worker threads that call GetCameraView.
 #pragma once
 
 #include <algorithm>
@@ -109,8 +108,7 @@ namespace dwsc
         return {a.x * wa + b.x * wb, a.y * wa + b.y * wb, a.z * wa + b.z * wb, a.w * wa + b.w * wb};
     }
 
-    // Response curves: how hard the camera catches up as the lag grows. 0 exponential (constant rate),
-    // 1 linear, 2 smoothstep, 3 ease in-out (cubic). x is lag / catchup distance, clamped to [0, 1].
+    // Catch-up strength as the lag grows: 0 constant, 1 linear, 2 smoothstep, 3 cubic ease in-out. x in [0, 1].
     inline double curve(int kind, double x)
     {
         x = std::clamp(x, 0.0, 1.0);
@@ -123,7 +121,7 @@ namespace dwsc
         }
     }
 
-    // Frame-rate independent blend factor for one step toward the target.
+    // Frame-rate independent: the same lag closes at the same speed at any frame time.
     inline double follow_alpha(double rate, int kind, double lag, double catchup, double floor_scale, double dt)
     {
         double scale = kind == 0 ? 1.0 : floor_scale + (1.0 - floor_scale) * curve(kind, catchup > 0.0 ? lag / catchup : 1.0);

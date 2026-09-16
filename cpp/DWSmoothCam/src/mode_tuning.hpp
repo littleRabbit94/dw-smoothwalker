@@ -1,11 +1,9 @@
-// DWSmoothCam camera position tuning: per-group distance, height, shoulder and FOV, the game's own lag
-// and the look up/down limits, written into the game's camera modes. Game thread only.
+// Camera position tuning: per-group distance, height, shoulder and FOV, the game's own lag and the look
+// limits, written into the game's camera modes. Game thread only, except restore() at unload.
 //
-// Each mode class's default object (CDO) is captured once, before any write, and every value the mod
-// writes is computed from that capture, never from the current value, so repeated applies cannot
-// compound. New mode instances copy the CDO. Instances already alive are swept on apply. Scalars apply
-// on the next frame; CameraOffsets is only read on a camera type change, so an apply flips the player's
-// camera type away and back over two frames with the type blend at 0 (docs/design.md, "How writes land").
+// Every write is computed from the CDO values captured the first time a class is seen, never from the
+// current value, so applies cannot compound. CameraOffsets is only re-read on a camera type change, so an
+// apply flips the player's camera type away and back (docs/design.md, "How writes land").
 #pragma once
 
 #include "config.hpp"
@@ -46,7 +44,7 @@ namespace dwsc
         const wchar_t* name; // BP_CameraMode_<name>
     };
 
-    // The modes a player sees for more than a moment. Finisher and shadowstep attack cameras are scripted shots.
+    // Finisher and shadowstep attack cameras are scripted shots and stay as shipped.
     inline const std::vector<ModeClassSpec>& mode_classes()
     {
         static const std::vector<ModeClassSpec> specs{
@@ -64,9 +62,9 @@ namespace dwsc
 
     struct GroupTuning
     {
-        double distance = 100; // percent of the game's distance behind the character
-        double height = 0;     // cm added
-        double shoulder = 0;   // cm added outward on the side the mode already sits; centred modes are left alone
+        double distance = 100; // percent
+        double height = 0;     // cm
+        double shoulder = 0;   // cm outward on the side the mode already sits
         double fov = 0;        // degrees added
     };
 
@@ -74,11 +72,11 @@ namespace dwsc
     {
         bool active = true;
         GroupTuning groups[5];
-        double game_lag_scale = 1; // multiplies the game's own lag speeds: higher is tighter
+        double game_lag_scale = 1;
         bool shoulder_swap = false;
-        double pitch_min = -60;    // applied only to modes that use the game's -60 / 40 range
+        double pitch_min = -60;
         double pitch_max = 40;
-        double transition = 0.5;   // s: how long a position change glides; 0 snaps
+        double transition = 0.5; // s
     };
 
     inline auto operator==(const GroupTuning& a, const GroupTuning& b) -> bool
@@ -116,31 +114,28 @@ namespace dwsc
     class ModeTuner
     {
       public:
-        // Finds the mode CDOs. The originals are read the first time a class is seen and kept for the
-        // session: a class that survives a map load still holds the mod's values, and must not have
-        // them captured as the game's.
+        // Originals are kept for the session: a class that stays loaded across a map load still holds the
+        // mod's values and must not have them captured as the game's.
         auto capture() -> void
         {
             if (!m_layout_ok && !resolve_layout()) return;
             for (auto& mode : m_modes)
             {
-                if (mode.captured) continue;
+                if (mode.captured || !mode.usable) continue;
                 auto path = std::wstring(L"/Game/_Dawnwalker/Player/Camera/Modes/BP_CameraMode_") + mode.spec.name + L".Default__BP_CameraMode_" +
                             mode.spec.name + L"_C";
                 auto* cdo = UObjectGlobals::StaticFindObject<UObject*>(nullptr, nullptr, path.c_str());
                 if (!cdo) continue;
-                mode.cdo = cdo;
-                mode.cls = cdo->GetClassPrivate();
                 if (!mode.has_original)
                 {
                     read_original(cdo, mode.original);
+                    // A wrong layout would put every write in the wrong memory.
                     if (!plausible(mode.original))
                     {
-                        // A wrong layout would make every write land in the wrong memory: stop before the first one.
-                        Output::send<LogLevel::Warning>(STR("[DWSmoothCam] {} reads as fov {}, {} offsets: layout mismatch, camera position tuning off\n"),
+                        Output::send<LogLevel::Warning>(STR("[DWSmoothCam] {} reads as fov {}, {} offsets: not a camera layout, left as shipped\n"),
                                                         mode.spec.name, mode.original.fov, mode.original.offsets.size());
-                        m_layout_ok = false;
-                        return;
+                        mode.usable = false;
+                        continue;
                     }
                     mode.has_original = true;
                     if (std::wstring_view(mode.spec.name) == L"Base_LongRange" && !mode.original.offsets.empty())
@@ -151,12 +146,13 @@ namespace dwsc
                                                        mode.original.pitch_max, mode.original.offsets.size(), first.key, first.x, first.y, first.z);
                     }
                 }
+                mode.cdo = cdo;
+                mode.cls = cdo->GetClassPrivate();
                 mode.captured = true;
-                ++m_captured;
             }
         }
 
-        // Before a map load: classes may unload, so no pointer survives it. Originals stay.
+        // Before a map load: classes may unload.
         auto forget() -> void
         {
             for (auto& mode : m_modes)
@@ -165,50 +161,39 @@ namespace dwsc
                 mode.cdo = nullptr;
                 mode.cls = nullptr;
             }
-            m_captured = 0;
-            m_live.clear();
             m_flip_stage = Idle;
             m_flip_again = false;
             m_flip_camera = nullptr;
         }
 
-        auto captured() const -> int { return m_captured; }
-        auto layout_ok() const -> bool { return m_layout_ok; }
-
-        // Writes the tuning into every captured CDO and every live instance, and starts the type flip.
         auto apply(const PositionTuning& tuning, UObject* player_camera) -> void
         {
             capture();
             if (!m_layout_ok) return;
+            int classes = 0;
             for (auto& mode : m_modes)
             {
-                if (mode.captured) write(mode.cdo, mode, tuning);
+                if (!mode.captured) continue;
+                write(mode.cdo, mode, tuning);
+                ++classes;
             }
-
-            m_live.clear();
-            std::vector<UObject*> instances;
-            UObjectGlobals::FindAllOf(STR("RebelCameraModeTPP"), instances);
-            for (auto* instance : instances)
-            {
-                if (!instance) continue;
-                auto* cls = instance->GetClassPrivate();
-                for (auto& mode : m_modes)
-                {
-                    if (!mode.captured || mode.cls != cls || instance == mode.cdo) continue;
-                    write(instance, mode, tuning);
-                    m_live.push_back({instance, &mode});
-                    break;
-                }
-            }
+            int live = 0;
+            for_each_instance([&](UObject* instance, Mode& mode) {
+                write(instance, mode, tuning);
+                ++live;
+            });
+            m_applied = true;
             m_transition = static_cast<float>(tuning.transition);
             request_flip(player_camera);
-            Output::send<LogLevel::Normal>(STR("[DWSmoothCam] camera position applied: {} mode classes, {} live modes\n"), m_captured,
-                                           m_live.size());
+            Output::send<LogLevel::Normal>(STR("[DWSmoothCam] camera position applied: {} mode classes, {} live modes\n"), classes, live);
         }
 
-        // The game's own values back, for a hot reload or camera_tuning = 0.
+        // At unload, after the mod's callbacks are gone. Live instances keep their values until the game pushes
+        // new ones.
         auto restore() -> void
         {
+            if (!m_applied) return;
+            capture(); // forget() may have dropped the CDO pointers since the last apply
             if (!m_layout_ok) return;
             PositionTuning neutral;
             neutral.active = false;
@@ -218,14 +203,24 @@ namespace dwsc
             }
         }
 
-        // Once per engine tick. view_updates counts GetCameraView calls for the player's camera: a stage
-        // only advances once the camera has updated since the last one, so a flip requested under a pause
-        // (the Mod Menu) waits for the world instead of running unseen.
-        auto tick(uint64_t view_updates) -> void
+        // Once per engine tick. A stage advances only after the player's camera has updated, so a flip
+        // requested under a pause (the Mod Menu) waits for the world instead of running unseen.
+        auto tick(uint64_t view_updates, UObject* player_camera) -> void
         {
             bool updated = view_updates != m_flip_seen;
             m_flip_seen = view_updates;
-            if (m_flip_stage == Idle || !updated) return;
+            if (m_flip_stage == Idle) return;
+            if (!player_camera) return; // briefly unpossessed: wait, the camera usually comes back
+            if (player_camera != m_flip_camera)
+            {
+                // A different pawn; its camera gets a fresh apply.
+                set_blend(false);
+                m_flip_stage = Idle;
+                m_flip_again = false;
+                m_flip_camera = nullptr;
+                return;
+            }
+            if (!updated) return;
 
             switch (m_flip_stage)
             {
@@ -236,28 +231,26 @@ namespace dwsc
                     m_flip_stage = Idle;
                     return;
                 }
-                for (auto& live : m_live) write_float(live.object, m_off.type_blend, m_transition);
-                m_flip_type = type;
-                set_camera_type(m_flip_camera, type == 1 ? 2 : 1);
+                set_blend(true);
+                m_flip_home = type;
+                m_flip_away = type == 1 ? 2 : 1;
+                set_camera_type(m_flip_camera, m_flip_away);
                 m_flip_stage = Away;
                 return;
             }
             case Away:
-                set_camera_type(m_flip_camera, m_flip_type);
+                // If the game changed the type itself meanwhile (entering an interior), its choice stands.
+                if (get_camera_type(m_flip_camera) == m_flip_away) set_camera_type(m_flip_camera, m_flip_home);
                 m_flip_back_at = std::chrono::steady_clock::now();
                 m_flip_stage = Back;
                 return;
             case Back: {
-                // The game's blend keeps running on the settings it started with; restore after it ends.
+                // The running blend keeps the settings it started with.
                 auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - m_flip_back_at).count();
                 if (elapsed < m_transition + 0.25) return;
-                for (auto& live : m_live) write_float(live.object, m_off.type_blend, live.mode->original.type_blend);
-                m_flip_stage = Idle;
-                if (m_flip_again)
-                {
-                    m_flip_again = false;
-                    m_flip_stage = Pending;
-                }
+                set_blend(false);
+                m_flip_stage = m_flip_again ? Pending : Idle;
+                m_flip_again = false;
                 return;
             }
             default:
@@ -286,21 +279,16 @@ namespace dwsc
             UClass* cls = nullptr;
             bool captured = false;
             bool has_original = false;
+            bool usable = true;
             Original original;
         };
 
         struct Offsets
         {
             int32_t fov = -1, pitch_min = -1, pitch_max = -1, vlag = -1, hlag = -1;
-            int32_t offsets_map = -1, type_blend = -1; // type_blend: CameraTypeBlendArgs.BlendTime, absolute
+            int32_t offsets_map = -1, type_blend = -1; // type_blend: CameraTypeBlendArgs.BlendTime
             int32_t offset_target = -1, offset_fov = -1;
             int32_t offset_size = 0, offset_align = 0;
-        };
-
-        struct Live
-        {
-            UObject* object;
-            Mode* mode;
         };
 
         std::vector<Mode> m_modes = [] {
@@ -311,9 +299,8 @@ namespace dwsc
         Offsets m_off;
         bool m_layout_ok = false;
         bool m_layout_tried = false;
-        int m_captured = 0;
+        bool m_applied = false;
         FScriptMapLayout m_map_layout{};
-        std::vector<Live> m_live;
 
         UFunction* m_set_type = nullptr;
         UFunction* m_get_type = nullptr;
@@ -322,13 +309,13 @@ namespace dwsc
         {
             Idle,
             Pending, // waiting for the camera to update
-            Away,    // switched to another camera type
+            Away,    // switched to another type
             Back     // switched back; waiting for the blend to end
         };
         FlipStage m_flip_stage = Idle;
         bool m_flip_again = false;
         UObject* m_flip_camera = nullptr;
-        uint8_t m_flip_type = 0;
+        uint8_t m_flip_home = 0, m_flip_away = 0;
         uint64_t m_flip_seen = 0;
         float m_transition = 0.5f;
         std::chrono::steady_clock::time_point m_flip_back_at{};
@@ -379,8 +366,7 @@ namespace dwsc
                 Output::send<LogLevel::Warning>(STR("[DWSmoothCam] camera mode layout not found, camera position tuning off\n"));
                 return false;
             }
-            // ECameraType key: one byte.
-            m_map_layout = FScriptMap::GetScriptLayout(1, 1, m_off.offset_size, m_off.offset_align);
+            m_map_layout = FScriptMap::GetScriptLayout(1, 1, m_off.offset_size, m_off.offset_align); // ECameraType key: one byte
             m_layout_ok = true;
             Output::send<LogLevel::Normal>(STR("[DWSmoothCam] camera mode layout: offsets map 0x{:X}, CameraOffset {} bytes, value at 0x{:X}\n"),
                                            m_off.offsets_map, m_off.offset_size, m_map_layout.ValueOffset);
@@ -410,6 +396,33 @@ namespace dwsc
         static auto write_float(UObject* object, int32_t offset, float value) -> void
         {
             memcpy(reinterpret_cast<uint8_t*>(object) + offset, &value, sizeof(value));
+        }
+
+        // Live instances are looked up each time rather than kept: a popped mode can be collected at any GC.
+        template <typename Visit>
+        auto for_each_instance(Visit&& visit) -> void
+        {
+            std::vector<UObject*> instances;
+            UObjectGlobals::FindAllOf(STR("RebelCameraModeTPP"), instances);
+            for (auto* instance : instances)
+            {
+                if (!instance) continue;
+                auto* cls = instance->GetClassPrivate();
+                for (auto& mode : m_modes)
+                {
+                    if (!mode.captured || mode.cls != cls || instance == mode.cdo) continue;
+                    visit(instance, mode);
+                    break;
+                }
+            }
+        }
+
+        // transition: the flip's blend time; otherwise each mode's own.
+        auto set_blend(bool transition) -> void
+        {
+            for_each_instance([&](UObject* instance, Mode& mode) {
+                write_float(instance, m_off.type_blend, transition ? m_transition : mode.original.type_blend);
+            });
         }
 
         template <typename Visit>
@@ -455,6 +468,7 @@ namespace dwsc
             write_float(object, m_off.fov, on ? static_cast<float>(o.fov + g.fov) : o.fov);
             write_float(object, m_off.hlag, on ? static_cast<float>(o.hlag * t.game_lag_scale) : o.hlag);
             write_float(object, m_off.vlag, on ? static_cast<float>(o.vlag * t.game_lag_scale) : o.vlag);
+            // Aiming and combat ship wider limits; only the -60 / 40 modes take the setting.
             bool game_range = o.pitch_min == -60.0f && o.pitch_max == 40.0f;
             write_float(object, m_off.pitch_min, on && game_range ? static_cast<float>(t.pitch_min) : o.pitch_min);
             write_float(object, m_off.pitch_max, on && game_range ? static_cast<float>(t.pitch_max) : o.pitch_max);
@@ -468,9 +482,10 @@ namespace dwsc
                     if (on)
                     {
                         if (oo.x < 0.0) target[0] = oo.x * g.distance / 100.0;
-                        if (oo.y != 0.0)
+                        if (oo.y != 0.0) // centred modes stay centred
                         {
-                            target[1] = oo.y + (oo.y > 0.0 ? g.shoulder : -g.shoulder);
+                            // A negative offset stops at the centre instead of crossing to the other shoulder.
+                            target[1] = std::copysign(std::max(std::abs(oo.y) + g.shoulder, 0.0), oo.y);
                             if (t.shoulder_swap) target[1] = -target[1];
                         }
                         target[2] = oo.z + g.height;
@@ -497,13 +512,15 @@ namespace dwsc
             camera->ProcessEvent(m_set_type, params);
         }
 
-        // Queues the flip that makes the modes re-read CameraOffsets. One already running finishes first,
-        // then runs again, so the latest values are the ones read.
+        // A request during a running flip runs again after it, so the latest values are the ones read.
         auto request_flip(UObject* camera) -> void
         {
             if (!camera) return;
-            m_flip_camera = camera;
-            if (m_flip_stage == Idle) m_flip_stage = Pending;
+            if (m_flip_stage == Idle)
+            {
+                m_flip_camera = camera;
+                m_flip_stage = Pending;
+            }
             else if (m_flip_stage != Pending) m_flip_again = true;
         }
     };

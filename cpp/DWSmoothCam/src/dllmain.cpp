@@ -1,8 +1,5 @@
-// DWSmoothCam: frame-interpolated third-person camera for The Blood of Dawnwalker.
-// Hooks RebelCameraComponent::GetCameraView (vtable slot 214), lets the game build its view, then lags
-// the character pivot the view is built around and adds that lag to the camera. The game's collision,
-// offsets, FOV and blends stay the game's.
-// Design notes: docs/design.md "DWSmoothCam"; docs/design.md "The gameplay camera", "The per-frame hook".
+// DWSmoothCam: lags the character pivot the game's camera view is built around (GetCameraView, vtable
+// slot 214). Design and measurements: docs/design.md "DWSmoothCam", docs/design.md "The gameplay camera".
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
 #include "config.hpp"
@@ -10,6 +7,7 @@
 #include "smoothing.hpp"
 
 #include <atomic>
+#include <cmath>
 #include <chrono>
 #include <format>
 #include <string>
@@ -42,14 +40,14 @@ namespace
     constexpr const char* SETTINGS_PATH = "ue4ss/Mods/DWSmoothCam/scripts/config/smoothcam.ini";
     constexpr const char* PRESETS_PATH = "ue4ss/Mods/DWSmoothCam/scripts/config/presets.ini";
 
-    // Leading members of UE 5.5 FMinimalViewInfo: Location, Rotation (Pitch, Yaw, Roll).
+    // Prefix of UE 5.5 FMinimalViewInfo.
     struct ViewHead
     {
         double location[3];
         double rotation[3];
     };
 
-    // What the hook needs, numbers only: copying it allocates nothing on the worker thread.
+    // Numbers only, so the hook's copy allocates nothing on a worker thread.
     struct Tuning
     {
         double follow_rate_h, follow_rate_v;
@@ -69,6 +67,7 @@ namespace
 
     GetCameraViewFn g_original = nullptr;
     uintptr_t** g_vtable_entry = nullptr;
+    std::atomic<int> g_in_hook{0}; // calls running inside get_camera_view_hook; unload waits for 0
 
     SRWLOCK g_tuning_lock = SRWLOCK_INIT;
     Tuning g_tuning = tuning_of(dwsc::Settings{});
@@ -81,13 +80,12 @@ namespace
     std::atomic<void*> g_player_root{nullptr};
     std::atomic<int32_t> g_translation_offset{-1}; // USceneComponent::ComponentToWorld.Translation
 
-    // Stats for log_stats.
     std::atomic<uint64_t> g_frames{0};
     std::atomic<uint64_t> g_clamped{0};
     std::atomic<double> g_lag_sum{0.0};
-    std::atomic<uint64_t> g_view_updates{0}; // GetCameraView calls for the player's camera: the camera is updating
-    std::atomic<int64_t> g_last_view_qpc{0};  // QPC time of the latest of them
-    std::atomic<uint64_t> g_calls_timed{0}; // smooth_view calls, and QPC ticks spent in them
+    std::atomic<uint64_t> g_view_updates{0}; // player-camera updates: flip stages advance on these
+    std::atomic<int64_t> g_last_view_qpc{0};  // V and N act only while this is recent
+    std::atomic<uint64_t> g_calls_timed{0};
     std::atomic<uint64_t> g_ticks_spent{0};
 
     // Kept free of C++ objects: __try needs a plain frame.
@@ -117,8 +115,7 @@ namespace
         }
     }
 
-    // Hook-thread state. GetCameraView calls for one camera arrive in sequence, and only the player's
-    // camera reaches this, so no lock.
+    // Hook state without a lock: only the player's camera reaches it, and its calls arrive in sequence.
     struct Follow
     {
         bool valid = false;
@@ -136,12 +133,16 @@ namespace
         return static_cast<double>(b.QuadPart - a.QuadPart) / static_cast<double>(g_qpc_frequency.QuadPart);
     }
 
-    // Soft leash: the internal lag may run to three times the limit, and what the camera shows is eased
-    // into the limit (tanh), so reaching it has no edge. Hard: shown lag stops at the limit.
+    // Soft: the internal lag may run to 3x the limit and the shown lag eases into it, so the limit has no edge.
     auto leash(double lag, double limit, bool soft) -> double
     {
         if (limit <= 0.0) return 0.0;
         return soft ? limit * std::tanh(lag / limit) : std::min(lag, limit);
+    }
+
+    auto finite(const dwsc::Vec3& v) -> bool
+    {
+        return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
     }
 
     auto smooth_view(void* desired_view, float delta_time) -> void
@@ -166,11 +167,17 @@ namespace
 
         dwsc::Vec3 pivot{pivot_raw[0], pivot_raw[1], pivot_raw[2]};
         dwsc::Vec3 camera{view.location[0], view.location[1], view.location[2]};
+        if (!finite(pivot) || !finite(camera) || !std::isfinite(view.rotation[0]) || !std::isfinite(view.rotation[1]) ||
+            !std::isfinite(view.rotation[2]))
+        {
+            g_follow.valid = false;
+            return;
+        }
         dwsc::Quat rotation = dwsc::from_rotator(view.rotation[0], view.rotation[1], view.rotation[2]);
 
         // Snap after a toggle, a settings change, a gap (cutscene, photo mode, load) or a teleport.
         bool snap = g_reset.exchange(false, std::memory_order_relaxed) || !g_follow.valid ||
-                    seconds_between(g_follow.last_call, now) > t.reset_gap || dwsc::length(pivot - g_follow.pivot_last) > t.reset_distance;
+                    seconds_between(g_follow.last_call, now) > t.reset_gap || !(dwsc::length(pivot - g_follow.pivot_last) <= t.reset_distance);
         g_follow.last_call = now;
         g_follow.pivot_last = pivot;
         if (snap)
@@ -185,7 +192,6 @@ namespace
         // The world delta: 0 while paused, so a paused frame holds the lag instead of settling it.
         double dt = std::clamp(static_cast<double>(delta_time), 0.0, 0.1);
 
-        // Horizontal follow on the internal pivot, bounded at the internal leash.
         dwsc::Vec3& ps = g_follow.pivot_smoothed;
         double inner_h = t.soft_leash ? 3.0 * t.max_lag_h : t.max_lag_h;
         double inner_v = t.soft_leash ? 3.0 * t.max_lag_v : t.max_lag_v;
@@ -218,13 +224,12 @@ namespace
             ps.z = pivot.z - lag_v;
         }
 
-        // The lag the camera shows.
         double shown_h = leash(lag_h, t.max_lag_h, t.soft_leash);
         double scale_h = lag_h > 0.0 ? shown_h / lag_h : 0.0;
         double shown_v = std::copysign(leash(std::abs(lag_v), t.max_lag_v, t.soft_leash), lag_v);
         dwsc::Vec3 shown_pivot{pivot.x - lag_hx * scale_h, pivot.y - lag_hy * scale_h, pivot.z - shown_v};
 
-        // Rotation: slerp toward the game's rotation, and swing the camera around the pivot to match.
+        // The arm swings with the smoothed rotation so the camera still orbits the pivot.
         dwsc::Vec3 arm = camera - pivot;
         if (t.rotation_smoothing)
         {
@@ -241,8 +246,8 @@ namespace
 
         dwsc::Vec3 result = shown_pivot + arm;
 
-        // Walls: the game already pulled its camera in front of any wall. While the camera is closer to
-        // the pivot than it has recently been, keep the smoothed camera no farther out than the game's.
+        // The game has already pulled its camera in front of walls. While it sits closer than usual, the
+        // smoothed camera may not be farther out than the game's.
         double game_distance = dwsc::length(arm);
         double settle = 1.0 - std::exp(-1.0 * dt);
         g_follow.nominal_distance = std::max(game_distance, g_follow.nominal_distance + (game_distance - g_follow.nominal_distance) * settle);
@@ -257,6 +262,11 @@ namespace
             }
         }
 
+        if (!finite(result) || !std::isfinite(view.rotation[0]) || !std::isfinite(view.rotation[1]) || !std::isfinite(view.rotation[2]))
+        {
+            g_follow.valid = false; // leave the game's view as it built it
+            return;
+        }
         view.location[0] = result.x;
         view.location[1] = result.y;
         view.location[2] = result.z;
@@ -269,8 +279,15 @@ namespace
         }
     }
 
+    struct InHook
+    {
+        InHook() { g_in_hook.fetch_add(1, std::memory_order_relaxed); }
+        ~InHook() { g_in_hook.fetch_sub(1, std::memory_order_relaxed); }
+    };
+
     void __fastcall get_camera_view_hook(void* self, float delta_time, void* desired_view)
     {
+        InHook in_hook;
         g_original(self, delta_time, desired_view);
         if (self != g_player_camera.load(std::memory_order_relaxed)) return;
         g_view_updates.fetch_add(1, std::memory_order_relaxed);
@@ -291,8 +308,7 @@ namespace
         g_ticks_spent.fetch_add(static_cast<uint64_t>(stop.QuadPart - start.QuadPart), std::memory_order_relaxed);
     }
 
-    // The player's camera updated within the last quarter second. False under a pause (the Mod Menu, the
-    // pause menu, a load), in a cutscene and in the free camera: no GetCameraView calls reach the hook.
+    // False under a pause, a load, a cutscene or the free camera: the player's camera is not updating.
     auto camera_live() -> bool
     {
         LARGE_INTEGER now{};
@@ -341,7 +357,7 @@ class DWSmoothCam : public CppUserModBase
     DWSmoothCam() : CppUserModBase()
     {
         ModName = STR("DWSmoothCam");
-        ModVersion = STR("0.7.3");
+        ModVersion = STR("0.7.4");
         ModDescription = STR("Frame-interpolated third-person camera");
         ModAuthors = STR("littleRabbit6");
 
@@ -351,10 +367,11 @@ class DWSmoothCam : public CppUserModBase
         Output::send<LogLevel::Normal>(STR("[DWSmoothCam] v{} loaded, {}\n"), ModVersion, g_enabled.load() ? STR("on") : STR("off"));
     }
 
+    // UE4SS frees the DLL right after this (hot reload). UnregisterCallback waits for running callbacks, so the
+    // game thread is out of m_tuner before restore(); a call already in the hook must return before unload.
     ~DWSmoothCam() override
     {
-        m_tuner.restore();
-        // The DLL can be unloaded (hot reload): the vtable must not point into it afterwards.
+        for (auto id : m_callbacks) Hook::UnregisterCallback(id);
         if (g_vtable_entry && g_original)
         {
             DWORD prev{};
@@ -363,8 +380,12 @@ class DWSmoothCam : public CppUserModBase
                 *g_vtable_entry = reinterpret_cast<uintptr_t*>(g_original);
                 VirtualProtect(g_vtable_entry, sizeof(*g_vtable_entry), prev, &prev);
             }
+            // A worker may have read the old entry just before the restore and not entered the hook yet.
+            Sleep(50);
+            for (int i = 0; i < 500 && g_in_hook.load() != 0; ++i) Sleep(10);
+            if (g_in_hook.load() != 0) Output::send<LogLevel::Warning>(STR("[DWSmoothCam] unload: a camera update is still in the hook\n"));
         }
-        for (auto id : m_callbacks) Hook::UnregisterCallback(id);
+        m_tuner.restore();
     }
 
     auto on_unreal_init() -> void override
@@ -388,12 +409,11 @@ class DWSmoothCam : public CppUserModBase
             bool now = !g_enabled.load();
             g_reset.store(true);
             g_enabled.store(now);
-            if (!m_controller) m_find_requested.store(true); // e.g. after a hot reload mid-game
             Output::send<LogLevel::Normal>(STR("[DWSmoothCam] smoothing {}\n"), now ? STR("on") : STR("off"));
             request_banner(now ? STR("SmoothCam: On") : STR("SmoothCam: Off"));
         });
-        // V and N write smoothcam.ini. Under a pause the Mod Menu may have that file open, and it refuses an
-        // Apply once the file changed behind it, so both keys only act while the camera is live.
+        // V and N write smoothcam.ini. The Mod Menu (which pauses) refuses an Apply once its file changed
+        // behind it, so both keys only act while the camera is live.
         bind(m_preset_key, STR("preset_key"), [this]() {
             if (!camera_live())
             {
@@ -411,6 +431,7 @@ class DWSmoothCam : public CppUserModBase
             swap_shoulder();
         });
 
+        m_find_requested.store(true); // after a hot reload the controller has already begun play
         m_last_report = m_last_poll = std::chrono::steady_clock::now();
     }
 
@@ -447,12 +468,11 @@ class DWSmoothCam : public CppUserModBase
     int32_t m_pawn_offset = -1; // AController::Pawn, same class every map
     std::atomic<bool> m_find_requested{false};
 
-    std::mutex m_file_mutex;     // settings file, presets file and m_settings: UE4SS thread and key callbacks
+    std::mutex m_file_mutex; // both ini files and m_settings; the engine tick never takes it
     dwsc::Settings m_settings{};
     uint64_t m_settings_stamp = 0;
     std::string m_toggle_key, m_preset_key, m_shoulder_key;
 
-    // Camera position: settings published under m_position_mutex, applied from the engine tick.
     dwsc::ModeTuner m_tuner; // game thread only
     std::mutex m_position_mutex;
     dwsc::PositionTuning m_position{};
@@ -462,28 +482,26 @@ class DWSmoothCam : public CppUserModBase
 
     std::chrono::steady_clock::time_point m_last_report{}, m_last_poll{};
 
-    // Banner: requested from any thread, shown from the engine tick.
-    std::mutex m_banner_mutex;
+    std::mutex m_banner_mutex; // m_banner_text, m_banner_due, m_banner_pending
     std::wstring m_banner_text;
-    std::chrono::steady_clock::time_point m_banner_due{}; // under m_banner_mutex
-    std::atomic<bool> m_banner_pending{false};
-    std::vector<UObject*> m_our_banners; // game thread: NotificationInfos this mod pushed; compared, never dereferenced
-    int32_t m_queue_offset = -1;         // NotificationSubsystem::NotificationQueue
+    std::chrono::steady_clock::time_point m_banner_due{};
+    bool m_banner_pending = false;
+    int32_t m_queue_offset = -1;        // NotificationSubsystem::NotificationQueue
+    int32_t m_region_data_offset = -1;  // RegionEnteredNotificationInfo::RegionData
+    UClass* m_region_info_class = nullptr;
     std::atomic<bool> m_show_banner{true};
     int m_banner_state = 0; // 0 unresolved, 1 ready, -1 unavailable (game thread only)
     UFunction* m_banner_function = nullptr;
     UObject* m_banner_library = nullptr;
 
-    // Debounced: a burst of presses shows one banner, with the last text, BANNER_SETTLE after the last press.
+    // Debounced: a burst of presses shows one banner, with the last text.
     auto request_banner(std::wstring text) -> void
     {
         if (!m_show_banner.load()) return;
-        {
-            std::lock_guard guard(m_banner_mutex);
-            m_banner_text = std::move(text);
-            m_banner_due = std::chrono::steady_clock::now() + BANNER_SETTLE;
-        }
-        m_banner_pending.store(true);
+        std::lock_guard guard(m_banner_mutex);
+        m_banner_text = std::move(text);
+        m_banner_due = std::chrono::steady_clock::now() + BANNER_SETTLE;
+        m_banner_pending = true;
     }
 
     static constexpr auto BANNER_SETTLE = std::chrono::milliseconds(400);
@@ -495,38 +513,51 @@ class DWSmoothCam : public CppUserModBase
         int32_t max;
     };
 
-    // Removes this mod's banners that are still waiting in the game's queue, so presses never stack up a
-    // backlog. The one on screen is not in the queue and is left alone: ending a notification its widget
-    // is showing crashed the game (docs/design.md, "Rapid banners queue").
+    // Thins our own waiting banners so presses cannot build a backlog. The banner on screen is left alone:
+    // ending a notification its widget is showing crashed the game (docs/design.md, "Rapid banners queue").
+    // Ours are recognised by class and text, never by a remembered address, which the game may reuse.
     auto drop_stale_banners(UObject* subsystem) -> void
     {
-        if (!subsystem || m_our_banners.empty()) return;
-        if (m_queue_offset < 0)
+        if (!subsystem) return;
+        if (m_queue_offset < 0 || m_region_data_offset < 0 || !m_region_info_class)
         {
             auto* slot = subsystem->GetValuePtrByPropertyNameInChain<void>(STR("NotificationQueue"));
-            if (!slot) return;
+            m_region_info_class = UObjectGlobals::StaticFindObject<UClass*>(nullptr, nullptr, STR("/Script/DogwoodUI.RegionEnteredNotificationInfo"));
+            int32_t data = -1;
+            if (m_region_info_class)
+            {
+                for (FProperty* property : m_region_info_class->ForEachProperty())
+                {
+                    if (property->GetName() == STR("RegionData")) data = property->GetOffset_ForInternal();
+                }
+            }
+            if (!slot || data < 0) return;
             m_queue_offset = static_cast<int32_t>(reinterpret_cast<uint8_t*>(slot) - reinterpret_cast<uint8_t*>(subsystem));
+            m_region_data_offset = data;
         }
         auto* queue = reinterpret_cast<ObjectArray*>(reinterpret_cast<uint8_t*>(subsystem) + m_queue_offset);
         if (queue->num < 0 || queue->num > queue->max || queue->max > 4096 || (queue->num > 0 && !queue->data)) return;
 
         int32_t kept = 0;
-        std::vector<UObject*> still_queued;
         for (int32_t i = 0; i < queue->num; ++i)
         {
             auto* entry = queue->data[i];
-            bool ours = std::find(m_our_banners.begin(), m_our_banners.end(), entry) != m_our_banners.end();
-            if (ours) continue;
-            queue->data[kept++] = entry;
+            if (!is_our_banner(entry)) queue->data[kept++] = entry;
         }
         queue->num = kept;
-        // Every banner of ours that was waiting is now gone; any other one was shown or collected.
-        m_our_banners.clear();
     }
 
-    // PushRegionEnteredNotification(WorldContextObject, RegionData, IsNewlyDiscovered): the region banner,
-    // with RegionData.RegionDisplayText as the line shown. The parameter layout is checked against
-    // reflection once; any difference switches banners off rather than guessing.
+    auto is_our_banner(UObject* entry) -> bool
+    {
+        if (!entry || entry->GetClassPrivate() != m_region_info_class) return false;
+        auto* text = reinterpret_cast<FText*>(reinterpret_cast<uint8_t*>(entry) + m_region_data_offset + BANNER_TEXT);
+        return text->ToString().starts_with(BANNER_PREFIX);
+    }
+
+    static constexpr const wchar_t* BANNER_PREFIX = L"SmoothCam:";
+
+    // The region banner shows RegionData.RegionDisplayText. The hard-coded parameter layout must match
+    // reflection, or banners stay off.
     auto resolve_banner() -> bool
     {
         m_banner_state = -1;
@@ -562,35 +593,24 @@ class DWSmoothCam : public CppUserModBase
 
     auto show_pending_banner() -> void
     {
-        if (!m_banner_pending.load() || !m_controller) return;
+        if (!m_controller) return;
         std::wstring line;
         {
             std::lock_guard guard(m_banner_mutex);
-            if (std::chrono::steady_clock::now() < m_banner_due) return;
+            if (!m_banner_pending || std::chrono::steady_clock::now() < m_banner_due) return;
+            m_banner_pending = false;
             line = m_banner_text;
         }
         if (m_banner_state == 0) resolve_banner();
-        m_banner_pending.store(false);
         if (m_banner_state != 1) return;
 
-        auto* subsystem = UObjectGlobals::FindFirstOf(STR("NotificationSubsystem"));
-        drop_stale_banners(subsystem);
-        int32_t before = -1;
-        ObjectArray* queue = nullptr;
-        if (subsystem && m_queue_offset >= 0)
-        {
-            queue = reinterpret_cast<ObjectArray*>(reinterpret_cast<uint8_t*>(subsystem) + m_queue_offset);
-            before = queue->num;
-        }
+        drop_stale_banners(UObjectGlobals::FindFirstOf(STR("NotificationSubsystem")));
         FText text(line.c_str());
         uint8_t params[BANNER_PARAMS_SIZE]{};
         memcpy(params + BANNER_WORLD, &m_controller, sizeof(m_controller));
         text.CopyBorrowedTo(params + BANNER_DATA + BANNER_TEXT);
         params[BANNER_FLAG] = 0; // not newly discovered: no discovery reward
         m_banner_library->ProcessEvent(m_banner_function, params);
-
-        // The push appends one NotificationInfo to the queue (or shows it at once when the queue is idle).
-        if (queue && before >= 0 && queue->num == before + 1 && queue->data) m_our_banners.push_back(queue->data[queue->num - 1]);
     }
 
     static constexpr int32_t BANNER_WORLD = 0x00;
@@ -629,7 +649,7 @@ class DWSmoothCam : public CppUserModBase
         }
     }
 
-    // Flips which shoulder the camera sits over, in every mode that has a side, and saves it to the ini.
+    // Saved to the ini so the Mod Menu page shows it.
     auto swap_shoulder() -> void
     {
         std::lock_guard guard(m_file_mutex);
@@ -644,11 +664,11 @@ class DWSmoothCam : public CppUserModBase
         Output::send<LogLevel::Normal>(STR("[DWSmoothCam] shoulder {}\n"), m_settings.shoulder_swap ? STR("swapped") : STR("as the game has it"));
     }
 
-    // Game thread: applies camera position once a player camera exists and the settings moved.
+    // Game thread.
     auto apply_position() -> void
     {
-        m_tuner.tick(g_view_updates.load());
         auto* camera = static_cast<UObject*>(g_player_camera.load());
+        m_tuner.tick(g_view_updates.load(), camera);
         if (!camera) return;
         auto generation = m_position_generation.load();
         if (generation == m_position_applied_generation) return;
@@ -661,18 +681,32 @@ class DWSmoothCam : public CppUserModBase
         m_position_applied_generation = generation;
     }
 
-    // Reads smoothcam.ini, runs a pending menu save or load, writes the file back if either ran, publishes.
+    // Runs a pending menu save or load and writes the picker back to 0.
     auto reload_settings_locked(bool startup) -> void
     {
+        // Stamp first: a write landing between the two is then seen by the next poll.
+        auto stamp = last_write(SETTINGS_PATH);
         auto content = dwsc::read_file(SETTINGS_PATH);
-        m_settings_stamp = last_write(SETTINGS_PATH);
+        // At startup the key names are read only once, so ride out a Mod Menu rename in progress.
+        for (int i = 0; startup && !content && i < 10; ++i)
+        {
+            Sleep(20);
+            stamp = last_write(SETTINGS_PATH);
+            content = dwsc::read_file(SETTINGS_PATH);
+        }
         if (!content)
         {
-            if (startup) Output::send<LogLevel::Warning>(STR("[DWSmoothCam] smoothcam.ini not found, using defaults\n"));
+            // The Mod Menu replaces the file by rename, so it is briefly absent: keep what is live and retry.
+            if (!startup) return;
+            Output::send<LogLevel::Warning>(STR("[DWSmoothCam] smoothcam.ini not found, using defaults\n"));
             m_settings = dwsc::Settings{};
+            m_toggle_key = m_settings.toggle_key;
+            m_preset_key = m_settings.preset_key;
+            m_shoulder_key = m_settings.shoulder_key;
             publish_locked();
             return;
         }
+        m_settings_stamp = stamp;
 
         auto previous_enabled = m_settings.enabled;
         m_settings = dwsc::parse_settings(*content);
@@ -699,7 +733,8 @@ class DWSmoothCam : public CppUserModBase
             if (auto preset = find_preset(m_settings.preset_load))
             {
                 dwsc::apply_values(m_settings, preset->second);
-                writes.insert(writes.end(), preset->second.begin(), preset->second.end());
+                auto applied = dwsc::preset_of(m_settings);
+                writes.insert(writes.end(), applied.begin(), applied.end());
                 Output::send<LogLevel::Normal>(STR("[DWSmoothCam] loaded preset {}\n"), widen(preset->first));
                 request_banner(STR("SmoothCam: ") + widen(preset->first));
             }
@@ -722,7 +757,6 @@ class DWSmoothCam : public CppUserModBase
         if (!startup) Output::send<LogLevel::Normal>(STR("[DWSmoothCam] settings applied\n"));
     }
 
-    // 101-103 built-in, 1-6 user slot. Returns its name and values.
     auto find_preset(int id) -> std::optional<std::pair<std::string, dwsc::Values>>
     {
         for (auto& p : dwsc::builtin_presets())
@@ -740,7 +774,7 @@ class DWSmoothCam : public CppUserModBase
         return std::nullopt;
     }
 
-    // Built-ins, then saved slots. Writes the values into smoothcam.ini so the menu shows them.
+    // Written into smoothcam.ini so the Mod Menu page shows the loaded values.
     auto cycle_preset() -> void
     {
         std::lock_guard guard(m_file_mutex);
@@ -755,7 +789,7 @@ class DWSmoothCam : public CppUserModBase
 
         auto content = dwsc::read_file(SETTINGS_PATH);
         dwsc::apply_values(m_settings, preset->second);
-        if (content && dwsc::write_file(SETTINGS_PATH, dwsc::rewrite_numbers(*content, preset->second)))
+        if (content && dwsc::write_file(SETTINGS_PATH, dwsc::rewrite_numbers(*content, dwsc::preset_of(m_settings))))
         {
             m_settings_stamp = last_write(SETTINGS_PATH);
         }
@@ -829,7 +863,7 @@ class DWSmoothCam : public CppUserModBase
         }
     }
 
-    // Game thread, every tick: one pointer read unless the pawn changed.
+    // Every tick: one pointer read unless the pawn changed.
     auto on_engine_tick() -> void
     {
         show_pending_banner();
@@ -876,9 +910,8 @@ class DWSmoothCam : public CppUserModBase
         Output::send<LogLevel::Normal>(STR("[DWSmoothCam] following {}\n"), pawn->GetName());
     }
 
-    // ComponentToWorld is not reflected. A root component has no parent, so its world translation equals
-    // its reflected RelativeLocation: find the one other place those three doubles sit, followed by a
-    // (1, 1, 1) scale 0x20 further on (UE 5.5 FTransform: rotation, translation, scale, 0x20 each).
+    // ComponentToWorld is not reflected. A root's world translation equals its RelativeLocation, so the offset
+    // is the one other place those doubles sit with a unit scale 0x20 after (UE 5.5 FTransform layout).
     auto find_translation_offset(UObject* root) -> bool
     {
         auto* relative = root->GetValuePtrByPropertyNameInChain<double>(STR("RelativeLocation"));

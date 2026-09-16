@@ -1,8 +1,5 @@
-// DWSmoothCam settings and presets.
-// scripts/config/smoothcam.ini holds the live values. The Dawnwalker Mod Menu rewrites its numbers in place
-// (mod_settings.ini declares them), and the mod re-reads the file when it changes. Key names (toggle_key,
-// preset_key) are read at startup only: the menu cannot move them.
-// scripts/config/presets.ini holds the six user slots and is written only by the mod.
+// Settings (smoothcam.ini, rewritten in place by the Dawnwalker Mod Menu and re-read on change) and presets
+// (presets.ini, written only by the mod). Key names are read at startup: the menu can only move numbers.
 #pragma once
 
 #define WIN32_LEAN_AND_MEAN
@@ -31,44 +28,44 @@ namespace dwsc
         std::string preset_key = "V";
         std::string shoulder_key = "N";
 
-        double follow_rate_h = 8.0;       // 1/s: how fast the camera catches the character horizontally
-        double follow_rate_v = 10.0;      // 1/s: vertically
+        double follow_rate_h = 8.0;       // 1/s
+        double follow_rate_v = 10.0;      // 1/s
         int curve_h = 2;                  // 0 exponential, 1 linear, 2 smoothstep, 3 ease in-out
         int curve_v = 0;
-        double catchup_distance = 150.0;  // cm of lag at which a curve reaches the full rate
-        double min_rate_scale = 0.35;     // rate multiplier at zero lag, for curves 1-3
+        double catchup_distance = 150.0;  // cm of lag at which a curve reaches full rate
+        double min_rate_scale = 0.35;     // rate multiplier at zero lag, curves 1-3
         double max_lag_h = 70.0;          // cm
         double max_lag_v = 50.0;
-        bool soft_leash = true;           // ease into max_lag instead of stopping hard at it
+        bool soft_leash = true;
 
         bool rotation_smoothing = false;
         double rotation_rate = 20.0;
 
         bool wall_clamp = true;
-        double reset_distance = 500.0;    // cm the character may move in one frame before the camera snaps
-        double reset_gap = 0.25;          // s without a view update (cutscene, photo mode, load) before it snaps
+        double reset_distance = 500.0;    // cm moved in one frame that counts as a teleport
+        double reset_gap = 0.25;          // s without a view update before the camera snaps
 
-        bool show_banner = true;          // announce presets and the toggle with the game's region banner
+        bool show_banner = true;
 
-        // Camera position: written into the game's camera modes (mode_tuning.hpp). Neutral values leave them as shipped.
+        // Camera position (mode_tuning.hpp). These defaults leave the game's modes as shipped.
         bool camera_tuning = true;
         double exploration_distance = 100, exploration_height = 0, exploration_shoulder = 0, exploration_fov = 0;
         double sprint_distance = 100, sprint_height = 0, sprint_shoulder = 0, sprint_fov = 0;
         double combat_distance = 100, combat_height = 0, combat_shoulder = 0, combat_fov = 0;
         double aiming_distance = 100, aiming_height = 0, aiming_shoulder = 0, aiming_fov = 0;
         double traversal_distance = 100, traversal_height = 0, traversal_fov = 0;
-        double game_lag_scale = 1;        // multiplies the game's own lag speeds: higher is tighter
+        double game_lag_scale = 1;        // higher is tighter
         bool shoulder_swap = false;
         double pitch_min = -60, pitch_max = 40;
-        double position_transition = 0.5; // s a position change glides over; 0 snaps
+        double position_transition = 0.5; // s; 0 snaps
 
-        int preset_load = 0;              // menu action: 101-103 built-in, 1-6 slot; the mod sets it back to 0
-        int preset_save = 0;              // menu action: 1-6 slot; the mod sets it back to 0
+        int preset_load = 0;              // menu action, reset to 0: 101-103 built-in, 1-6 slot
+        int preset_save = 0;              // menu action, reset to 0: 1-6 slot
 
         bool log_stats = false;
     };
 
-    // The keys a preset carries: the feel, not the switches, keys or safety limits.
+    // A preset carries the feel only, not switches, keys, safety limits or camera position.
     inline const std::array<const char*, 12> PRESET_KEYS{"follow_rate_h", "follow_rate_v", "curve_h", "curve_v",
                                                           "catchup_distance", "min_rate_scale", "max_lag_h", "max_lag_v",
                                                           "soft_leash", "rotation_smoothing", "rotation_rate", "wall_clamp"};
@@ -85,11 +82,26 @@ namespace dwsc
 
     inline auto set_value(Settings& s, const std::string& key, const std::string& value) -> void
     {
+        // std::stod accepts "nan" and "inf", which clamps pass through.
         auto number = [&](double& out) {
-            try { out = std::stod(value); } catch (...) {}
+            try
+            {
+                double v = std::stod(value);
+                if (std::isfinite(v)) out = v;
+            }
+            catch (...)
+            {
+            }
         };
         auto integer = [&](int& out) {
-            try { out = static_cast<int>(std::lround(std::stod(value))); } catch (...) {}
+            try
+            {
+                double v = std::stod(value);
+                if (std::isfinite(v) && std::abs(v) < 1e6) out = static_cast<int>(std::lround(v));
+            }
+            catch (...)
+            {
+            }
         };
         auto flag = [&](bool& out) {
             try { out = std::stod(value) != 0.0; } catch (...) { out = value == "true" || value == "True"; }
@@ -144,34 +156,43 @@ namespace dwsc
         else if (key == "log_stats") flag(s.log_stats);
     }
 
+    // The Mod Menu's ranges (mod_settings.ini). Presets are written back into the file, and a value outside
+    // its range stops the whole page from opening.
     inline auto sanitize(Settings& s) -> void
     {
         s.curve_h = std::clamp(s.curve_h, 0, 3);
         s.curve_v = std::clamp(s.curve_v, 0, 3);
-        s.follow_rate_h = std::max(s.follow_rate_h, 0.0);
-        s.follow_rate_v = std::max(s.follow_rate_v, 0.0);
-        s.catchup_distance = std::max(s.catchup_distance, 1.0);
-        s.min_rate_scale = std::clamp(s.min_rate_scale, 0.01, 1.0);
-        s.max_lag_h = std::max(s.max_lag_h, 0.0);
-        s.max_lag_v = std::max(s.max_lag_v, 0.0);
-        s.rotation_rate = std::max(s.rotation_rate, 0.0);
-        s.reset_distance = std::max(s.reset_distance, 1.0);
-        s.reset_gap = std::max(s.reset_gap, 0.0);
+        s.follow_rate_h = std::clamp(s.follow_rate_h, 0.5, 30.0);
+        s.follow_rate_v = std::clamp(s.follow_rate_v, 0.5, 30.0);
+        s.catchup_distance = std::clamp(s.catchup_distance, 10.0, 500.0);
+        s.min_rate_scale = std::clamp(s.min_rate_scale, 0.05, 1.0);
+        s.max_lag_h = std::clamp(s.max_lag_h, 0.0, 300.0);
+        s.max_lag_v = std::clamp(s.max_lag_v, 0.0, 200.0);
+        s.rotation_rate = std::clamp(s.rotation_rate, 1.0, 60.0);
+        s.reset_distance = std::clamp(s.reset_distance, 100.0, 3000.0);
+        s.reset_gap = std::clamp(s.reset_gap, 0.05, 2.0);
         for (double* d : {&s.exploration_distance, &s.sprint_distance, &s.combat_distance, &s.aiming_distance, &s.traversal_distance})
         {
-            *d = std::clamp(*d, 25.0, 300.0);
+            *d = std::clamp(*d, 50.0, 250.0);
+        }
+        for (double* h : {&s.exploration_height, &s.sprint_height, &s.combat_height, &s.aiming_height, &s.traversal_height})
+        {
+            *h = std::clamp(*h, -50.0, 100.0);
+        }
+        for (double* o : {&s.exploration_shoulder, &s.sprint_shoulder, &s.combat_shoulder, &s.aiming_shoulder})
+        {
+            *o = std::clamp(*o, -60.0, 100.0);
         }
         for (double* f : {&s.exploration_fov, &s.sprint_fov, &s.combat_fov, &s.aiming_fov, &s.traversal_fov})
         {
-            *f = std::clamp(*f, -40.0, 40.0);
+            *f = std::clamp(*f, -30.0, 30.0);
         }
-        s.game_lag_scale = std::clamp(s.game_lag_scale, 0.1, 20.0);
-        s.pitch_min = std::clamp(s.pitch_min, -89.0, -10.0);
-        s.pitch_max = std::clamp(s.pitch_max, 10.0, 89.0);
-        s.position_transition = std::clamp(s.position_transition, 0.0, 3.0);
+        s.game_lag_scale = std::clamp(s.game_lag_scale, 1.0, 20.0);
+        s.pitch_min = std::clamp(s.pitch_min, -89.0, -30.0);
+        s.pitch_max = std::clamp(s.pitch_max, 20.0, 89.0);
+        s.position_transition = std::clamp(s.position_transition, 0.0, 2.0);
     }
 
-    // key = value lines; ';' and '#' start comments. Sections are ignored.
     inline auto parse_settings(const std::string& content) -> Settings
     {
         Settings s;
@@ -227,7 +248,7 @@ namespace dwsc
         sanitize(s);
     }
 
-    // Replace the number of each key in place, keeping layout and comments, the way the Mod Menu does.
+    // In place, keeping layout and comments, as the Mod Menu does.
     inline auto rewrite_numbers(const std::string& content, const Values& values) -> std::string
     {
         std::string out;
@@ -274,7 +295,7 @@ namespace dwsc
         return buffer.str();
     }
 
-    // Temp file plus rename, so the Mod Menu never reads half a file.
+    // Temp file plus rename, so the Mod Menu never reads a half-written file.
     inline auto write_file(const std::string& path, const std::string& content) -> bool
     {
         auto tmp = path + ".dwsc.tmp";
@@ -294,7 +315,7 @@ namespace dwsc
         Values values;
     };
 
-    // Menu ids 101-103, cycled in this order. Balanced is the shipped default. Values follow PRESET_KEYS.
+    // Menu ids 101-103, in cycle order. Balanced matches the shipped defaults.
     inline auto builtin_presets() -> const std::vector<NamedPreset>&
     {
         static const std::vector<NamedPreset> presets{
@@ -311,7 +332,6 @@ namespace dwsc
         return presets;
     }
 
-    // presets.ini: [Slot1] .. [Slot6], each with PRESET_KEYS.
     inline auto read_slots(const std::string& path) -> std::map<int, Values>
     {
         std::map<int, Values> slots;
@@ -332,9 +352,13 @@ namespace dwsc
             }
             auto eq = line.find('=');
             if (!current || eq == std::string::npos) continue;
+            // A hand-edited slot must not carry preset_load, which would re-trigger the load forever.
+            auto key = trim(line.substr(0, eq));
+            if (std::find_if(PRESET_KEYS.begin(), PRESET_KEYS.end(), [&](const char* k) { return key == k; }) == PRESET_KEYS.end()) continue;
             try
             {
-                slots[current].emplace_back(trim(line.substr(0, eq)), std::stod(trim(line.substr(eq + 1))));
+                double v = std::stod(trim(line.substr(eq + 1)));
+                if (std::isfinite(v)) slots[current].emplace_back(key, v);
             }
             catch (...)
             {
