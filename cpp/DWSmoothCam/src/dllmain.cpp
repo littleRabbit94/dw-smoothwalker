@@ -15,7 +15,9 @@
 #include <string>
 #include <cstdint>
 #include <cstring>
+#include <algorithm>
 #include <mutex>
+#include <vector>
 
 #include <DynamicOutput/DynamicOutput.hpp>
 #include <Input/KeyDef.hpp>
@@ -84,6 +86,7 @@ namespace
     std::atomic<uint64_t> g_clamped{0};
     std::atomic<double> g_lag_sum{0.0};
     std::atomic<uint64_t> g_view_updates{0}; // GetCameraView calls for the player's camera: the camera is updating
+    std::atomic<int64_t> g_last_view_qpc{0};  // QPC time of the latest of them
     std::atomic<uint64_t> g_calls_timed{0}; // smooth_view calls, and QPC ticks spent in them
     std::atomic<uint64_t> g_ticks_spent{0};
 
@@ -271,6 +274,9 @@ namespace
         g_original(self, delta_time, desired_view);
         if (self != g_player_camera.load(std::memory_order_relaxed)) return;
         g_view_updates.fetch_add(1, std::memory_order_relaxed);
+        LARGE_INTEGER stamp{};
+        QueryPerformanceCounter(&stamp);
+        g_last_view_qpc.store(stamp.QuadPart, std::memory_order_relaxed);
         if (!g_enabled.load(std::memory_order_relaxed)) return;
         if (!g_log_stats.load(std::memory_order_relaxed))
         {
@@ -283,6 +289,16 @@ namespace
         QueryPerformanceCounter(&stop);
         g_calls_timed.fetch_add(1, std::memory_order_relaxed);
         g_ticks_spent.fetch_add(static_cast<uint64_t>(stop.QuadPart - start.QuadPart), std::memory_order_relaxed);
+    }
+
+    // The player's camera updated within the last quarter second. False under a pause (the Mod Menu, the
+    // pause menu, a load), in a cutscene and in the free camera: no GetCameraView calls reach the hook.
+    auto camera_live() -> bool
+    {
+        LARGE_INTEGER now{};
+        QueryPerformanceCounter(&now);
+        auto last = g_last_view_qpc.load(std::memory_order_relaxed);
+        return last != 0 && static_cast<double>(now.QuadPart - last) / static_cast<double>(g_qpc_frequency.QuadPart) < 0.25;
     }
 
     auto parse_key(const std::string& name) -> int
@@ -325,7 +341,7 @@ class DWSmoothCam : public CppUserModBase
     DWSmoothCam() : CppUserModBase()
     {
         ModName = STR("DWSmoothCam");
-        ModVersion = STR("0.7.1");
+        ModVersion = STR("0.7.3");
         ModDescription = STR("Frame-interpolated third-person camera");
         ModAuthors = STR("littleRabbit6");
 
@@ -376,8 +392,24 @@ class DWSmoothCam : public CppUserModBase
             Output::send<LogLevel::Normal>(STR("[DWSmoothCam] smoothing {}\n"), now ? STR("on") : STR("off"));
             request_banner(now ? STR("SmoothCam: On") : STR("SmoothCam: Off"));
         });
-        bind(m_preset_key, STR("preset_key"), [this]() { cycle_preset(); });
-        bind(m_shoulder_key, STR("shoulder_key"), [this]() { swap_shoulder(); });
+        // V and N write smoothcam.ini. Under a pause the Mod Menu may have that file open, and it refuses an
+        // Apply once the file changed behind it, so both keys only act while the camera is live.
+        bind(m_preset_key, STR("preset_key"), [this]() {
+            if (!camera_live())
+            {
+                Output::send<LogLevel::Normal>(STR("[DWSmoothCam] preset key ignored while the camera is paused\n"));
+                return;
+            }
+            cycle_preset();
+        });
+        bind(m_shoulder_key, STR("shoulder_key"), [this]() {
+            if (!camera_live())
+            {
+                Output::send<LogLevel::Normal>(STR("[DWSmoothCam] shoulder key ignored while the camera is paused\n"));
+                return;
+            }
+            swap_shoulder();
+        });
 
         m_last_report = m_last_poll = std::chrono::steady_clock::now();
     }
@@ -433,20 +465,63 @@ class DWSmoothCam : public CppUserModBase
     // Banner: requested from any thread, shown from the engine tick.
     std::mutex m_banner_mutex;
     std::wstring m_banner_text;
+    std::chrono::steady_clock::time_point m_banner_due{}; // under m_banner_mutex
     std::atomic<bool> m_banner_pending{false};
+    std::vector<UObject*> m_our_banners; // game thread: NotificationInfos this mod pushed; compared, never dereferenced
+    int32_t m_queue_offset = -1;         // NotificationSubsystem::NotificationQueue
     std::atomic<bool> m_show_banner{true};
     int m_banner_state = 0; // 0 unresolved, 1 ready, -1 unavailable (game thread only)
     UFunction* m_banner_function = nullptr;
     UObject* m_banner_library = nullptr;
 
+    // Debounced: a burst of presses shows one banner, with the last text, BANNER_SETTLE after the last press.
     auto request_banner(std::wstring text) -> void
     {
         if (!m_show_banner.load()) return;
         {
             std::lock_guard guard(m_banner_mutex);
             m_banner_text = std::move(text);
+            m_banner_due = std::chrono::steady_clock::now() + BANNER_SETTLE;
         }
         m_banner_pending.store(true);
+    }
+
+    static constexpr auto BANNER_SETTLE = std::chrono::milliseconds(400);
+
+    struct ObjectArray
+    {
+        UObject** data;
+        int32_t num;
+        int32_t max;
+    };
+
+    // Removes this mod's banners that are still waiting in the game's queue, so presses never stack up a
+    // backlog. The one on screen is not in the queue and is left alone: ending a notification its widget
+    // is showing crashed the game (docs/design.md, "Rapid banners queue").
+    auto drop_stale_banners(UObject* subsystem) -> void
+    {
+        if (!subsystem || m_our_banners.empty()) return;
+        if (m_queue_offset < 0)
+        {
+            auto* slot = subsystem->GetValuePtrByPropertyNameInChain<void>(STR("NotificationQueue"));
+            if (!slot) return;
+            m_queue_offset = static_cast<int32_t>(reinterpret_cast<uint8_t*>(slot) - reinterpret_cast<uint8_t*>(subsystem));
+        }
+        auto* queue = reinterpret_cast<ObjectArray*>(reinterpret_cast<uint8_t*>(subsystem) + m_queue_offset);
+        if (queue->num < 0 || queue->num > queue->max || queue->max > 4096 || (queue->num > 0 && !queue->data)) return;
+
+        int32_t kept = 0;
+        std::vector<UObject*> still_queued;
+        for (int32_t i = 0; i < queue->num; ++i)
+        {
+            auto* entry = queue->data[i];
+            bool ours = std::find(m_our_banners.begin(), m_our_banners.end(), entry) != m_our_banners.end();
+            if (ours) continue;
+            queue->data[kept++] = entry;
+        }
+        queue->num = kept;
+        // Every banner of ours that was waiting is now gone; any other one was shown or collected.
+        m_our_banners.clear();
     }
 
     // PushRegionEnteredNotification(WorldContextObject, RegionData, IsNewlyDiscovered): the region banner,
@@ -488,14 +563,24 @@ class DWSmoothCam : public CppUserModBase
     auto show_pending_banner() -> void
     {
         if (!m_banner_pending.load() || !m_controller) return;
+        std::wstring line;
+        {
+            std::lock_guard guard(m_banner_mutex);
+            if (std::chrono::steady_clock::now() < m_banner_due) return;
+            line = m_banner_text;
+        }
         if (m_banner_state == 0) resolve_banner();
         m_banner_pending.store(false);
         if (m_banner_state != 1) return;
 
-        std::wstring line;
+        auto* subsystem = UObjectGlobals::FindFirstOf(STR("NotificationSubsystem"));
+        drop_stale_banners(subsystem);
+        int32_t before = -1;
+        ObjectArray* queue = nullptr;
+        if (subsystem && m_queue_offset >= 0)
         {
-            std::lock_guard guard(m_banner_mutex);
-            line = m_banner_text;
+            queue = reinterpret_cast<ObjectArray*>(reinterpret_cast<uint8_t*>(subsystem) + m_queue_offset);
+            before = queue->num;
         }
         FText text(line.c_str());
         uint8_t params[BANNER_PARAMS_SIZE]{};
@@ -503,6 +588,9 @@ class DWSmoothCam : public CppUserModBase
         text.CopyBorrowedTo(params + BANNER_DATA + BANNER_TEXT);
         params[BANNER_FLAG] = 0; // not newly discovered: no discovery reward
         m_banner_library->ProcessEvent(m_banner_function, params);
+
+        // The push appends one NotificationInfo to the queue (or shows it at once when the queue is idle).
+        if (queue && before >= 0 && queue->num == before + 1 && queue->data) m_our_banners.push_back(queue->data[queue->num - 1]);
     }
 
     static constexpr int32_t BANNER_WORLD = 0x00;
@@ -552,8 +640,8 @@ class DWSmoothCam : public CppUserModBase
             if (dwsc::write_file(SETTINGS_PATH, dwsc::rewrite_numbers(*content, values))) m_settings_stamp = last_write(SETTINGS_PATH);
         }
         publish_locked();
+        // No banner: the camera moving to the other shoulder is the feedback.
         Output::send<LogLevel::Normal>(STR("[DWSmoothCam] shoulder {}\n"), m_settings.shoulder_swap ? STR("swapped") : STR("as the game has it"));
-        request_banner(m_settings.shoulder_swap ? STR("SmoothCam: Shoulder swapped") : STR("SmoothCam: Shoulder default"));
     }
 
     // Game thread: applies camera position once a player camera exists and the settings moved.
