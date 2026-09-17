@@ -64,6 +64,8 @@ without relying on BeginPlay, EndPlay or LoadMap (see "Loader profiles").
 `ComponentToWorld` is not reflected. On the root (capsule, no parent) its translation equals
 `RelativeLocation`, so the mod scans the component for that triple followed by a (1, 1, 1) scale 0x20
 later and requires exactly one match. Measured: translation at **0x200**, `RelativeLocation` at 0x140.
+A failed scan (a pawn at the origin matches twice) is retried for the same pawn after 2 s, doubling to 60 s;
+it used to leave smoothing off for that pawn's whole life.
 
 ### Follow
 
@@ -78,12 +80,20 @@ instant and only following lags. Optional rotation smoothing slerps the view and
 ### Walls
 
 While the game's camera sits closer than 0.85 of its recent distance (collision pulled it in), the result is
-kept no farther from the pivot than the game's camera.
+pulled toward the game's distance from the pivot: not at all at 0.85, fully at 0.65 and closer, smoothstep
+between. The threshold used to be hard, and the game's own modes shorten the arm as well (aiming 250 to
+about 85 cm, CombatNear to 150): running away from the camera, the whole lag along the arm (up to 70 cm on
+Balanced) went in one frame as the distance crossed 0.85, and came back in one. A position write that
+shortens the distance more than 15 % (Cinematic to Tight, 312 to 225 cm) tripped it too, from about 0.2 s to
+1 s after V, so for `position_transition` + 0.3 s after a mode write the recent distance tracks the game's
+and the clamp stays off. The recent distance settles at 1/s, so a real wall at half distance lets go after
+about 1.7 s.
 
 ### Snaps
 
 On toggle (0.4.0), more than `reset_gap` (0.25 s) without a view (cutscene, free camera, load), or a pivot
-jump over `reset_distance` (500 cm). The world delta drives the step, so a paused frame holds the lag.
+jump over `reset_distance` (500 cm). The world delta drives the step. Leaving a pause is a snap as well:
+the camera does not update under one, so the gap exceeds `reset_gap`.
 
 ### Crossfade
 
@@ -93,7 +103,10 @@ presets mid-motion, plus instant jumps from a new lag limit, rotation smoothing 
 cuts snap (startup, player or pawn change, `reset_gap`, `reset_distance`). A tuning generation (read under
 the existing SRW lock), an O generation and a mode-write generation start a smoothstep crossfade over
 `position_transition` (0 = none) from the last output, as offsets from the game's own view so moving and
-turning during it do not lag; world delta, so a pause holds it. The smoothing state itself is not rewritten.
+turning during it do not lag; world delta, so slow motion slows it with the game. A pause does not hold it:
+the camera stops updating under one (0 calls/s), so the first update after it exceeds `reset_gap` and is a cut. The smoothing state itself is not rewritten.
+A publish bumps the tuning generation only when a hook value changed: N and the switches change none, and a
+fade they started held part of the old lag for the transition time.
 
 ## Camera modes and position tuning
 
@@ -195,18 +208,28 @@ the centre (0.7.4).
   values. At unload the CDOs get the originals back; live instances keep their values until the game pushes
   new modes. `restore()` re-captures before writing, and does nothing unless this session applied. A neutral
   apply was checked live: every value equal to the shipped one.
-- **Where writes go.** Every captured CDO (new instances copy it), then every live `RebelCameraModeTPP`
-  instance found with `FindAllOf` (on apply only, never per tick). Instances are looked up at each flip stage.
+- **Where writes go.** Every captured CDO (new instances copy it), then the player camera's live modes. A
+  mode's outer is the `FollowCamera` it was pushed on (checked live), so each apply makes one
+  `ForEachUObject` pass comparing the outer pointer, then the class against the captured classes, and keeps
+  the hits as `LiveRef`s for the flip's two blend-time writes, each checked against the object array before
+  use. Until then every apply and both flip stages called `FindAllOf("RebelCameraModeTPP")`, which compares
+  names up every object's class chain: measured 58-64 ms a call on the game thread (435,100 objects), so
+  each N or V dropped 3-4 frames at the press, again on the next frame and again 0.25 s after the glide.
+  The apply log line carries its own duration. Modes on other cameras are left alone: new instances copy
+  the CDO and a new player camera gets its own apply.
 - **The flip waits for the camera.** `CameraOffsets` is only read on a camera type change. 0.7.0 flipped the
   type over two engine ticks, and an Apply from the Mod Menu landed while the menu had the world paused:
   the camera never updated between the two flips and the new distance showed only later. 0.7.1 counts
   `GetCameraView` calls for the player's camera (`g_view_updates`) and advances each stage only after one:
-  pending, away, back. A request during a flip runs again after it. The flip abandons if the player camera
+  pending, away, back. A request while away runs again after the switch back; one during the glide back
+  starts over at once (queued behind the glide, a quick second press moved the camera in two steps). The flip abandons if the player camera
   changes, waits while the player camera is briefly null, and switches back only from the type it set
   (0.7.4).
 - **The flip glides.** With the type blend at 0 a shoulder swap snapped. The flip now sets the live modes'
   `CameraTypeBlendArgs.BlendTime` to `position_transition` (0.5 s default; 0 snaps) and restores the game's
-  value 0.25 s after the blend ends. Verified afterwards: live mode and CDO back at 1.00.
+  value 0.25 s after the blend ends, counted in the world time of the player's camera updates (the hook sums
+  its `DeltaTime`), since the blend runs on world time: a pause or slow motion mid-glide must not put the
+  blend time back early. An unload mid-glide restores it too. Verified afterwards: live mode and CDO back at 1.00.
 
 ## Presets and the Mod Menu page
 
@@ -368,7 +391,9 @@ camera. The log says when a press was ignored. `O` writes nothing and stays live
 - **Debounced, own entries thinned** (0.7.3). `request_banner` is debounced: the banner goes out 0.4 s after
   the last request, with the last text. Before the next push the DLL removes its own entries that are still
   waiting, compacting the TArray in place on the game thread. The game's own notifications are never
-  touched, and a banner already on screen plays out (about 3-4 s). Shoulder swaps show no banner.
+  touched, and a banner already on screen plays out (about 3-4 s). Shoulder swaps show no banner. The
+  subsystem is looked up once and kept as a `LiveRef`: `FindFirstOf("NotificationSubsystem")` measured 28 ms,
+  0.4 s into every V glide.
 - **Ours are recognised by class and text** (0.7.4). No addresses are kept: a queued entry is ours only if it
   is a `RegionEnteredNotificationInfo` whose text starts with `SmoothCam:`. (0.7.3 recorded the new last
   entry of `NotificationQueue`, found by reflection, straight after each push and compared pointers only; a

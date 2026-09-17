@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <DynamicOutput/DynamicOutput.hpp>
@@ -183,7 +184,7 @@ namespace dwsc
         }
 
         // Without a LoadMap hook, forget() may not run before a class unloads; every use of a captured CDO or
-        // class pointer is preceded by this check: capture(), for_each_instance() (hence set_blend()).
+        // class pointer is preceded by this check: capture(), scan_instances(), for_each_instance() (hence set_blend()).
         auto drop_dead_classes() -> void
         {
             for (auto& mode : m_modes)
@@ -209,10 +210,12 @@ namespace dwsc
             m_flip_stage = Idle;
             m_flip_again = false;
             m_flip_camera = nullptr;
+            m_live.clear();
         }
 
         auto apply(const PositionTuning& tuning, UObject* player_camera) -> void
         {
+            auto started = std::chrono::steady_clock::now();
             capture();
             if (!m_layout_ok) return;
             int classes = 0;
@@ -223,6 +226,7 @@ namespace dwsc
                 ++classes;
             }
             int live = 0;
+            scan_instances(player_camera);
             for_each_instance([&](UObject* instance, Mode& mode) {
                 write(instance, mode, tuning);
                 ++live;
@@ -230,7 +234,8 @@ namespace dwsc
             m_applied = true;
             m_transition = static_cast<float>(tuning.transition);
             request_flip(player_camera);
-            Output::send<LogLevel::Normal>(STR("[DWSmoothCam] camera position applied: {} mode classes, {} live modes\n"), classes, live);
+            auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+            Output::send<LogLevel::Normal>(STR("[DWSmoothCam] camera position applied: {} mode classes, {} live modes, {:.1f} ms\n"), classes, live, ms);
         }
 
         // At unload, after the mod's callbacks are gone. Live instances keep their values until the game pushes
@@ -240,6 +245,7 @@ namespace dwsc
             if (!m_applied) return;
             capture(); // forget() may have dropped the CDO pointers since the last apply
             if (!m_layout_ok) return;
+            if (m_flip_stage != Idle) set_blend(false); // unloaded mid-glide: the game's blend time back, a plain write
             PositionTuning neutral;
             neutral.active = false;
             for (auto& mode : m_modes)
@@ -250,7 +256,9 @@ namespace dwsc
 
         // Once per engine tick. A stage advances only after the player's camera has updated, so a flip
         // requested under a pause (the Mod Menu) waits for the world instead of running unseen.
-        auto tick(uint64_t view_updates, UObject* player_camera) -> void
+        // view_seconds: world time of the player's camera updates. The glide runs on world time, so the wait for
+        // its end must too, or a pause or slow motion mid-glide restores the blend time while it still blends.
+        auto tick(uint64_t view_updates, double view_seconds, UObject* player_camera) -> void
         {
             bool updated = view_updates != m_flip_seen;
             m_flip_seen = view_updates;
@@ -273,6 +281,7 @@ namespace dwsc
                 auto type = get_camera_type(m_flip_camera);
                 if (type < 1 || type > 3)
                 {
+                    set_blend(false); // a flip restarted from Back still holds the transition blend time
                     m_flip_stage = Idle;
                     return;
                 }
@@ -286,13 +295,12 @@ namespace dwsc
             case Away:
                 // If the game changed the type itself meanwhile (entering an interior), its choice stands.
                 if (get_camera_type(m_flip_camera) == m_flip_away) set_camera_type(m_flip_camera, m_flip_home);
-                m_flip_back_at = std::chrono::steady_clock::now();
+                m_flip_back_at = view_seconds;
                 m_flip_stage = Back;
                 return;
             case Back: {
                 // The running blend keeps the settings it started with.
-                auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - m_flip_back_at).count();
-                if (elapsed < m_transition + 0.25) return;
+                if (view_seconds - m_flip_back_at < m_transition + 0.25) return;
                 set_blend(false);
                 m_flip_stage = m_flip_again ? Pending : Idle;
                 m_flip_again = false;
@@ -342,6 +350,7 @@ namespace dwsc
             for (auto& spec : mode_classes()) modes.push_back({spec});
             return modes;
         }();
+        std::vector<std::pair<LiveRef, size_t>> m_live; // the player's live modes at the last apply, with their m_modes index
         Offsets m_off;
         bool m_layout_ok = false;
         bool m_layout_tried = false;
@@ -364,7 +373,7 @@ namespace dwsc
         uint8_t m_flip_home = 0, m_flip_away = 0;
         uint64_t m_flip_seen = 0;
         float m_transition = 0.5f;
-        std::chrono::steady_clock::time_point m_flip_back_at{};
+        double m_flip_back_at = 0.0; // view_seconds at the switch back
 
         static auto offset_in(UStruct* owner, const wchar_t* name) -> int32_t
         {
@@ -444,23 +453,38 @@ namespace dwsc
             memcpy(reinterpret_cast<uint8_t*>(object) + offset, &value, sizeof(value));
         }
 
-        // Live instances are looked up each time rather than kept: a popped mode can be collected at any GC.
+        // The player's live modes, once per apply: objects whose outer is the camera and whose class is a
+        // captured mode. Not FindAllOf: its name compares up every class chain took 60 ms a call, three calls a
+        // swap. Other cameras' modes are left alone: new instances copy the CDO, and a new player camera gets
+        // its own apply.
+        auto scan_instances(UObject* player_camera) -> void
+        {
+            drop_dead_classes();
+            m_live.clear();
+            if (!player_camera) return;
+            UObjectGlobals::ForEachUObject([&](UObject* object, int32, int32) {
+                if (object->GetOuterPrivate() != player_camera) return LoopAction::Continue;
+                auto* cls = object->GetClassPrivate();
+                for (size_t i = 0; i < m_modes.size(); ++i)
+                {
+                    if (!m_modes[i].captured || m_modes[i].cls != cls || object == m_modes[i].cdo) continue;
+                    m_live.push_back({LiveRef::of(object), i});
+                    break;
+                }
+                return LoopAction::Continue;
+            });
+        }
+
+        // LiveRefs, not pointers: a popped mode can be collected at any GC.
         template <typename Visit>
         auto for_each_instance(Visit&& visit) -> void
         {
             drop_dead_classes();
-            std::vector<UObject*> instances;
-            UObjectGlobals::FindAllOf(STR("RebelCameraModeTPP"), instances);
-            for (auto* instance : instances)
+            for (auto& [ref, index] : m_live)
             {
-                if (!instance) continue;
-                auto* cls = instance->GetClassPrivate();
-                for (auto& mode : m_modes)
-                {
-                    if (!mode.captured || mode.cls != cls || instance == mode.cdo) continue;
-                    visit(instance, mode);
-                    break;
-                }
+                auto& mode = m_modes[index];
+                if (!mode.captured || mode.cls != ref.cls || !ref.alive()) continue;
+                visit(ref.object, mode);
             }
         }
 
@@ -559,14 +583,16 @@ namespace dwsc
             camera->ProcessEvent(m_set_type, params);
         }
 
-        // A request during a running flip runs again after it, so the latest values are the ones read.
+        // A request while away runs again after the switch back, so the latest values are read. One during the
+        // glide back restarts at once: queued behind the glide, a quick second press moved the camera in two steps.
         auto request_flip(UObject* camera) -> void
         {
             if (!camera) return;
-            if (m_flip_stage == Idle)
+            if (m_flip_stage == Idle || (m_flip_stage == Back && camera == m_flip_camera))
             {
                 m_flip_camera = camera;
                 m_flip_stage = Pending;
+                m_flip_again = false;
             }
             else if (m_flip_stage != Pending) m_flip_again = true;
         }

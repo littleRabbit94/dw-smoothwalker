@@ -66,13 +66,23 @@ namespace
         bool soft_leash, rotation_smoothing, wall_clamp;
         double rotation_rate, reset_distance, reset_gap;
         double transition;   // position_transition: the crossfade after a change
-        uint64_t generation; // bumped by every publish
+        uint64_t generation; // bumped by a publish that changed a value
     };
 
     auto tuning_of(const dwsc::Settings& s) -> Tuning
     {
         return {s.follow_rate_h, s.follow_rate_v, s.curve_h, s.curve_v, s.catchup_distance, s.min_rate_scale, s.max_lag_h, s.max_lag_v,
                 s.soft_leash, s.rotation_smoothing, s.wall_clamp, s.rotation_rate, s.reset_distance, s.reset_gap, s.position_transition, 0};
+    }
+
+    // Every field but generation.
+    auto same_values(const Tuning& a, const Tuning& b) -> bool
+    {
+        return a.follow_rate_h == b.follow_rate_h && a.follow_rate_v == b.follow_rate_v && a.curve_h == b.curve_h && a.curve_v == b.curve_v &&
+               a.catchup_distance == b.catchup_distance && a.min_rate_scale == b.min_rate_scale && a.max_lag_h == b.max_lag_h &&
+               a.max_lag_v == b.max_lag_v && a.soft_leash == b.soft_leash && a.rotation_smoothing == b.rotation_smoothing &&
+               a.wall_clamp == b.wall_clamp && a.rotation_rate == b.rotation_rate && a.reset_distance == b.reset_distance &&
+               a.reset_gap == b.reset_gap && a.transition == b.transition;
     }
 
     using GetCameraViewFn = void(__fastcall*)(void* self, float delta_time, void* desired_view);
@@ -99,6 +109,7 @@ namespace
     std::atomic<double> g_lag_sum{0.0};
     std::atomic<uint64_t> g_view_updates{0}; // player-camera updates: flip stages advance on these
     std::atomic<int64_t> g_last_view_qpc{0};  // V and N act only while this is recent
+    std::atomic<double> g_view_seconds{0.0};  // world time over those updates: the flip's glide runs on it
     std::atomic<uint64_t> g_calls_timed{0};
     std::atomic<uint64_t> g_ticks_spent{0};
 
@@ -137,6 +148,7 @@ namespace
         dwsc::Vec3 pivot_last{};
         dwsc::Quat rotation_smoothed{};
         double nominal_distance = 0.0;
+        double nominal_hold = 0.0; // s left in which nominal_distance tracks the game: a position write is gliding
         LARGE_INTEGER last_call{};
 
         // Last view handed to the game, relative to the game's own view that frame. The arm is rebuilt from the
@@ -166,6 +178,27 @@ namespace
     {
         if (limit <= 0.0) return 0.0;
         return soft ? limit * std::tanh(lag / limit) : std::min(lag, limit);
+    }
+
+    // How much of the wall clamp applies: 0 at 0.85 of the usual distance, 1 at 0.65 and closer. Eased because the
+    // game's own modes (aiming, close combat) cross 0.85 too, and a hard threshold dropped the whole lag in one frame.
+    auto wall_weight(double game_distance, double nominal_distance) -> double
+    {
+        if (!(nominal_distance > 0.0)) return 0.0;
+        double x = std::clamp((0.85 - game_distance / nominal_distance) / 0.20, 0.0, 1.0);
+        return x * x * (3.0 - 2.0 * x);
+    }
+
+    // Pulls result toward the game's distance from the pivot by weight; true if it moved.
+    auto clamp_to_wall(dwsc::Vec3& result, const dwsc::Vec3& pivot, double game_distance, double weight) -> bool
+    {
+        if (weight <= 0.0) return false;
+        dwsc::Vec3 out = result - pivot;
+        double out_distance = dwsc::length(out);
+        if (!(out_distance > game_distance) || out_distance <= 0.0) return false;
+        double limit = out_distance + (game_distance - out_distance) * weight;
+        result = pivot + out * (limit / out_distance);
+        return true;
     }
 
     auto finite(const dwsc::Vec3& v) -> bool
@@ -215,6 +248,8 @@ namespace
         auto toggle = g_toggle_generation.load(std::memory_order_relaxed);
         auto position = g_position_generation.load(std::memory_order_relaxed);
         bool changed = t.generation != g_follow.seen_tuning || toggle != g_follow.seen_toggle || position != g_follow.seen_position;
+        // A shorter distance gliding in is not a wall. No wall clamp until it has landed.
+        if (position != g_follow.seen_position) g_follow.nominal_hold = t.transition + 0.3;
         g_follow.seen_tuning = t.generation;
         g_follow.seen_toggle = toggle;
         g_follow.seen_position = position;
@@ -223,7 +258,8 @@ namespace
         g_follow.last_call = now;
         g_follow.pivot_last = pivot;
 
-        // The world delta: 0 while paused, so a paused frame holds the lag and the crossfade.
+        // The world delta, so slow motion slows the follow and the crossfade with the game. A pause is not
+        // held: the camera stops updating under one, and the first update after it is a cut (reset_gap).
         double dt = std::clamp(static_cast<double>(delta_time), 0.0, 0.1);
 
         dwsc::Vec3 result = camera;
@@ -301,15 +337,14 @@ namespace
             double game_distance = dwsc::length(arm);
             double settle = 1.0 - std::exp(-1.0 * dt);
             g_follow.nominal_distance = std::max(game_distance, g_follow.nominal_distance + (game_distance - g_follow.nominal_distance) * settle);
-            if (t.wall_clamp && game_distance < 0.85 * g_follow.nominal_distance)
+            if (g_follow.nominal_hold > 0.0)
             {
-                dwsc::Vec3 out = result - pivot;
-                double out_distance = dwsc::length(out);
-                if (out_distance > game_distance && out_distance > 0.0)
-                {
-                    result = pivot + out * (game_distance / out_distance);
-                    g_clamped.fetch_add(1, std::memory_order_relaxed);
-                }
+                g_follow.nominal_hold -= dt;
+                g_follow.nominal_distance = game_distance;
+            }
+            if (t.wall_clamp && clamp_to_wall(result, pivot, game_distance, wall_weight(game_distance, g_follow.nominal_distance)))
+            {
+                g_clamped.fetch_add(1, std::memory_order_relaxed);
             }
 
             if (g_log_stats.load(std::memory_order_relaxed))
@@ -357,12 +392,9 @@ namespace
             // The faded part of the lag was never clamped: keep it in front of a wall the game pulled in for.
             double game_distance = dwsc::length(game_arm);
             // The O-off fade too: it ends at the game's view, so clamping to the game's distance never moves the endpoint.
-            if ((!enabled || g_follow.valid) && t.wall_clamp && g_follow.nominal_distance > 0.0 &&
-                game_distance < 0.85 * g_follow.nominal_distance)
+            if ((!enabled || g_follow.valid) && t.wall_clamp)
             {
-                dwsc::Vec3 out = result - pivot;
-                double out_distance = dwsc::length(out);
-                if (out_distance > game_distance && out_distance > 0.0) result = pivot + out * (game_distance / out_distance);
+                clamp_to_wall(result, pivot, game_distance, wall_weight(game_distance, g_follow.nominal_distance));
             }
         }
 
@@ -400,6 +432,11 @@ namespace
         g_original(self, delta_time, desired_view);
         if (self != g_player_camera.load(std::memory_order_relaxed)) return;
         g_view_updates.fetch_add(1, std::memory_order_relaxed);
+        // One writer: the player's camera updates in sequence.
+        if (std::isfinite(delta_time) && delta_time > 0.0f)
+        {
+            g_view_seconds.store(g_view_seconds.load(std::memory_order_relaxed) + delta_time, std::memory_order_relaxed);
+        }
         LARGE_INTEGER stamp{};
         QueryPerformanceCounter(&stamp);
         g_last_view_qpc.store(stamp.QuadPart, std::memory_order_relaxed);
@@ -619,6 +656,9 @@ class DWSmoothCam : public CppUserModBase
     dwsc::LiveRef m_controller, m_pawn, m_camera, m_root;
     std::atomic<bool> m_player_known{false}; // m_controller held; read by request_banner on the UE4SS update thread
     int32_t m_pawn_offset = -1; // AController::Pawn, same class every map
+    bool m_offset_retry = false; // find_translation_offset failed for m_pawn; game thread only
+    std::chrono::steady_clock::time_point m_next_offset_scan{};
+    std::chrono::seconds m_offset_wait{2};
     std::atomic<bool> m_find_requested{false};
     std::chrono::steady_clock::time_point m_next_find{};
     std::chrono::seconds m_find_interval{2}; // FindFirstOf fallback: 2 s, doubling to 60 s while nothing is found
@@ -661,6 +701,7 @@ class DWSmoothCam : public CppUserModBase
     int m_banner_state = 0; // 0 unresolved, 1 ready, -1 unavailable (game thread only)
     UFunction* m_banner_function = nullptr;
     UObject* m_banner_library = nullptr;
+    dwsc::LiveRef m_notifications; // NotificationSubsystem, game thread only, checked live before use
 
     // Debounced: a burst of presses shows one banner, with the last text.
     // Dropped without a player: a banner queued at the main menu would show minutes later, after a load.
@@ -773,7 +814,9 @@ class DWSmoothCam : public CppUserModBase
         if (m_banner_state == 0) resolve_banner();
         if (m_banner_state != 1) return;
 
-        drop_stale_banners(UObjectGlobals::FindFirstOf(STR("NotificationSubsystem")));
+        // Cached: FindFirstOf walks the whole object array (28 ms measured), and this runs mid-glide after V.
+        if (!m_notifications.alive()) m_notifications = dwsc::LiveRef::of(UObjectGlobals::FindFirstOf(STR("NotificationSubsystem")));
+        drop_stale_banners(m_notifications.object);
         FText text(line.c_str());
         uint8_t params[BANNER_PARAMS_SIZE]{};
         memcpy(params + BANNER_WORLD, &m_controller.object, sizeof(m_controller.object));
@@ -803,20 +846,25 @@ class DWSmoothCam : public CppUserModBase
     auto publish_locked() -> void
     {
         // No g_reset: the hook crossfades on the new generation instead of snapping the lag away mid-motion.
+        // Only a changed value starts one: N and the switches change none, and a fade holds part of the old lag.
+        auto tuning = tuning_of(m_settings);
         AcquireSRWLockExclusive(&g_tuning_lock);
-        g_tuning = tuning_of(m_settings);
-        g_tuning.generation = ++m_tuning_generation;
+        if (!same_values(tuning, g_tuning))
+        {
+            tuning.generation = ++m_tuning_generation;
+            g_tuning = tuning;
+        }
         ReleaseSRWLockExclusive(&g_tuning_lock);
         g_log_stats.store(m_settings.log_stats);
         m_show_banner.store(m_settings.show_banner);
 
         auto position = dwsc::position_of(m_settings);
         std::lock_guard guard(m_position_mutex);
-        if (!(position == m_position))
-        {
-            m_position = position;
-            m_position_generation.fetch_add(1);
-        }
+        // camera_tuning off before and after: every write would be the game's own value, and the apply's flip
+        // would swing the camera for nothing. The values are kept, so switching it on applies the latest.
+        bool idle = !position.active && !m_position.active;
+        if (!(position == m_position) && !idle) m_position_generation.fetch_add(1);
+        m_position = position;
     }
 
     // Written back to the ini by flush_locked, so the Mod Menu page shows it.
@@ -828,14 +876,15 @@ class DWSmoothCam : public CppUserModBase
         publish_locked();
         mark_pending_locked();
         // No banner: the camera moving to the other shoulder is the feedback.
-        Output::send<LogLevel::Normal>(STR("[DWSmoothCam] shoulder {}\n"), m_settings.shoulder_swap ? STR("swapped") : STR("as the game has it"));
+        Output::send<LogLevel::Normal>(STR("[DWSmoothCam] shoulder {}{}\n"), m_settings.shoulder_swap ? STR("swapped") : STR("as the game has it"),
+                                       m_settings.camera_tuning ? STR("") : STR(" (camera_tuning is 0: shows once it is on)"));
     }
 
     // Game thread.
     auto apply_position() -> void
     {
         auto* camera = static_cast<UObject*>(g_player_camera.load());
-        m_tuner.tick(g_view_updates.load(), camera);
+        m_tuner.tick(g_view_updates.load(), g_view_seconds.load(), camera);
         if (!camera) return;
         auto generation = m_position_generation.load();
         if (generation == m_position_applied_generation) return;
@@ -1418,7 +1467,11 @@ class DWSmoothCam : public CppUserModBase
             m_pawn_offset = static_cast<int32_t>(reinterpret_cast<uint8_t*>(slot) - reinterpret_cast<uint8_t*>(m_controller.object));
         }
         auto* pawn = *reinterpret_cast<UObject**>(reinterpret_cast<uint8_t*>(m_controller.object) + m_pawn_offset);
-        if (pawn == m_pawn.object) return;
+        if (pawn == m_pawn.object && !m_offset_retry) return;
+        // The translation scan failed for this pawn (at the origin the triple matches twice): retry, backing off.
+        if (pawn == m_pawn.object && std::chrono::steady_clock::now() < m_next_offset_scan) return;
+        if (pawn != m_pawn.object) m_offset_wait = std::chrono::seconds(2); // a new pawn does not inherit the old one's wait
+        m_offset_retry = false;
         forget_pawn();
         m_pawn = dwsc::LiveRef::of(pawn);
         // Controller.Pawn can point at a Garbage pawn until GC; re-adopting it would warn every tick.
@@ -1432,13 +1485,20 @@ class DWSmoothCam : public CppUserModBase
             Output::send<LogLevel::Warning>(STR("[DWSmoothCam] pawn {} has no FollowCamera or RootComponent\n"), pawn->GetName());
             return;
         }
-        if (g_translation_offset.load() < 0 && !find_translation_offset(root.object)) return;
+        if (g_translation_offset.load() < 0 && !find_translation_offset(root.object))
+        {
+            m_offset_retry = true;
+            m_next_offset_scan = std::chrono::steady_clock::now() + m_offset_wait;
+            m_offset_wait = std::min(m_offset_wait * 2, std::chrono::seconds(60)); // each miss logs a warning
+            return;
+        }
 
         m_camera = camera;
         m_root = root;
         g_player_root.store(root.object);
         g_player_camera.store(camera.object);
         m_position_applied_generation = 0; // a new pawn: its modes get the current position
+        m_offset_wait = std::chrono::seconds(2);
         Output::send<LogLevel::Normal>(STR("[DWSmoothCam] following {}\n"), pawn->GetName());
     }
 
