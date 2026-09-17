@@ -281,9 +281,15 @@ the centre (0.7.4).
   saves the slot from the live settings (`presets/Slot N.ini` is written at once: the menu does not watch it);
   (c) a changed non-zero `preset` loads that preset, then the preset keys edited in the same Apply are
   applied again on top. An empty slot logs and loads nothing. `enabled` changes the live switch only when
-  the file's value changes, so O and an Apply of other settings do not fight. `enabled` and O switch the
-  follow only; position tuning stays on.
-- **Deferred write-back.** Nothing writes `smoothcam.ini` from a reload, V or N. The desired file is every
+  the file's value changes, so O and an Apply of other settings do not fight. `enabled` and O
+  switch the whole mod: off also publishes the position tuning as inactive (the modes go back to the game's
+  values, as `camera_tuning = 0` does), skips the per-tick aiming `GetState` calls, and V and N are ignored,
+  so off is a clean A/B against the game's own camera. O sets `m_settings.enabled` too, so the write-back
+  puts it in the file and the page shows it.
+- **Deferred write-back.** Nothing writes `smoothcam.ini` from O, V, N or a plain reload. The exception:
+  a reload that loaded a preset or saved a slot flushes at once. Deferred, a page reopened before
+  the world ran again showed the new `preset` with the old sliders. The cost: the page still open refuses
+  its next Apply ("reopen this mod"); its sliders were stale anyway. The desired file is every
   numeric live value, with `preset` = the active preset and `preset_save` = 0. `on_update` writes the
   differing numbers (in place, temp file plus rename) only when the camera is live, which means no menu page
   is open (the page is reachable only from the main or pause menu, where the player camera does not update),
@@ -388,7 +394,8 @@ the centre (0.7.4).
 `N` pressed with the Mod Menu open wrote `shoulder_swap` to the ini behind the open page (the swap then
 played on close), which makes the menu refuse the next Apply on that page. Since 0.7.2 the hook
 stamps the QPC time of every player-camera update, and `V` and `N` act only when the last one is under 0.25 s old: not under a pause, a load, a cutscene or the free
-camera. The log says when a press was ignored. `O` writes nothing and stays live.
+camera. The log says when a press was ignored. Both are also ignored while the mod is off. `O` stays
+live; its `enabled` change is written back like the others, once the camera is live.
 
 ### Banners
 
@@ -539,8 +546,8 @@ cancelled itself; the four captures above then ran clean. The fix is in UEBench 
   needs a rebuild against it.
 - **The page indicator lags.** After an Apply of a slider, the page stays open with the old `preset` value
   shown until it is reopened, because the corrected indicator is written only once the camera is live again.
-  Likewise, after a preset load while paused the page keeps showing that Preset entry, and re-picking the
-  same preset on that page does nothing until the game has been unpaused once.
+  After a preset load or slot save the file is written at once, so that page refuses another Apply
+  until it is reopened.
 - **Drop-ins are read at startup.** Files added to or removed from `config/presets/` while the game runs are
   ignored until the next start or mod reload. At most 50 drop-ins.
 - **Finisher and shadowstep attack cameras** (~40 classes) are left as shipped.

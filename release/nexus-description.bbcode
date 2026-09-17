@@ -11,9 +11,9 @@ It also sets where the camera sits, separately for exploring, sprinting, combat 
 [list]
 [*][font=Courier New]V[/font]: move the camera to the other shoulder. It glides across in half a second.
 [*]Presets: pick one on the Mod Menu page or with [font=Courier New]preset[/font] in the ini. [b]Tight[/b] barely trails, with the camera a little closer. [b]Balanced[/b] is the default: a clear trail that settles fast, with the camera where the game puts it. [b]Cinematic[/b] is a heavy, slow trail with smoothed turning, the camera a little further back and higher, and a wider view when you sprint. Your ten save slots come after them, then any presets you installed from other authors.
-[*]On and off: the [font=Courier New]enabled[/font] switch, on the same page or in the ini.
+[*]On and off: the [font=Courier New]enabled[/font] switch, on the same page or in the ini. Off is the game's own camera: no follow and no camera position changes.
 [/list]
-SmoothCam binds only one key by default, so it doesn't eat into your keyboard. If you want a key to cycle presets or switch the follow on and off, set [font=Courier New]preset_key[/font] or [font=Courier New]toggle_key[/font] in the ini.
+SmoothCam binds only one key by default, so it doesn't eat into your keyboard. If you want a key to cycle presets or switch the mod on and off, set [font=Courier New]preset_key[/font] or [font=Courier New]toggle_key[/font] in the ini.
 A short banner at the top of the screen names the preset, or says On or Off. Quick presses show one banner with the last name. A preset carries the follow feel, turning, the snap thresholds and the whole camera position (distance, height, shoulder offset and field of view per situation, plus the look limits). It leaves the on/off switches, the shoulder side, the aiming setting, banners and keys alone. All three keys can be changed in the ini, and a blank one is left unbound.
 
 [size=4][b]Requirements[/b][/size]
@@ -46,8 +46,8 @@ To uninstall, close the game and delete [font=Courier New]ue4ss\Mods\DWSmoothCam
 [b]Common issues[/b]
 [list]
 [*]The mod supports Steam build 25232147 only. On any other build it refuses to hook the camera and stays inactive, and [font=Courier New]UE4SS.log[/font] says so: [font=Courier New]unsupported game build, mod inactive[/font]. I would rather it do nothing than crash your game after a patch.
-[*]After loading a preset from the Mod Menu, the open page still shows the old slider values and the old Preset entry until you reopen it. Changes you apply in the meantime still land on top of the loaded preset.
-[*]The shoulder key and the preset key are ignored while the game is paused, including with the Mod Menu open. The on/off key works at any time.
+[*]After loading a preset from the Mod Menu, the open page still shows the old slider values until you reopen it, and refuses another Apply until then.
+[*]The shoulder key and the preset key are ignored while the game is paused, including with the Mod Menu open, and while the mod is switched off. The on/off key works at any time, and the Mod Menu page shows its state.
 [/list]
 
 [size=4][b]Compatibility[/b][/size]
@@ -71,7 +71,7 @@ Switching presets or shoulders is free as well. Eight presses inside one 20-seco
 [/list]
 [b]Follow[/b] (in presets, except enabled and aiming_follow)
 [list]
-[*][font=Courier New]enabled = 1[/font]: 0 turns the smooth follow off. Camera position has its own switch.
+[*][font=Courier New]enabled = 1[/font]: 0 is the game's own camera: no follow, no camera position changes, and the preset and shoulder keys do nothing.
 [*][font=Courier New]follow_rate_h = 8[/font], [font=Courier New]follow_rate_v = 10[/font]: catch-up rate per second, horizontal and vertical. Higher is tighter.
 [*][font=Courier New]curve_h = 2[/font], [font=Courier New]curve_v = 0[/font]: 0 constant, 1 linear, 2 smoothstep, 3 ease in-out. The curves start gently and reach full rate at [font=Courier New]catchup_distance = 150[/font] cm; [font=Courier New]min_rate_scale = 0.35[/font] is the rate at zero lag.
 [*][font=Courier New]max_lag_h = 70[/font], [font=Courier New]max_lag_v = 50[/font]: the furthest the camera may fall behind, in cm.

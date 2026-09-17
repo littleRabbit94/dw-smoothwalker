@@ -609,29 +609,19 @@ class DWSmoothCam : public CppUserModBase
         if (!engine_tick) Output::send<LogLevel::Warning>(STR("[DWSmoothCam] UE4SS EngineTick hook is off: the camera cannot find the player\n"));
 
         bind(m_toggle_key, STR("toggle_key"), [this]() {
+            std::lock_guard guard(m_file_mutex);
             bool now = !g_enabled.load();
-            g_toggle_generation.fetch_add(1); // before the store: a hook frame between the two must still fade
-            g_enabled.store(now);
+            set_enabled_locked(now);
+            publish_locked();
+            mark_pending_locked();
             Output::send<LogLevel::Normal>(STR("[DWSmoothCam] smoothing {}\n"), now ? STR("on") : STR("off"));
             request_banner(now ? STR("SmoothCam: On") : STR("SmoothCam: Off"));
         });
-        // Both keys below change live settings that flush_locked later writes to smoothcam.ini; both act only while the
-        // camera is live, since a paused Mod Menu page would refuse its next Apply once the file changed under it.
         bind(m_preset_key, STR("preset_key"), [this]() {
-            if (!camera_live())
-            {
-                Output::send<LogLevel::Normal>(STR("[DWSmoothCam] preset key ignored while the camera is paused\n"));
-                return;
-            }
-            cycle_preset();
+            if (key_live(STR("preset"))) cycle_preset();
         });
         bind(m_shoulder_key, STR("shoulder_key"), [this]() {
-            if (!camera_live())
-            {
-                Output::send<LogLevel::Normal>(STR("[DWSmoothCam] shoulder key ignored while the camera is paused\n"));
-                return;
-            }
-            swap_shoulder();
+            if (key_live(STR("shoulder"))) swap_shoulder();
         });
 
         m_find_requested.store(true); // after a hot reload the controller has already begun play
@@ -863,6 +853,24 @@ class DWSmoothCam : public CppUserModBase
         register_keydown_event(static_cast<Input::Key>(key), std::move(action));
     }
 
+    // The preset and shoulder keys act only while the mod is on and the camera is live. Off is the game as shipped,
+    // so nothing may move; under a pause the change would land in smoothcam.ini behind an open Mod Menu page.
+    auto key_live(const TCHAR* key) -> bool
+    {
+        const TCHAR* why = !g_enabled.load() ? STR("SmoothCam is off") : !camera_live() ? STR("the camera is paused") : nullptr;
+        if (why) Output::send<LogLevel::Normal>(STR("[DWSmoothCam] {} key ignored while {}\n"), key, why);
+        return !why;
+    }
+
+    // The live switch, kept in m_settings too so the write-back shows it on the Mod Menu page.
+    auto set_enabled_locked(bool on) -> void
+    {
+        m_settings.enabled = on;
+        if (g_enabled.load() == on) return;
+        g_toggle_generation.fetch_add(1); // before the store: a hook frame between the two must still fade
+        g_enabled.store(on);
+    }
+
     auto publish_locked() -> void
     {
         // No g_reset: the hook crossfades on the new generation instead of snapping the lag away mid-motion.
@@ -879,6 +887,7 @@ class DWSmoothCam : public CppUserModBase
         m_show_banner.store(m_settings.show_banner);
 
         auto position = dwsc::position_of(m_settings);
+        position.active = position.active && m_settings.enabled; // off is the game as shipped, camera modes included
         std::lock_guard guard(m_position_mutex);
         // camera_tuning off before and after: every write would be the game's own value, and the apply's flip
         // would swing the camera for nothing. The values are kept, so switching it on applies the latest.
@@ -905,7 +914,7 @@ class DWSmoothCam : public CppUserModBase
     {
         auto* camera = static_cast<UObject*>(g_player_camera.load());
         m_tuner.tick(g_view_updates.load(), g_view_seconds.load(), camera);
-        g_aiming.store(camera && m_tuner.aiming());
+        g_aiming.store(camera && g_enabled.load() && m_tuner.aiming()); // off: no per-tick GetState calls either
         if (!camera) return;
         auto generation = m_position_generation.load();
         if (generation == m_position_applied_generation) return;
@@ -984,12 +993,9 @@ class DWSmoothCam : public CppUserModBase
 
         // (a) Ordinary edits onto the live settings. The toggle's state changes only if the file's enabled did.
         dwsc::apply_values(m_settings, edits);
-        if (edited("enabled") && g_enabled.load() != m_settings.enabled)
-        {
-            g_toggle_generation.fetch_add(1); // fade like the toggle key, bumped before the store
-            g_enabled.store(m_settings.enabled);
-        }
+        if (edited("enabled")) set_enabled_locked(m_settings.enabled); // fades like the toggle key
 
+        bool derived = false; // a save or a load: the live numbers now differ from what the Apply wrote
         // (b) Save runs before a load in the same Apply. The slot file is written now: the menu does not watch it.
         if (edited("preset_save") && m_settings.preset_save >= 1 && m_settings.preset_save <= dwsc::MAX_SLOTS)
         {
@@ -997,6 +1003,7 @@ class DWSmoothCam : public CppUserModBase
             Output::send<LogLevel::Normal>(STR("[DWSmoothCam] saved slot {}{}\n"), m_settings.preset_save, ok ? STR("") : STR(": write failed"));
             if (ok)
             {
+                derived = true;
                 m_loaded_id = m_settings.preset_save; // the slot holds the live values; a load in this Apply still wins
                 request_banner(std::format(STR("SmoothCam: saved to Slot {}"), m_settings.preset_save));
             }
@@ -1006,6 +1013,7 @@ class DWSmoothCam : public CppUserModBase
         // (c) A changed picker loads that preset. Preset keys edited in the same Apply win over it.
         if (edited("preset") && m_settings.preset != 0 && load_preset_locked(m_settings.preset))
         {
+            derived = true;
             dwsc::Values own;
             for (auto& edit : edits)
             {
@@ -1017,6 +1025,10 @@ class DWSmoothCam : public CppUserModBase
         update_active_locked();
         publish_locked();
         mark_pending_locked();
+        // Written at once, without the camera_live() gate: a page reopened before the world runs again must show the
+        // loaded sliders. The page still open refuses its next Apply ("reopen this mod"); its sliders were stale
+        // anyway. A plain slider Apply stays deferred, so tuning with the page open keeps working.
+        if (derived && m_flush_pending.load()) flush_locked(std::chrono::steady_clock::now());
         Output::send<LogLevel::Normal>(STR("[DWSmoothCam] settings applied\n"));
     }
 
