@@ -2,8 +2,8 @@
 
 A third-person camera for The Blood of Dawnwalker that trails your character and catches up smoothly while
 turning stays instant. While you aim, the trail eases down so the view stays on the crosshair. Distance,
-height, shoulder and FOV can be set per situation, with presets on `V`, on/off on `O` and a shoulder swap
-on `N`.
+height, shoulder and FOV can be set per situation, with a shoulder swap on `V`. Presets and on/off live
+on the Mod Menu page and in the ini, and can be given keys there.
 
 I'm a hobbyist software engineer and I build utilities I want to use myself. This one exists because the
 game's camera is bolted to the character and I missed the follow from SmoothCam in Skyrim. `docs/design.md`

@@ -99,7 +99,7 @@ namespace
     // Published by the game thread, read by the hook. Pointers are only compared or read under SEH.
     std::atomic<bool> g_enabled{true};
     std::atomic<bool> g_reset{true}; // a hard cut: snap, no crossfade
-    std::atomic<uint64_t> g_toggle_generation{0};   // O
+    std::atomic<uint64_t> g_toggle_generation{0};   // toggle key
     std::atomic<uint64_t> g_position_generation{0}; // mode writes; their FOV lands on the next camera update
     std::atomic<bool> g_log_stats{false};
     std::atomic<bool> g_aiming{false}; // an aiming camera mode is blending in or active
@@ -111,7 +111,7 @@ namespace
     std::atomic<uint64_t> g_clamped{0};
     std::atomic<double> g_lag_sum{0.0};
     std::atomic<uint64_t> g_view_updates{0}; // player-camera updates: flip stages advance on these
-    std::atomic<int64_t> g_last_view_qpc{0};  // V and N act only while this is recent
+    std::atomic<int64_t> g_last_view_qpc{0};  // preset and shoulder keys act only while this is recent
     std::atomic<double> g_view_seconds{0.0};  // world time over those updates: the flip's glide runs on it
     std::atomic<uint64_t> g_calls_timed{0};
     std::atomic<uint64_t> g_ticks_spent{0};
@@ -217,7 +217,7 @@ namespace
         g_follow.blending = false;
     }
 
-    // enabled false still runs while a crossfade to the game's own view (O off) is under way.
+    // enabled false still runs while a crossfade to the game's own view (toggled off) is under way.
     auto update_view(void* desired_view, float delta_time, bool enabled) -> void
     {
         AcquireSRWLockShared(&g_tuning_lock);
@@ -248,7 +248,7 @@ namespace
         }
         dwsc::Quat rotation = dwsc::from_rotator(view.rotation[0], view.rotation[1], view.rotation[2]);
 
-        // Settings, O and mode writes crossfade; a hard cut (player or world change, a gap, a teleport) snaps.
+        // Settings, the toggle and mode writes crossfade; a hard cut (player or world change, a gap, a teleport) snaps.
         auto toggle = g_toggle_generation.load(std::memory_order_relaxed);
         auto position = g_position_generation.load(std::memory_order_relaxed);
         bool changed = t.generation != g_follow.seen_tuning || toggle != g_follow.seen_toggle || position != g_follow.seen_position;
@@ -403,7 +403,7 @@ namespace
 
             // The faded part of the lag was never clamped: keep it in front of a wall the game pulled in for.
             double game_distance = dwsc::length(game_arm);
-            // The O-off fade too: it ends at the game's view, so clamping to the game's distance never moves the endpoint.
+            // The toggle-off fade too: it ends at the game's view, so clamping to the game's distance never moves the endpoint.
             if ((!enabled || g_follow.valid) && t.wall_clamp)
             {
                 clamp_to_wall(result, pivot, game_distance, wall_weight(game_distance, g_follow.nominal_distance));
@@ -453,7 +453,7 @@ namespace
         QueryPerformanceCounter(&stamp);
         g_last_view_qpc.store(stamp.QuadPart, std::memory_order_relaxed);
         bool enabled = g_enabled.load(std::memory_order_relaxed);
-        // Off and settled: the game's view untouched, as before. The next O press starts from a fresh output.
+        // Off and settled: the game's view untouched, as before. The next toggle starts from a fresh output.
         if (!enabled && !g_follow.blending && g_toggle_generation.load(std::memory_order_relaxed) == g_follow.seen_toggle)
         {
             g_follow.valid = false;
@@ -615,7 +615,7 @@ class DWSmoothCam : public CppUserModBase
             Output::send<LogLevel::Normal>(STR("[DWSmoothCam] smoothing {}\n"), now ? STR("on") : STR("off"));
             request_banner(now ? STR("SmoothCam: On") : STR("SmoothCam: Off"));
         });
-        // V and N change live settings that flush_locked later writes to smoothcam.ini; both act only while the
+        // Both keys below change live settings that flush_locked later writes to smoothcam.ini; both act only while the
         // camera is live, since a paused Mod Menu page would refuse its next Apply once the file changed under it.
         bind(m_preset_key, STR("preset_key"), [this]() {
             if (!camera_live())
@@ -834,7 +834,7 @@ class DWSmoothCam : public CppUserModBase
         if (m_banner_state == 0) resolve_banner();
         if (m_banner_state != 1) return;
 
-        // Cached: FindFirstOf walks the whole object array (28 ms measured), and this runs mid-glide after V.
+        // Cached: FindFirstOf walks the whole object array (28 ms measured), and this runs mid-glide after a preset change.
         if (!m_notifications.alive()) m_notifications = dwsc::LiveRef::of(UObjectGlobals::FindFirstOf(STR("NotificationSubsystem")));
         drop_stale_banners(m_notifications.object);
         FText text(line.c_str());
@@ -866,7 +866,7 @@ class DWSmoothCam : public CppUserModBase
     auto publish_locked() -> void
     {
         // No g_reset: the hook crossfades on the new generation instead of snapping the lag away mid-motion.
-        // Only a changed value starts one: N and the switches change none, and a fade holds part of the old lag.
+        // Only a changed value starts one: a shoulder swap and the switches change none, and a fade holds part of the old lag.
         auto tuning = tuning_of(m_settings);
         AcquireSRWLockExclusive(&g_tuning_lock);
         if (!same_values(tuning, g_tuning))
@@ -920,7 +920,7 @@ class DWSmoothCam : public CppUserModBase
     }
 
     // Startup parses every value; a later change applies only keys whose number moved since the file was last
-    // seen, so a live V/N/preset change survives an Apply of the rest. Only flush_locked writes smoothcam.ini.
+    // seen, so a live key or preset change survives an Apply of the rest. Only flush_locked writes smoothcam.ini.
     auto reload_settings_locked(bool startup) -> void
     {
         // Stamp first: a write landing between the two is then seen by the next poll.
@@ -982,11 +982,11 @@ class DWSmoothCam : public CppUserModBase
             return std::any_of(edits.begin(), edits.end(), [&](auto& edit) { return edit.first == key; });
         };
 
-        // (a) Ordinary edits onto the live settings. O's state changes only if the file's enabled did.
+        // (a) Ordinary edits onto the live settings. The toggle's state changes only if the file's enabled did.
         dwsc::apply_values(m_settings, edits);
         if (edited("enabled") && g_enabled.load() != m_settings.enabled)
         {
-            g_toggle_generation.fetch_add(1); // fade like O, bumped before the store
+            g_toggle_generation.fetch_add(1); // fade like the toggle key, bumped before the store
             g_enabled.store(m_settings.enabled);
         }
 

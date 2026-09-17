@@ -9,11 +9,12 @@ It also sets where the camera sits, separately for exploring, sprinting, combat 
 
 [size=4][b]Presets and keys[/b][/size]
 [list]
-[*][font=Courier New]O[/font]: switch the smooth follow on and off.
-[*][font=Courier New]V[/font]: cycle presets, starting from the one you are on. [b]Tight[/b] barely trails, with the camera a little closer. [b]Balanced[/b] is the default: a clear trail that settles fast, with the camera where the game puts it. [b]Cinematic[/b] is a heavy, slow trail with smoothed turning, the camera a little further back and higher, and a wider view when you sprint. Your ten save slots come after them, then any presets you installed from other authors.
-[*][font=Courier New]N[/font]: move the camera to the other shoulder. It glides across in half a second.
+[*][font=Courier New]V[/font]: move the camera to the other shoulder. It glides across in half a second.
+[*]Presets: pick one on the Mod Menu page or with [font=Courier New]preset[/font] in the ini. [b]Tight[/b] barely trails, with the camera a little closer. [b]Balanced[/b] is the default: a clear trail that settles fast, with the camera where the game puts it. [b]Cinematic[/b] is a heavy, slow trail with smoothed turning, the camera a little further back and higher, and a wider view when you sprint. Your ten save slots come after them, then any presets you installed from other authors.
+[*]On and off: the [font=Courier New]enabled[/font] switch, on the same page or in the ini.
 [/list]
-A short banner at the top of the screen names the preset, or says On or Off. Quick presses show one banner with the last name. A preset carries the follow feel, turning, the snap thresholds and the whole camera position (distance, height, shoulder offset and field of view per situation, plus the look limits). It leaves the on/off switches, the shoulder side, the aiming setting, banners and keys alone. All three keys can be changed in the ini.
+SmoothCam binds only one key by default, so it doesn't eat into your keyboard. If you want a key to cycle presets or switch the follow on and off, set [font=Courier New]preset_key[/font] or [font=Courier New]toggle_key[/font] in the ini.
+A short banner at the top of the screen names the preset, or says On or Off. Quick presses show one banner with the last name. A preset carries the follow feel, turning, the snap thresholds and the whole camera position (distance, height, shoulder offset and field of view per situation, plus the look limits). It leaves the on/off switches, the shoulder side, the aiming setting, banners and keys alone. All three keys can be changed in the ini, and a blank one is left unbound.
 
 [size=4][b]Requirements[/b][/size]
 [list]
@@ -46,7 +47,7 @@ To uninstall, close the game and delete [font=Courier New]ue4ss\Mods\DWSmoothCam
 [list]
 [*]The mod supports Steam build 25232147 only. On any other build it refuses to hook the camera and stays inactive, and [font=Courier New]UE4SS.log[/font] says so: [font=Courier New]unsupported game build, mod inactive[/font]. I would rather it do nothing than crash your game after a patch.
 [*]After loading a preset from the Mod Menu, the open page still shows the old slider values and the old Preset entry until you reopen it. Changes you apply in the meantime still land on top of the loaded preset.
-[*][font=Courier New]V[/font] and [font=Courier New]N[/font] are ignored while the game is paused, including with the Mod Menu open. [font=Courier New]O[/font] works at any time.
+[*]The shoulder key and the preset key are ignored while the game is paused, including with the Mod Menu open. The on/off key works at any time.
 [/list]
 
 [size=4][b]Compatibility[/b][/size]
@@ -54,7 +55,7 @@ To uninstall, close the game and delete [font=Courier New]ue4ss\Mods\DWSmoothCam
 [*]Conflicts with any other mod that replaces the third-person camera. Run one or the other.
 [*][url=https://www.nexusmods.com/thebloodofdawnwalker/mods/350]FreeCam - UE4SS[/url] ([font=Courier New]F7[/font]) works alongside it. When you leave the free camera, the game camera snaps back to your character.
 [*]Framecore's UE4SS in Compatibility mode logs [font=Courier New]A callback for 'LoadMap' must return bool or nil[/font] on each load and one [font=Courier New]bad conversion[/font] at startup. Both come from UE4SS's bundled BPModLoaderMod and ConsoleEnablerMod, not from SmoothCam.
-[*]Keys: SmoothCam uses [font=Courier New]O[/font], [font=Courier New]V[/font] and [font=Courier New]N[/font], all unbound in this game. P, F5 and F9 are used by the game.
+[*]Keys: SmoothCam uses only [font=Courier New]V[/font] by default, which this game leaves unbound. P, F5 and F9 are used by the game.
 [/list]
 
 [size=4][b]Performance[/b][/size]
@@ -66,7 +67,7 @@ Switching presets or shoulders is free as well. Eight presses inside one 20-seco
 [spoiler]
 [b]Keys[/b] (read at game start; any UE4SS key name)
 [list]
-[*][font=Courier New]toggle_key = O[/font], [font=Courier New]preset_key = V[/font], [font=Courier New]shoulder_key = N[/font]
+[*][font=Courier New]toggle_key =[/font], [font=Courier New]preset_key =[/font] (blank, no key), [font=Courier New]shoulder_key = V[/font]
 [/list]
 [b]Follow[/b] (in presets, except enabled and aiming_follow)
 [list]
@@ -91,11 +92,11 @@ Switching presets or shoulders is free as well. Eight presses inside one 20-seco
 [*][font=Courier New]camera_tuning = 1[/font]: 0 puts every camera mode back as the game ships it.
 [*]Per group, with the prefix [font=Courier New]exploration_[/font], [font=Courier New]sprint_[/font], [font=Courier New]combat_[/font], [font=Courier New]aiming_[/font] or [font=Courier New]traversal_[/font]: [font=Courier New]distance[/font] (% of the game's, 50 to 250), [font=Courier New]height[/font] (cm), [font=Courier New]shoulder[/font] (cm further out; centered cameras stay centered; not for traversal), [font=Courier New]fov[/font] (degrees added).
 [*][font=Courier New]game_lag_scale = 3[/font]: multiplies the game's own camera lag speeds. The game lags its camera a little by itself, and two lags stacked feel mushy. Higher makes the game's part tighter, so SmoothCam's follow is the one you feel. 1 is the game's own.
-[*][font=Courier New]shoulder_swap = 0[/font]: 1 is the other shoulder. [font=Courier New]N[/font] switches it.
+[*][font=Courier New]shoulder_swap = 0[/font]: 1 is the other shoulder. [font=Courier New]V[/font] switches it.
 [*][font=Courier New]position_transition = 0.5[/font]: seconds a position change or shoulder swap glides over. 0 snaps.
 [*][font=Courier New]pitch_min = -60[/font], [font=Courier New]pitch_max = 40[/font]: look down and up limits while exploring, sprinting and in focus. Aiming and combat already allow -89 / 89.
 [/list]
-[b]Presets[/b]: [font=Courier New]preset = 102[/font] shows the matching preset (0 Custom, 101 Tight, 102 Balanced, 103 Cinematic, 1 to 10 a slot, 201 and up an installed preset); change it to load one. [font=Courier New]preset_save[/font] (1 to 10) saves to a slot and the mod sets it back to 0. The mod writes these, and V and N changes, back to the ini only while you play, never behind an open Mod Menu page. Saved slots go to [font=Courier New]config\presets\Slot N.ini[/font]; the mod creates the folder.
+[b]Presets[/b]: [font=Courier New]preset = 102[/font] shows the matching preset (0 Custom, 101 Tight, 102 Balanced, 103 Cinematic, 1 to 10 a slot, 201 and up an installed preset); change it to load one. [font=Courier New]preset_save[/font] (1 to 10) saves to a slot and the mod sets it back to 0. The mod writes these, and key presses that change them, back to the ini only while you play, never behind an open Mod Menu page. Saved slots go to [font=Courier New]config\presets\Slot N.ini[/font]; the mod creates the folder.
 [/spoiler]
 
 [size=4][b]For mod authors: making a preset[/b][/size]

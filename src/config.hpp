@@ -29,9 +29,9 @@ namespace dwsc
     struct Settings
     {
         bool enabled = true;
-        std::string toggle_key = "O";
-        std::string preset_key = "V";
-        std::string shoulder_key = "N";
+        std::string toggle_key;           // empty: not bound
+        std::string preset_key;
+        std::string shoulder_key = "V";
 
         double follow_rate_h = 8.0;       // 1/s
         double follow_rate_v = 10.0;      // 1/s
@@ -238,7 +238,9 @@ namespace dwsc
             if (eq == std::string::npos) continue;
             auto key = trim(line.substr(0, eq));
             auto value = trim(line.substr(eq + 1));
-            if (!key.empty() && !value.empty()) set_value(s, key, value);
+            // A blank key name is kept, so it unbinds the key instead of falling back to the default.
+            bool key_name = key == "toggle_key" || key == "preset_key" || key == "shoulder_key";
+            if (!key.empty() && (!value.empty() || key_name)) set_value(s, key, value);
         }
         sanitize(s);
         return s;
