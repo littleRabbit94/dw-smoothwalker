@@ -46,7 +46,7 @@ Without the Mod Menu, edit [font=Courier New]config\smoothcam.ini[/font] in the 
 [*]Supports Steam build 25232147 only. On any other build the mod refuses to hook the camera and stays inactive. [font=Courier New]UE4SS.log[/font] says so: [font=Courier New]unsupported game build, mod inactive[/font].
 [*]After loading a preset from the Mod Menu, the open page still shows the old slider values and the old Preset entry until you reopen it. Changes you apply in the meantime still land on top of the loaded preset.
 [*][font=Courier New]V[/font] and [font=Courier New]N[/font] are ignored while the game is paused, including with the Mod Menu open. [font=Courier New]O[/font] works at any time.
-[*]Smoothed turning (on in Cinematic, off otherwise) adds a little delay to aiming.
+[*]While you aim, the trail and the smoothed turning (on in Cinematic) ease down to 30% so the view stays on your aim, and ease back when you lower it. [font=Courier New]aiming_follow[/font] sets how much stays.
 [/list]
 
 [size=4][b]Compatibility[/b][/size]
@@ -63,13 +63,14 @@ Without the Mod Menu, edit [font=Courier New]config\smoothcam.ini[/font] in the 
 [list]
 [*][font=Courier New]toggle_key = O[/font], [font=Courier New]preset_key = V[/font], [font=Courier New]shoulder_key = N[/font]
 [/list]
-[b]Follow[/b] (in presets, except enabled)
+[b]Follow[/b] (in presets, except enabled and aiming_follow)
 [list]
 [*][font=Courier New]enabled = 1[/font]: 0 turns the smooth follow off. Camera position has its own switch.
 [*][font=Courier New]follow_rate_h = 8[/font], [font=Courier New]follow_rate_v = 10[/font]: catch-up rate per second, horizontal and vertical. Higher is tighter.
 [*][font=Courier New]curve_h = 2[/font], [font=Courier New]curve_v = 0[/font]: 0 constant, 1 linear, 2 smoothstep, 3 ease in-out. The curves start gently and reach full rate at [font=Courier New]catchup_distance = 150[/font] cm; [font=Courier New]min_rate_scale = 0.35[/font] is the rate at zero lag.
 [*][font=Courier New]max_lag_h = 70[/font], [font=Courier New]max_lag_v = 50[/font]: the furthest the camera may fall behind, in cm.
 [*][font=Courier New]soft_leash = 1[/font]: eases into the lag limit instead of stopping hard at it.
+[*][font=Courier New]aiming_follow = 30[/font]: percent of the trail and the turning smoothing kept while you aim. 0 locks the camera to your aim, 100 trails as everywhere else. Not part of a preset.
 [*][font=Courier New]rotation_smoothing = 0[/font], [font=Courier New]rotation_rate = 20[/font]: smooth turning too, and how fast it catches up.
 [*][font=Courier New]wall_clamp = 1[/font]: keeps the smoothed camera in front of walls the game pulled its camera in for.
 [/list]
@@ -84,7 +85,7 @@ Without the Mod Menu, edit [font=Courier New]config\smoothcam.ini[/font] in the 
 [list]
 [*][font=Courier New]camera_tuning = 1[/font]: 0 puts every camera mode back as the game ships it.
 [*]Per group, with the prefix [font=Courier New]exploration_[/font], [font=Courier New]sprint_[/font], [font=Courier New]combat_[/font], [font=Courier New]aiming_[/font] or [font=Courier New]traversal_[/font]: [font=Courier New]distance[/font] (% of the game's, 50 to 250), [font=Courier New]height[/font] (cm), [font=Courier New]shoulder[/font] (cm further out; centred cameras stay centred; not for traversal), [font=Courier New]fov[/font] (degrees added).
-[*][font=Courier New]game_lag_scale = 1[/font]: multiplies the game's own camera lag speeds. Higher makes the game's part tighter.
+[*][font=Courier New]game_lag_scale = 3[/font]: multiplies the game's own camera lag speeds. The game lags its camera a little by itself, and two lags stacked feel mushy; higher makes the game's part tighter, so SmoothCam's follow is the one you feel. 1 is the game's own.
 [*][font=Courier New]shoulder_swap = 0[/font]: 1 is the other shoulder. [font=Courier New]N[/font] switches it.
 [*][font=Courier New]position_transition = 0.5[/font]: seconds a position change or shoulder swap glides over. 0 snaps.
 [*][font=Courier New]pitch_min = -60[/font], [font=Courier New]pitch_max = 40[/font]: look down and up limits while exploring, sprinting and in focus. Aiming and combat already allow -89 / 89.
@@ -127,7 +128,7 @@ exploration_fov = 5[/code]
 [*]Follow: [font=Courier New]follow_rate_h[/font] and [font=Courier New]follow_rate_v[/font] (0.5 to 30, 8 and 10), [font=Courier New]curve_h[/font] and [font=Courier New]curve_v[/font] (0 constant, 1 linear, 2 smoothstep, 3 ease in-out; 2 and 0), [font=Courier New]catchup_distance[/font] (10 to 500 cm, 150), [font=Courier New]min_rate_scale[/font] (0.05 to 1, 0.35), [font=Courier New]max_lag_h[/font] (0 to 300 cm, 70), [font=Courier New]max_lag_v[/font] (0 to 200 cm, 50), [font=Courier New]soft_leash[/font] (0 or 1, 1)
 [*]Turning and walls: [font=Courier New]rotation_smoothing[/font] (0 or 1, 0), [font=Courier New]rotation_rate[/font] (1 to 60, 20), [font=Courier New]wall_clamp[/font] (0 or 1, 1)
 [*]Snaps: [font=Courier New]reset_distance[/font] (100 to 3000 cm, 500), [font=Courier New]reset_gap[/font] (0.05 to 2 s, 0.25)
-[*]Camera, all modes: [font=Courier New]game_lag_scale[/font] (1 to 20, 1), [font=Courier New]position_transition[/font] (0 to 2 s, 0.5), [font=Courier New]pitch_min[/font] (-89 to -30, -60), [font=Courier New]pitch_max[/font] (20 to 89, 40)
+[*]Camera, all modes: [font=Courier New]game_lag_scale[/font] (1 to 20, 3), [font=Courier New]position_transition[/font] (0 to 2 s, 0.5), [font=Courier New]pitch_min[/font] (-89 to -30, -60), [font=Courier New]pitch_max[/font] (20 to 89, 40)
 [*]Per situation, with the prefix [font=Courier New]exploration_[/font], [font=Courier New]sprint_[/font], [font=Courier New]combat_[/font], [font=Courier New]aiming_[/font] or [font=Courier New]traversal_[/font]: [font=Courier New]distance[/font] (50 to 250 %, 100), [font=Courier New]height[/font] (-50 to 100 cm, 0), [font=Courier New]shoulder[/font] (-60 to 100 cm, 0; not for traversal), [font=Courier New]fov[/font] (-30 to 30 degrees, 0)
 [/list]
 

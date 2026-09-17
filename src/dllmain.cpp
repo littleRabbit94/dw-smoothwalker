@@ -66,13 +66,15 @@ namespace
         bool soft_leash, rotation_smoothing, wall_clamp;
         double rotation_rate, reset_distance, reset_gap;
         double transition;   // position_transition: the crossfade after a change
+        double aiming_keep;  // aiming_follow as a share: the trail and turning smoothing kept while aiming
         uint64_t generation; // bumped by a publish that changed a value
     };
 
     auto tuning_of(const dwsc::Settings& s) -> Tuning
     {
         return {s.follow_rate_h, s.follow_rate_v, s.curve_h, s.curve_v, s.catchup_distance, s.min_rate_scale, s.max_lag_h, s.max_lag_v,
-                s.soft_leash, s.rotation_smoothing, s.wall_clamp, s.rotation_rate, s.reset_distance, s.reset_gap, s.position_transition, 0};
+                s.soft_leash, s.rotation_smoothing, s.wall_clamp, s.rotation_rate, s.reset_distance, s.reset_gap, s.position_transition,
+                s.aiming_follow / 100.0, 0};
     }
 
     // Every field but generation.
@@ -82,7 +84,7 @@ namespace
                a.catchup_distance == b.catchup_distance && a.min_rate_scale == b.min_rate_scale && a.max_lag_h == b.max_lag_h &&
                a.max_lag_v == b.max_lag_v && a.soft_leash == b.soft_leash && a.rotation_smoothing == b.rotation_smoothing &&
                a.wall_clamp == b.wall_clamp && a.rotation_rate == b.rotation_rate && a.reset_distance == b.reset_distance &&
-               a.reset_gap == b.reset_gap && a.transition == b.transition;
+               a.reset_gap == b.reset_gap && a.transition == b.transition && a.aiming_keep == b.aiming_keep;
     }
 
     using GetCameraViewFn = void(__fastcall*)(void* self, float delta_time, void* desired_view);
@@ -100,6 +102,7 @@ namespace
     std::atomic<uint64_t> g_toggle_generation{0};   // O
     std::atomic<uint64_t> g_position_generation{0}; // mode writes; their FOV lands on the next camera update
     std::atomic<bool> g_log_stats{false};
+    std::atomic<bool> g_aiming{false}; // an aiming camera mode is blending in or active
     std::atomic<void*> g_player_camera{nullptr};
     std::atomic<void*> g_player_root{nullptr};
     std::atomic<int32_t> g_translation_offset{-1}; // USceneComponent::ComponentToWorld.Translation
@@ -148,6 +151,7 @@ namespace
         dwsc::Vec3 pivot_last{};
         dwsc::Quat rotation_smoothed{};
         double nominal_distance = 0.0;
+        double aim = 0.0;          // 0 to 1, eased toward g_aiming: how far the follow is handed to the player's aim
         double nominal_hold = 0.0; // s left in which nominal_distance tracks the game: a position write is gliding
         LARGE_INTEGER last_call{};
 
@@ -271,6 +275,7 @@ namespace
         else if (cut || !g_follow.valid)
         {
             g_follow.valid = true;
+            g_follow.aim = g_aiming.load(std::memory_order_relaxed) ? 1.0 : 0.0;
             g_follow.pivot_smoothed = pivot;
             g_follow.rotation_smoothed = rotation;
             g_follow.nominal_distance = dwsc::length(camera - pivot);
@@ -309,9 +314,15 @@ namespace
                 ps.z = pivot.z - lag_v;
             }
 
-            double shown_h = leash(lag_h, t.max_lag_h, t.soft_leash);
+            // A trail behind the crosshair reads as input lag. Only what is shown is scaled, and eased: the smoothed
+            // pivot and rotation run on underneath, so the trail returns without an edge.
+            double aim_target = g_aiming.load(std::memory_order_relaxed) ? 1.0 : 0.0;
+            g_follow.aim += (aim_target - g_follow.aim) * (1.0 - std::exp(-8.0 * dt));
+            double keep = 1.0 - g_follow.aim * (1.0 - std::clamp(t.aiming_keep, 0.0, 1.0));
+
+            double shown_h = leash(lag_h, t.max_lag_h, t.soft_leash) * keep;
             double scale_h = lag_h > 0.0 ? shown_h / lag_h : 0.0;
-            double shown_v = std::copysign(leash(std::abs(lag_v), t.max_lag_v, t.soft_leash), lag_v);
+            double shown_v = std::copysign(leash(std::abs(lag_v), t.max_lag_v, t.soft_leash), lag_v) * keep;
             dwsc::Vec3 shown_pivot{pivot.x - lag_hx * scale_h, pivot.y - lag_hy * scale_h, pivot.z - shown_v};
 
             // The arm swings with the smoothed rotation so the camera still orbits the pivot.
@@ -320,10 +331,11 @@ namespace
             {
                 double a_r = 1.0 - std::exp(-std::max(t.rotation_rate, 0.0) * dt);
                 g_follow.rotation_smoothed = dwsc::slerp(g_follow.rotation_smoothed, rotation, a_r);
-                dwsc::Quat delta = dwsc::multiply(g_follow.rotation_smoothed, dwsc::conjugate(rotation));
+                dwsc::Quat shown = keep < 1.0 ? dwsc::slerp(g_follow.rotation_smoothed, rotation, 1.0 - keep) : g_follow.rotation_smoothed;
+                dwsc::Quat delta = dwsc::multiply(shown, dwsc::conjugate(rotation));
                 arm = dwsc::rotate(delta, arm);
-                dwsc::to_rotator(g_follow.rotation_smoothed, view.rotation[0], view.rotation[1], view.rotation[2]);
-                result_rotation = g_follow.rotation_smoothed;
+                dwsc::to_rotator(shown, view.rotation[0], view.rotation[1], view.rotation[2]);
+                result_rotation = shown;
             }
             else
             {
@@ -893,6 +905,7 @@ class DWSmoothCam : public CppUserModBase
     {
         auto* camera = static_cast<UObject*>(g_player_camera.load());
         m_tuner.tick(g_view_updates.load(), g_view_seconds.load(), camera);
+        g_aiming.store(camera && m_tuner.aiming());
         if (!camera) return;
         auto generation = m_position_generation.load();
         if (generation == m_position_applied_generation) return;

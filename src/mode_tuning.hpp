@@ -216,6 +216,23 @@ namespace dwsc
             m_scan_needed = true;
         }
 
+        // Whether an aiming mode is blending in or active (ECameraModeState 0 or 1; 2 blending out, 3 popped).
+        // One GetState call per live aiming mode per engine tick. False until an apply has scanned this camera.
+        auto aiming() -> bool
+        {
+            if (!m_layout_ok || !m_get_state || m_scan_needed) return false;
+            adopt_new();
+            bool found = false;
+            for_each_instance([&](UObject* instance, Mode& mode) {
+                if (found || mode.spec.group != Aiming) return;
+                uint8_t params[16]{};
+                params[0] = 0xFF;
+                instance->ProcessEvent(m_get_state, params);
+                found = params[0] <= 1;
+            });
+            return found;
+        }
+
         // A new player camera: its modes were made before the new-object callback could see them.
         auto camera_changed() -> void
         {
@@ -383,6 +400,7 @@ namespace dwsc
 
         UFunction* m_set_type = nullptr;
         UFunction* m_get_type = nullptr;
+        UFunction* m_get_state = nullptr; // RebelCameraMode:GetState; without it aiming() stays false
 
         enum FlipStage
         {
@@ -419,6 +437,8 @@ namespace dwsc
             auto* blend = UObjectGlobals::StaticFindObject<UStruct*>(nullptr, nullptr, STR("/Script/Engine.AlphaBlendArgs"));
             m_set_type = UObjectGlobals::StaticFindObject<UFunction*>(nullptr, nullptr, STR("/Script/RebelCamera.RebelCameraComponent:SetCameraType"));
             m_get_type = UObjectGlobals::StaticFindObject<UFunction*>(nullptr, nullptr, STR("/Script/RebelCamera.RebelCameraComponent:GetCameraType"));
+
+            m_get_state = UObjectGlobals::StaticFindObject<UFunction*>(nullptr, nullptr, STR("/Script/RebelCamera.RebelCameraMode:GetState"));
 
             m_off.fov = offset_in(mode, STR("DefaultFieldOfView"));
             m_off.pitch_min = offset_in(mode, STR("ViewPitchMin"));

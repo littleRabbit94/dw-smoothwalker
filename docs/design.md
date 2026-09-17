@@ -73,6 +73,16 @@ A smoothed pivot trails the capsule: horizontal and vertical rates, each with a 
 distance and a leash. The camera becomes `smoothed pivot + (game camera - pivot)`, so orbiting stays
 instant and only following lags. Optional rotation smoothing slerps the view and swings the arm to match.
 
+- **Aiming** (`aiming_follow`, percent, default 30; not a preset key). A trail and smoothed turning behind
+  the crosshair read as input lag. The camera component has no "active mode" call, but every mode has
+  `GetState()` (`ECameraModeState`: BlendingIn 0, Active 1, BlendingOut 2, Popped 3; checked live), and the
+  tuner already holds the player's live modes with their group. Each engine tick it calls `GetState` on the
+  live aiming-group modes only (none while there is none) and publishes one atomic flag. The hook eases a
+  0-1 factor toward it (rate 8/s on the world delta, about a third of a second) and scales only what is
+  shown: the shown lag, and the shown rotation slerped from smoothed toward the game's. The smoothed pivot
+  and rotation run on underneath, so the trail is back when the aim is lowered, with no edge either way. A
+  cut snaps the factor. Guessing from the arm length was rejected: a close `exploration_distance` reads
+  the same as aiming.
 - **Soft leash** (`soft_leash = 1`, 0.5.0): the internal lag may run to 3x `max_lag`, and the camera shows
   `max_lag * tanh(lag / max_lag)`, so reaching the limit has no edge. With `soft_leash = 0` the leash is a
   hard clamp.
@@ -170,7 +180,7 @@ Measured live on the running game.
 
 Per group (exploring, sprinting, combat, aiming, claw ride and anti-grav): distance %, height, shoulder
 and FOV. For every mode: the game's own lag as a multiplier, a shoulder swap (`N`), the
-look up/down limits and a transition time. 44 settings on the menu page (0.7), validated with the menu's
+look up/down limits and a transition time. 45 settings on the menu page (44 in 0.7, plus `aiming_follow`), validated with the menu's
 parser. The groups cover 21 `BP_CameraMode_*` classes; the ~40 finisher and shadowstep attack cameras are
 left alone. All 21 are loaded at session start (checked 2026-09-16).
 
@@ -302,21 +312,29 @@ the centre (0.7.4).
   `preset` or `preset_save`. A preset file holding fewer keys loads and matches on the keys it has.
 - **Built-ins** (cycle order): Tight, Balanced, Cinematic. Follow values as 0.6.0: Tight (lag 25/20 cm,
   18/20 per s, constant), Balanced (the shipped default: 70/50 cm, 8/10 per s, smoothstep h), Cinematic
-  (120/80 cm, 4/6 per s, ease in-out, turning smoothed at 25). Balanced equals the shipped `smoothcam.ini`
-  on all 37 keys.
+  (120/80 cm, 4/6 per s, ease in-out, floor 0.35, turning smoothed at 25). Balanced equals the shipped
+  `smoothcam.ini` on all 37 keys.
 
   | Key | Tight | Balanced | Cinematic |
   |---|---|---|---|
-  | `game_lag_scale` | 2 | 1 | 1 |
+  | `game_lag_scale` | 4 | 3 | 2 |
   | `position_transition` | 0.4 | 0.5 | 0.8 |
   | pitch min / max | -60 / 40 | -60 / 40 | -70 / 55 |
-  | exploring distance / height / shoulder / FOV | 90 / 0 / 0 / 0 | 100 / 0 / 0 / 0 | 125 / 10 / 10 / 5 |
-  | sprinting | 90 / 0 / 0 / 0 | 100 / 0 / 0 / 0 | 120 / 10 / 10 / 5 |
+  | exploring distance / height / shoulder / FOV | 90 / 0 / 0 / 0 | 100 / 0 / 0 / 0 | 115 / 10 / 10 / 5 |
+  | sprinting | 90 / 0 / 0 / 0 | 100 / 0 / 0 / 0 | 110 / 10 / 10 / 8 |
   | combat | 95 / 0 / 0 / 0 | 100 / 0 / 0 / 0 | 110 / 0 / 0 / 0 |
   | aiming | 100 / 0 / 0 / 0 | 100 / 0 / 0 / 0 | 100 / 0 / 0 / 0 |
   | claw ride and anti-grav distance / height / FOV | 95 / 0 / 0 | 100 / 0 / 0 | 115 / 0 / 5 |
 
   `reset_distance` / `reset_gap` are 500 / 0.25 in all three. Every value sits on its slider step.
+
+  Why these values (0.8.0, before release). The game's exploring and sprint modes lag the camera
+  themselves (speed 3, up to 30 cm), and with `game_lag_scale` 1 that filter ran in series with the follow,
+  which reads as mushy rather than smooth: every preset now raises it (4 / 3 / 2) so the follow owns the
+  lag, and 3 is the shipped default. Cinematic's `min_rate_scale` went 0.25 to 0.35: at 4/s the rate at
+  rest was 1/s, a drift of about 3 s after stopping (the "floaty" of 0.5.0). Its exploring distance went
+  125 to 115 because 125 % and +5 FOV both shrink the character; sprint sells speed with FOV (+8) rather
+  than distance (110). Balanced still leaves the camera where the game puts it.
 - **Ten slots** (0.7 had 6): one constant, `dwsc::MAX_SLOTS = 10` in `config.hpp`, bounds the slot file
   names, the save range and the slot ids. The menu caps a picker at 64 values (`choices.lua`), and the
   Preset picker also carries Custom and the three built-ins, so 60 slots is the ceiling.
