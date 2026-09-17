@@ -164,7 +164,7 @@ namespace dwsc
                     // A wrong layout would put every write in the wrong memory.
                     if (!plausible(mode.original))
                     {
-                        Output::send<LogLevel::Warning>(STR("[DWSmoothCam] {} reads as fov {}, {} offsets: not a camera layout, left as shipped\n"),
+                        Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] {} reads as fov {}, {} offsets: not a camera layout, left as shipped\n"),
                                                         mode.spec.name, mode.original.fov, mode.original.offsets.size());
                         mode.usable = false;
                         continue;
@@ -173,7 +173,7 @@ namespace dwsc
                     if (std::wstring_view(mode.spec.name) == L"Base_LongRange" && !mode.original.offsets.empty())
                     {
                         auto& first = mode.original.offsets.front();
-                        Output::send<LogLevel::Normal>(STR("[DWSmoothCam] Base_LongRange: fov {}, lag {}/{}, pitch {}/{}, {} offsets, key {} at ({}, {}, {})\n"),
+                        Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] Base_LongRange: fov {}, lag {}/{}, pitch {}/{}, {} offsets, key {} at ({}, {}, {})\n"),
                                                        mode.original.fov, mode.original.hlag, mode.original.vlag, mode.original.pitch_min,
                                                        mode.original.pitch_max, mode.original.offsets.size(), first.key, first.x, first.y, first.z);
                     }
@@ -272,7 +272,7 @@ namespace dwsc
             m_transition = static_cast<float>(tuning.transition);
             request_flip(player_camera);
             auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
-            Output::send<LogLevel::Normal>(STR("[DWSmoothCam] camera position applied: {} mode classes, {} live modes, {:.1f} ms\n"), classes, live, ms);
+            Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] camera position applied: {} mode classes, {} live modes, {:.1f} ms\n"), classes, live, ms);
         }
 
         // At unload, after the mod's callbacks are gone. Live instances keep their values until the game pushes
@@ -463,12 +463,12 @@ namespace dwsc
                       m_off.offset_size > 0 && m_off.offset_align > 0 && m_set_type && m_get_type;
             if (!ok)
             {
-                Output::send<LogLevel::Warning>(STR("[DWSmoothCam] camera mode layout not found, camera position tuning off\n"));
+                Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] camera mode layout not found, camera position tuning off\n"));
                 return false;
             }
             m_map_layout = FScriptMap::GetScriptLayout(1, 1, m_off.offset_size, m_off.offset_align); // ECameraType key: one byte
             m_layout_ok = true;
-            Output::send<LogLevel::Normal>(STR("[DWSmoothCam] camera mode layout: offsets map 0x{:X}, CameraOffset {} bytes, value at 0x{:X}\n"),
+            Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] camera mode layout: offsets map 0x{:X}, CameraOffset {} bytes, value at 0x{:X}\n"),
                                            m_off.offsets_map, m_off.offset_size, m_map_layout.ValueOffset);
             return true;
         }

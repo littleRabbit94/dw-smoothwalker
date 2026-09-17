@@ -1,10 +1,11 @@
-# DWSmoothCam: design and measurements
+# SmoothWalker: design and measurements
 
 ## Overview
 
-A SmoothCam-style third-person camera for The Blood of Dawnwalker, written as a C++ UE4SS mod. It lags the
-character pivot the game's camera view is built around, so following trails the character while orbiting
-stays instant, and it tunes distance, height, shoulder and FOV inside the game's own camera modes.
+A third-person camera for The Blood of Dawnwalker, in the style of Skyrim's SmoothCam, written as a C++
+UE4SS mod. It lags the character pivot the game's camera view is built around, so following trails the
+character while orbiting stays instant, and it tunes distance, height, shoulder and FOV inside the
+game's own camera modes.
 
 Everything here was measured on Steam build 25232147 under UE4SS `97b7e501` (Vercadi's rc6 unless noted),
 2026-09-16.
@@ -15,7 +16,7 @@ Source in `src/`, superbuild `CMakeLists.txt` against an RE-UE4SS checkout at `9
 cache variable `DW_RE_UE4SS_SOURCE_DIR`), output copied to `mod/dlls/main.dll` (git-ignored). Build:
 
 ```
-cmake --build <build dir> --config Game__Shipping__Win64 --target DWSmoothCam --parallel
+cmake --build <build dir> --config Game__Shipping__Win64 --target DWSmoothWalker --parallel
 ```
 
 `--parallel`, not `-- /m`: Git Bash rewrites `/m` into a path and MSBuild refuses it. A loaded
@@ -259,13 +260,13 @@ the centre (0.7.4).
   It also refuses an Apply when the file changed since the page opened ("config changed externally;
   reopen this mod"), which is why the 0.7 Load preset description said to reopen the page. 0.8.0 never
   writes the file while a page can be open, so that advice is gone.
-- **Config lives in `ue4ss/Mods/DWSmoothCam/config/`, not `scripts/config/`.** UE4SS creates a Lua mod for any
+- **Config lives in `ue4ss/Mods/DWSmoothWalker/config/`, not `scripts/config/`.** UE4SS creates a Lua mod for any
   mod folder with a `scripts` subfolder (`UE4SSProgram.cpp` 1424) and then logs a missing `main.lua` on every
-  start; this mod has no Lua. `mod_settings.ini` points at `config/smoothcam.ini`.
+  start; this mod has no Lua. `mod_settings.ini` points at `config/smoothwalker.ini`.
 
 ### The settings file
 
-- **Live settings without Lua** (0.5.0). `on_update` (UE4SS thread) checks `smoothcam.ini`'s write time every
+- **Live settings without Lua** (0.5.0). `on_update` (UE4SS thread) checks `smoothwalker.ini`'s write time every
   250 ms. The hook copies a numbers-only `Tuning` struct under a shared SRW lock, so nothing allocates on the
   worker thread. `toggle_key` and `preset_key` stay startup-only. UE4SS runs key callbacks on the same
   thread as `on_update` (`UE4SSProgram.cpp`, `process_event` then `fire_update`).
@@ -286,7 +287,7 @@ the centre (0.7.4).
   values, as `camera_tuning = 0` does), skips the per-tick aiming `GetState` calls, and V and N are ignored,
   so off is a clean A/B against the game's own camera. O sets `m_settings.enabled` too, so the write-back
   puts it in the file and the page shows it.
-- **Deferred write-back.** Nothing writes `smoothcam.ini` from O, V, N or a plain reload. The exception:
+- **Deferred write-back.** Nothing writes `smoothwalker.ini` from O, V, N or a plain reload. The exception:
   a reload that loaded a preset or saved a slot flushes at once. Deferred, a page reopened before
   the world ran again showed the new `preset` with the old sliders. The cost: the page still open refuses
   its next Apply ("reopen this mod"); its sliders were stale anyway. The desired file is every
@@ -300,10 +301,10 @@ the centre (0.7.4).
 - **Pending side file.** A preset loaded from the paused menu used to be lost if the game exited or
   hot-reloaded before the camera went live: the file kept `preset = 103` and any sliders, and startup does
   not treat `preset` as a load request. Whenever the pending set or the stamp changes, the DLL writes
-  `config/smoothcam.pending` (temp plus rename; the menu never reads it): the `smoothcam.ini` mtime
+  `config/smoothwalker.pending` (temp plus rename; the menu never reads it): the `smoothwalker.ini` mtime
   the state was computed against, then every differing key. It is deleted after a successful flush or when
   nothing is pending. At startup, after the full parse, it is applied onto the live settings only if
-  `smoothcam.ini`'s mtime still equals its stamp (the values then flush once live), and deleted either way.
+  `smoothwalker.ini`'s mtime still equals its stamp (the values then flush once live), and deleted either way.
 - **Startup flush.** The constructor runs the flush once without the `camera_live()` gate (stamp check
   kept). No page can be open while a mod constructs: on first start the menu has not run, and Ctrl+R
   uninstalls Lua mods before C++ mods reload (`UE4SSProgram.cpp` `uninstall_mods`, `queue_reinstall_mods`). This
@@ -319,7 +320,7 @@ the centre (0.7.4).
 - **Built-ins** (cycle order): Tight, Balanced, Cinematic. Follow values as 0.6.0: Tight (lag 25/20 cm,
   18/20 per s, constant), Balanced (the shipped default: 70/50 cm, 8/10 per s, smoothstep h), Cinematic
   (120/80 cm, 4/6 per s, ease in-out, floor 0.35, turning smoothed at 25). Balanced equals the shipped
-  `smoothcam.ini` on all 37 keys.
+  `smoothwalker.ini` on all 37 keys.
 
   | Key | Tight | Balanced | Cinematic |
   |---|---|---|---|
@@ -402,7 +403,7 @@ live; its `enabled` change is written back like the others, once the camera is l
 - **The region banner.** There is no free-text notification: every `NotificationSystemLibrary` push is
   typed. But `PushRegionEnteredNotification(WorldContextObject, FRegionData, bool IsNewlyDiscovered)` shows
   `RegionData.RegionDisplayText` in the region banner. Verified live 2026-09-16 with
-  `FText("SmoothCam: Cinematic")` and `IsNewlyDiscovered = false`: the banner appeared. Parameter layout:
+  `FText("SmoothWalker: Cinematic")` and `IsNewlyDiscovered = false`: the banner appeared. Parameter layout:
   WorldContextObject 0x00, RegionData 0x08 (RegionTag, GlossaryEntry, LootRegionTag as FNames at 0x00,
   0x08, 0x10; RegionDisplayText at 0x20), IsNewlyDiscovered 0x40, 0x48 total. The DLL checks those
   offsets against reflection once and turns banners off on a mismatch, builds the buffer zeroed, lends
@@ -425,7 +426,7 @@ live; its `enabled` change is written back like the others, once the camera is l
   subsystem is looked up once and kept as a `LiveRef`: `FindFirstOf("NotificationSubsystem")` measured 28 ms,
   0.4 s into every V glide.
 - **Ours are recognised by class and text** (0.7.4). No addresses are kept: a queued entry is ours only if it
-  is a `RegionEnteredNotificationInfo` whose text starts with `SmoothCam:`. (0.7.3 recorded the new last
+  is a `RegionEnteredNotificationInfo` whose text starts with `SmoothWalker:`. (0.7.3 recorded the new last
   entry of `NotificationQueue`, found by reflection, straight after each push and compared pointers only; a
   stale pointer could match the game's own notification at a reused address.) The banner flag is cleared
   under the mutex.
@@ -518,7 +519,7 @@ toggling the smoothing between captures (so "off" means the DLL loaded with the 
 original, the fair A/B for the math), order on, off, on, off. Poll sampler, 20 s per capture after a 2 s
 settle, all four valid with identical stamps (`sg.*` 2, ViewDistance 3, `r.ScreenPercentage` 58):
 
-| Capture | SmoothCam | n | mean ms | p50 ms | p95 ms | p99 ms | stutters |
+| Capture | SmoothWalker | n | mean ms | p50 ms | p95 ms | p99 ms | stutters |
 |---|---|---|---|---|---|---|---|
 | 13:17:08 | on | 945 | 21.25 | 21.14 | 23.28 | 24.23 | 0 |
 | 13:21:21 | off | 945 | 21.26 | 21.21 | 23.21 | 24.26 | 0 |
@@ -576,7 +577,7 @@ Soft leash, live settings, the Mod Menu page and the region banner, as described
 - **Presets were menu actions the DLL runs** (0.5.0-0.7.4; 0.8.0 replaced `preset_load` with the `preset`
   indicator). `preset_load` (101-103 built-in, 1-6 slot) and `preset_save` (1-6) were pickers. On the next
   poll the DLL saved the 12 `PRESET_KEYS` to `presets.ini`, or loaded a preset and rewrote those numbers in
-  `smoothcam.ini` in place (comments kept, temp file plus `MoveFileEx`), then set the picker back to 0. Save
+  `smoothwalker.ini` in place (comments kept, temp file plus `MoveFileEx`), then set the picker back to 0. Save
   ran before load when one Apply set both.
 - **Built-ins.** 0.6.0 introduced Tight, Balanced and Cinematic with the follow values above. 0.5.0 had
   Subtle/Cinematic/Responsive; in play only Cinematic felt different, and it read as pulled back and floaty
@@ -628,7 +629,7 @@ waits for running callbacks (`RemoveCallback` -> `WaitForExecutorsToFinish`).
 | `restore()` skipped CDOs dropped by `LoadMap`, so a reload could capture tuned values as originals | `restore()` re-captures before writing |
 | NaN from the ini (`std::stod` takes `nan`/`inf`) or a bad read stuck in the follow state and reached the view | Non-finite ini values ignored; non-finite pivot, view or result skips the frame |
 | The Mod Menu's rename leaves the ini briefly absent; a poll then reset every setting to defaults | A missing file after startup keeps the live settings and retries |
-| A stale banner pointer could match the game's own notification at a reused address | No addresses kept: a queued entry is ours only if it is a `RegionEnteredNotificationInfo` whose text starts with `SmoothCam:` |
+| A stale banner pointer could match the game's own notification at a reused address | No addresses kept: a queued entry is ours only if it is a `RegionEnteredNotificationInfo` whose text starts with `SmoothWalker:` |
 | `enabled`/O described as "the game's camera" but position tuning stayed on | Descriptions say it switches the follow only |
 | A negative shoulder offset could cross to the other shoulder | Offset stops at the centre |
 | After a mid-game hot reload the controller was only found on O, which also toggled smoothing off | One controller lookup requested at init |
@@ -649,7 +650,7 @@ still opens the page.
 ### 0.8.0: presets carry position, the Preset picker
 
 Three problems with 0.7: a preset left the camera position alone, the menu had no way to show which preset
-was active, and V and N wrote `smoothcam.ini` at once, so every Mod Menu Apply re-read the whole file and
+was active, and V and N wrote `smoothwalker.ini` at once, so every Mod Menu Apply re-read the whole file and
 anything written behind an open page made its next Apply fail.
 
 Changes, each described above: diff-based reload, deferred write-back, the pending side file and the

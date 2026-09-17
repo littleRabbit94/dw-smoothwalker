@@ -1,4 +1,4 @@
-// Settings (smoothcam.ini, rewritten in place by the Dawnwalker Mod Menu and re-read on change, written back by
+// Settings (smoothwalker.ini, rewritten in place by the Dawnwalker Mod Menu and re-read on change, written back by
 // the mod while the camera is live) and presets (config/presets/*.ini: slot files written by the mod,
 // drop-ins added by hand). Key names are read at startup: the menu can only move numbers.
 #pragma once
@@ -586,7 +586,7 @@ namespace dwsc
     inline auto slot_file_content(int slot, const Values& values) -> std::string
     {
         auto n = std::to_string(slot);
-        std::string out = "; DWSmoothCam Slot " + n + ", written by the mod when you save to it from the Mod Menu.\n"
+        std::string out = "; DWSmoothWalker Slot " + n + ", written by the mod when you save to it from the Mod Menu.\n"
                           "; To make a drop-in preset from it, copy this file, give the copy any other name, and change name below.\n";
         out += "name = Slot " + n + "\n";
         for (auto& [key, value] : values) out += key + " = " + format_number(value) + "\n";
