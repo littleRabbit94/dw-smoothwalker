@@ -1,8 +1,13 @@
 # SmoothCam - BoD Edition (DWSmoothCam)
 
-A smoother third-person camera for The Blood of Dawnwalker: the camera trails your character and catches up
-smoothly while turning stays instant. Distance, height, shoulder and FOV can be set per situation, with
-presets on `V`, on/off on `O` and a shoulder swap on `N`.
+A third-person camera for The Blood of Dawnwalker that trails your character and catches up smoothly while
+turning stays instant. While you aim, the trail eases down so the view stays on the crosshair. Distance,
+height, shoulder and FOV can be set per situation, with presets on `V`, on/off on `O` and a shoulder swap
+on `N`.
+
+I'm a hobbyist software engineer and I build utilities I want to use myself. This one exists because the
+game's camera is bolted to the character and I missed the follow from SmoothCam in Skyrim. `docs/design.md`
+records how it works and everything I measured along the way.
 
 ## Requirements
 
@@ -31,14 +36,16 @@ cmake --build <build dir> --config Game__Shipping__Win64 --target DWSmoothCam --
 
 The first build compiles UE4SS too. The output is copied to `mod/dlls/main.dll` (and `main.pdb`). Use
 `--parallel`, not `-- /m`: Git Bash rewrites `/m` into a path. To deploy, close the game and copy `mod/`
-to `Dawnwalker/Binaries/Win64/ue4ss/Mods/DWSmoothCam/`.
+to `Dawnwalker/Binaries/Win64/ue4ss/Mods/DWSmoothCam/`. An installed `config/smoothcam.ini` holds the player's
+settings: when a new setting is added, add its line there instead of overwriting the file. The Mod Menu page
+will not open while a `ConfigKey` is missing from it.
 
 ## Layout
 
 | Path | Contents |
 |---|---|
 | `CMakeLists.txt` | Superbuild: RE-UE4SS from `DW_RE_UE4SS_SOURCE_DIR`, then the `DWSmoothCam` target |
-| `src/` | The DLL source: `dllmain.cpp`, `config.hpp`, `mode_tuning.hpp`, `smoothing.hpp` |
+| `src/` | The DLL source: `dllmain.cpp` (hook, follow, settings, player discovery), `config.hpp` (settings and presets), `mode_tuning.hpp` (camera position in the game's modes, aiming state), `smoothing.hpp` (math) |
 | `mod/` | Exactly what ships under `ue4ss/Mods/DWSmoothCam/`: `enabled.txt`, `LICENSE`, `mod_settings.ini` (Mod Menu page), `config/smoothcam.ini`; `dlls/` is build output |
 | `release/` | `Build-Package.py`, the Nexus page description and metadata, `example-preset/` |
 | `docs/design.md` | How the mod works, the game's camera, measurements and version history |
@@ -57,7 +64,13 @@ writes `release/dist/SmoothCam-BoD-Edition-<version>.zip` and `release/dist/Smoo
 Copy `release/example-preset/Template.ini` into `ue4ss/Mods/DWSmoothCam/config/presets/` under a new name,
 change the `name` line and the values, and restart the game. Every key is commented with its range and
 default. The preset format and rules (37 keys, clamping, the 50 drop-in limit) are in `docs/design.md`,
-"Presets".
+"Presets". Switches and `aiming_follow` are not preset keys; a preset that sets them is ignored on those lines.
+
+## Checking a change in game
+
+With `log_stats = 1` the mod logs the per-frame hook cost every 5 s. Every camera position apply logs its own
+duration (`camera position applied: ... ms`): after the first apply of a session it should read about 0 ms,
+and a number in the tens means something walks the object array on a key press again.
 
 ## License
 

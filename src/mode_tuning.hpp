@@ -1,5 +1,6 @@
 // Camera position tuning: per-group distance, height, shoulder and FOV, the game's own lag and the look
-// limits, written into the game's camera modes. Game thread only, except restore() at unload.
+// limits, written into the game's camera modes. Game thread only, except note_new() (any thread) and
+// restore() at unload.
 //
 // Every write is computed from the CDO values captured the first time a class is seen, never from the
 // current value, so applies cannot compound. CameraOffsets is only re-read on a camera type change, so an

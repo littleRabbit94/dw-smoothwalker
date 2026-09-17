@@ -15,7 +15,7 @@ AI-Generated Content (read 2026-09-16).
 | Field | Value |
 |---|---|
 | Mod name | `SmoothCam - BoD Edition` |
-| Summary | `A smoother third-person camera: it trails your character while turning stays instant. Distance, height, shoulder and FOV per situation; presets on V, on/off on O, shoulder swap on N. Optional Mod Menu page. Needs UE4SS, Steam build 25232147.` |
+| Summary | `A third-person camera that trails your character while turning stays instant, and eases off when you aim. Distance, height, shoulder and FOV per situation. Presets on V, on/off on O, shoulder swap on N. Needs UE4SS and Steam build 25232147.` |
 | Version | `0.8.0` |
 | Category | `Utilities`, beside FreeCam (mod 350) |
 | Tags | `Camera`, `Quality of Life`, `Utilities for Players`, `AI-Generated Content` |
@@ -31,8 +31,8 @@ AI-Generated Content (read 2026-09-16).
 | File name | `SmoothCam - BoD Edition` |
 | Version | `0.8.0` |
 | Category | Main Files |
-| File | `dist/SmoothCam-BoD-Edition-0.8.0.zip`, 267,099 bytes, built 2026-09-16 |
-| Description | `Close the game, then extract into the folder that holds the ue4ss folder (Dawnwalker/Binaries/Win64, the one with Dawnwalker.exe). The archive carries the folder path, so the mod lands in ue4ss/Mods/DWSmoothCam on its own. Needs UE4SS (mod 18 or mod 283) and Steam build 25232147. No mods.txt edit.` |
+| File | `dist/SmoothCam-BoD-Edition-0.8.0.zip`, 270,964 bytes, built 2026-09-17 |
+| Description | `Close the game, then extract into the folder that holds the ue4ss folder (Dawnwalker/Binaries/Win64, the one with Dawnwalker.exe). The archive carries the folder path, so the mod lands in ue4ss/Mods/DWSmoothCam by itself. Needs UE4SS (mod 18 or mod 283) and Steam build 25232147. No mods.txt edit.` |
 
 Optional file:
 
@@ -41,8 +41,8 @@ Optional file:
 | File name | `SmoothCam Example Preset` |
 | Version | `0.8.0` |
 | Category | Optional Files |
-| File | `dist/SmoothCam-Example-Preset-0.8.0.zip`, 1,355 bytes, built 2026-09-16 |
-| Description | `One preset, Over the Shoulder: a closer camera further out over the shoulder. Every key is commented with its range and default, so it doubles as a template for your own. Extract into Dawnwalker/Binaries/Win64 like the main file; it lands in ue4ss/Mods/DWSmoothCam/config/presets. Restart the game, then pick it with V or from the Mod Menu. Needs the main file.` |
+| File | `dist/SmoothCam-Example-Preset-0.8.0.zip`, 1,399 bytes, built 2026-09-17 |
+| Description | `One preset, Over the Shoulder: a closer camera further out over the shoulder, with a quicker follow to match. I commented every key with its range and default, so it doubles as a template for your own. Extract into Dawnwalker/Binaries/Win64 like the main file; it lands in ue4ss/Mods/DWSmoothCam/config/presets. Restart the game, then pick it with V or from the Mod Menu. Needs the main file.` |
 
 Source: `example-preset/`. The build checks it holds a name and all 37 preset keys, each once, inside
 the Mod Menu range and on its step.
@@ -64,10 +64,14 @@ Credit field: `GPL-3.0-or-later. Built on UE4SS by the UE4SS-RE team (MIT). Runs
 
 ## Images
 
-| Image | Status |
-|---|---|
-| Header, 1600x900 | Not made. FreeCam's header script is marked retired; capture in game (Steam F12) |
-| Gallery | Wanted: the same spot on Balanced and on Cinematic; a sprint with distance raised; aiming over the other shoulder |
+| Image | File | Uploaded URL |
+|---|---|---|
+| Page header, 1300x372 | `dist/header-1300x372.png` | (fill in) |
+| Thumbnail, 1600x900 | `dist/thumbnail.png` | (fill in) |
+| Gallery | Wanted: the same spot on Balanced and on Cinematic; a sprint with distance raised; aiming over the other shoulder | |
+
+Nexus's header upload crops to 1300x372. How the two images were built (sources, fonts and their
+licenses, layer positions) is in `art/NOTES.md`, which is not tracked, like the rest of `art/` and `dist/`.
 
 ## Changelog tab
 
@@ -78,10 +82,11 @@ differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 0.8.0 - First release
 
 - The camera trails your character and catches up smoothly, horizontal and vertical each at its own rate and response curve, with a soft lag limit. Turning stays instant unless smoothed turning is on.
+- While you aim, the trail and any smoothed turning ease down to 30% so the view stays on your crosshair, and ease back afterwards. aiming_follow sets how much stays.
 - Stays in front of walls the game pulls its camera in for; snaps back after cutscenes, loads, the free camera and teleports.
-- Camera position per situation (exploring, sprinting, combat and focus, aiming, claw ride and anti-grav): distance, height, shoulder offset and field of view. Also the game's own camera lag, look up/down limits and a glide time for position changes.
+- Camera position per situation (exploring, sprinting, combat and focus, aiming, claw ride and anti-grav): distance, height, shoulder offset and field of view. Also the game's own camera lag (tightened by default, so one lag is felt instead of two), look up/down limits and a glide time for position changes.
 - Presets Tight, Balanced and Cinematic, each with its own follow feel and camera position, plus ten save slots and up to 50 presets from other authors dropped into config/presets. A preset carries follow, turning, snap thresholds and camera position; not the on/off switches, the shoulder side, banners or keys.
-- V cycles presets from the one you are on, with a banner naming each. O switches the follow on and off, N swaps shoulders.
+- V cycles presets from the one you are on, with a banner naming each. O switches the follow on and off, N swaps shoulders. None of them costs a frame: eight presses in a 20-second capture, worst frame 23 ms against an 18 ms average, no stutters.
 - Settings in config/smoothcam.ini apply within a quarter second while the game runs. Optional page for Dawnwalker Mod Menu covering every setting except the key bindings, with a Preset entry that shows which preset your settings match.
 - Built for UE4SS 97b7e501: Vercadi's rc6 (mod 18) or Framecore's 2b (mod 283, Performance or Compatibility profile). Steam build 25232147 only. On any other build the mod stays inactive and says so in UE4SS.log.
 ```
@@ -97,7 +102,12 @@ differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 - It also fails when `main.dll` is older than the newest file in `src/`. A `git
   checkout` touches source mtimes, so after switching branches rebuild before packaging.
 - The description's Settings spoiler lists the shipped defaults by hand; after changing a default
-  in `smoothcam.ini`, update it.
+  in `smoothcam.ini`, update it. `aiming_follow` is a setting but not a preset key: it belongs in the
+  Settings spoiler and must stay out of the preset authors' key list.
+- Voice: the description is first person, a hobbyist engineer explaining a utility he built. Say what
+  was measured and why a choice was made; no sales language, no em dashes.
+- The description links the GitHub repo: make it public (after the hygiene sweep) before posting, or
+  drop the "Source and bug reports" section.
 - Game build: the DLL hooks `RebelCameraComponent` vtable slot 214 (`docs/design.md`, "The
   per-frame hook") and refuses to hook when that slot is not overridden. A game patch that moves the
   slot leaves the mod inactive rather than crashing; the build, the page requirements and the Known

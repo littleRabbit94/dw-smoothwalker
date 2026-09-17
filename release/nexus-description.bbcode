@@ -1,24 +1,23 @@
 [size=5][b]SmoothCam - BoD Edition[/b][/size]
-[i]A smoother third-person camera: it trails your character instead of being bolted to it.[/i]
+[i]A third-person camera that trails your character instead of being bolted to it.[/i]
 
-The game's camera follows your character almost rigidly, so every step, stop and jump lands on the view at once. With this mod the camera trails a little behind and catches up smoothly, horizontally and vertically, each at its own rate. Turning the camera stays instant: only the follow lags, so aiming and looking around feel exactly as before. Near walls the camera still pulls in the way the game's does, and after a cutscene, a load or a teleport it snaps back to your character instead of gliding across the map.
+I'm a hobbyist software engineer, and I like building small utilities that other people end up finding useful. This one started with the camera in The Blood of Dawnwalker. It follows the character almost rigidly, so every step, stop and landing hits the view at once, and a few hours in I missed the softer follow I knew from SmoothCam in Skyrim. So I wrote one for this game.
 
-It also sets where the camera sits, separately for each situation: exploring, sprinting, combat and focus, aiming, and claw ride and anti-grav. For each one you choose the distance, height, shoulder offset and field of view. Everything is set in an ini file, or from an in-game page if you also run [url=https://www.nexusmods.com/thebloodofdawnwalker/mods/271]Dawnwalker Mod Menu[/url].
+With the mod, the camera trails a little behind your character and catches up smoothly, with separate rates for horizontal and vertical movement. Turning is left alone: only the follow lags, so looking around feels the same as before. While you aim, the trail eases down to 30% so the view stays on your crosshair, and it eases back when you lower the weapon. Near walls the camera pulls in the way the game's own does. After a cutscene, a load or a teleport it snaps to your character instead of gliding across the map.
+
+It also sets where the camera sits, separately for exploring, sprinting, combat and focus, aiming, and claw ride and anti-grav. Each one gets its own distance, height, shoulder offset and field of view. Settings live in an ini file, or on an in-game page if you also run [url=https://www.nexusmods.com/thebloodofdawnwalker/mods/271]Dawnwalker Mod Menu[/url]. Either way, changes apply while the game runs.
 
 [size=4][b]Presets and keys[/b][/size]
 [list]
 [*][font=Courier New]O[/font]: switch the smooth follow on and off.
-[*][font=Courier New]V[/font]: cycle presets, starting from the one you are on. [b]Tight[/b] barely trails, with the camera a little closer. [b]Balanced[/b] is a clear trail that settles fast, with the game's own camera position (the default). [b]Cinematic[/b] is a heavy, slow trail with smoothed turning, the camera pulled back, higher and wider. Your ten save slots come after them, then any presets you installed from other authors.
+[*][font=Courier New]V[/font]: cycle presets, starting from the one you are on. [b]Tight[/b] barely trails, with the camera a little closer. [b]Balanced[/b] is the default: a clear trail that settles fast, with the camera where the game puts it. [b]Cinematic[/b] is a heavy, slow trail with smoothed turning, the camera a little further back and higher, and a wider view when you sprint. Your ten save slots come after them, then any presets you installed from other authors.
 [*][font=Courier New]N[/font]: move the camera to the other shoulder. It glides across in half a second.
 [/list]
-A short banner at the top of the screen names the preset, or says On or Off. Quick presses show one banner with the last name. A preset carries the follow feel, turning, the snap thresholds and the whole camera position (distance, height, shoulder offset and field of view per situation, look limits). It leaves alone the on/off switches, which shoulder the camera is on, banners and keys. All three keys can be changed in the ini.
-
-[size=4][b]Performance[/b][/size]
-The camera math runs once per frame inside the game's camera update and takes 3.3 to 3.6 microseconds, measured at 47 and 57 fps, standing and moving. That is about 0.02 % of a 21 ms frame. A whole-frame A/B with UEBench (four 20-second captures, alternating on and off at the same spot) found no measurable frame-time difference: median frame times of 21.19 ms on and 21.22 ms off, a gap smaller than the spread between two captures in the same state, and no stutters either way.
+A short banner at the top of the screen names the preset, or says On or Off. Quick presses show one banner with the last name. A preset carries the follow feel, turning, the snap thresholds and the whole camera position (distance, height, shoulder offset and field of view per situation, plus the look limits). It leaves the on/off switches, the shoulder side, the aiming setting, banners and keys alone. All three keys can be changed in the ini.
 
 [size=4][b]Requirements[/b][/size]
 [list]
-[*]UE4SS, one of these two. Both run UE4SS commit 97b7e501, which the DLL is built against; C++ mods only load on the UE4SS they were built for.
+[*]UE4SS, one of these two. Both run UE4SS commit 97b7e501, which the DLL is built against. C++ mods only load on the UE4SS they were built for.
 [list]
 [*][url=https://www.nexusmods.com/thebloodofdawnwalker/mods/18]UE4SS for Dawnwalker[/url] by Vercadi, file [font=Courier New]Dawnwalker-UE4SS-v1.2.1-rc6-build25232147[/font] (version 1.3 on that page).
 [*][url=https://www.nexusmods.com/thebloodofdawnwalker/mods/283]UE4SS for BoD[/url] by Framecore, version 2b, in either its Performance or its Compatibility profile.
@@ -27,26 +26,27 @@ The camera math runs once per frame inside the game's camera update and takes 3.
 [*]Optional: [url=https://www.nexusmods.com/thebloodofdawnwalker/mods/271]Dawnwalker Mod Menu[/url] for the in-game settings page.
 [/list]
 
-[size=4][b]Install[/b][/size]
-Close the game first. Extract the archive into the folder that contains the [i]ue4ss[/i] folder and [font=Courier New]Dawnwalker.exe[/font]:
+[size=4][b]Installation[/b][/size]
+[b]1)[/b] Close the game.
+[b]2)[/b] Extract the archive into the folder that contains the [i]ue4ss[/i] folder and [font=Courier New]Dawnwalker.exe[/font]:
 [code]<Steam library>\steamapps\common\The Blood of Dawnwalker\Dawnwalker\Binaries\Win64[/code]
-The archive contains the path, so the mod lands in [font=Courier New]ue4ss\Mods\DWSmoothCam[/font]. No [font=Courier New]mods.txt[/font] edit: [font=Courier New]enabled.txt[/font] in the mod folder enables it. [font=Courier New]UE4SS.log[/font] shows this on load:
+[b]3)[/b] Start the game. The archive carries the folder path, so the mod lands in [font=Courier New]ue4ss\Mods\DWSmoothCam[/font] by itself. There is no [font=Courier New]mods.txt[/font] edit: [font=Courier New]enabled.txt[/font] in the mod folder switches it on.
+
+[font=Courier New]UE4SS.log[/font] shows these two lines when it loaded:
 [code][DWSmoothCam] v0.8.0 loaded, on
 [DWSmoothCam] GetCameraView hooked (slot 214)[/code]
 
-Uninstall: close the game and delete [font=Courier New]ue4ss\Mods\DWSmoothCam[/font]. Nothing is written to save games; the camera changes live in memory and are gone on the next launch.
+To uninstall, close the game and delete [font=Courier New]ue4ss\Mods\DWSmoothCam[/font]. Nothing is written to save games. The camera changes live in memory and are gone on the next launch.
 
-[size=4][b]Dawnwalker Mod Menu page[/b][/size] (optional)
-With [url=https://www.nexusmods.com/thebloodofdawnwalker/mods/271]Dawnwalker Mod Menu[/url] installed, SmoothCam gets its own page under Mod Settings, in the main menu and in the pause menu. It covers every setting except the three key bindings. The Preset entry at the top shows which preset your settings match, or Custom; pick another and press Apply to load it. Press Apply and any change takes effect within a quarter second, with no restart. The sliders show a loaded preset's values the next time you open the page.
+[b]Settings in game.[/b] With [url=https://www.nexusmods.com/thebloodofdawnwalker/mods/271]Dawnwalker Mod Menu[/url] installed, SmoothCam gets its own page under Mod Settings, in the main menu and in the pause menu. It covers every setting except the three key bindings. The Preset entry at the top shows which preset your settings match, or Custom. Pick another and press Apply to load it. A change takes effect within a quarter second of Apply, with no restart.
 
-Without the Mod Menu, edit [font=Courier New]config\smoothcam.ini[/font] in the mod folder. Changes apply within a quarter second while the game runs; save the file and look back at the game. Key bindings are read when the game starts.
+[b]Settings without the Mod Menu.[/b] Edit [font=Courier New]config\smoothcam.ini[/font] in the mod folder. Save the file and look back at the game: changes apply within a quarter second. Key bindings are the exception, they are read when the game starts.
 
-[size=4][b]Known limits[/b][/size]
+[b]Common issues[/b]
 [list]
-[*]Supports Steam build 25232147 only. On any other build the mod refuses to hook the camera and stays inactive. [font=Courier New]UE4SS.log[/font] says so: [font=Courier New]unsupported game build, mod inactive[/font].
+[*]The mod supports Steam build 25232147 only. On any other build it refuses to hook the camera and stays inactive, and [font=Courier New]UE4SS.log[/font] says so: [font=Courier New]unsupported game build, mod inactive[/font]. I would rather it do nothing than crash your game after a patch.
 [*]After loading a preset from the Mod Menu, the open page still shows the old slider values and the old Preset entry until you reopen it. Changes you apply in the meantime still land on top of the loaded preset.
 [*][font=Courier New]V[/font] and [font=Courier New]N[/font] are ignored while the game is paused, including with the Mod Menu open. [font=Courier New]O[/font] works at any time.
-[*]While you aim, the trail and the smoothed turning (on in Cinematic) ease down to 30% so the view stays on your aim, and ease back when you lower it. [font=Courier New]aiming_follow[/font] sets how much stays.
 [/list]
 
 [size=4][b]Compatibility[/b][/size]
@@ -56,6 +56,11 @@ Without the Mod Menu, edit [font=Courier New]config\smoothcam.ini[/font] in the 
 [*]Framecore's UE4SS in Compatibility mode logs [font=Courier New]A callback for 'LoadMap' must return bool or nil[/font] on each load and one [font=Courier New]bad conversion[/font] at startup. Both come from UE4SS's bundled BPModLoaderMod and ConsoleEnablerMod, not from SmoothCam.
 [*]Keys: SmoothCam uses [font=Courier New]O[/font], [font=Courier New]V[/font] and [font=Courier New]N[/font], all unbound in this game. P, F5 and F9 are used by the game.
 [/list]
+
+[size=4][b]Performance[/b][/size]
+A camera mod that costs frames is not worth running, so I measured this one. The camera math runs once per frame inside the game's camera update and takes 3.3 to 3.6 microseconds, measured at 47 and 57 fps, standing and moving. That is about 0.02% of a 21 ms frame. A whole-frame A/B with UEBench (four 20-second captures, alternating on and off at the same spot) found no measurable difference: median frame times of 21.19 ms on and 21.22 ms off, a gap smaller than the spread between two captures in the same state, and no stutters either way.
+
+Switching presets or shoulders is free as well. Eight presses inside one 20-second capture left the worst frame at 23 ms against an 18 ms average, with no stutters.
 
 [size=4][b]Settings[/b][/size] ([font=Courier New]config\smoothcam.ini[/font] in the mod folder)
 [spoiler]
@@ -84,8 +89,8 @@ Without the Mod Menu, edit [font=Courier New]config\smoothcam.ini[/font] in the 
 [b]Camera position[/b] (100 / 0 / 0 / 0 is the game as shipped; in presets except the two switches)
 [list]
 [*][font=Courier New]camera_tuning = 1[/font]: 0 puts every camera mode back as the game ships it.
-[*]Per group, with the prefix [font=Courier New]exploration_[/font], [font=Courier New]sprint_[/font], [font=Courier New]combat_[/font], [font=Courier New]aiming_[/font] or [font=Courier New]traversal_[/font]: [font=Courier New]distance[/font] (% of the game's, 50 to 250), [font=Courier New]height[/font] (cm), [font=Courier New]shoulder[/font] (cm further out; centred cameras stay centred; not for traversal), [font=Courier New]fov[/font] (degrees added).
-[*][font=Courier New]game_lag_scale = 3[/font]: multiplies the game's own camera lag speeds. The game lags its camera a little by itself, and two lags stacked feel mushy; higher makes the game's part tighter, so SmoothCam's follow is the one you feel. 1 is the game's own.
+[*]Per group, with the prefix [font=Courier New]exploration_[/font], [font=Courier New]sprint_[/font], [font=Courier New]combat_[/font], [font=Courier New]aiming_[/font] or [font=Courier New]traversal_[/font]: [font=Courier New]distance[/font] (% of the game's, 50 to 250), [font=Courier New]height[/font] (cm), [font=Courier New]shoulder[/font] (cm further out; centered cameras stay centered; not for traversal), [font=Courier New]fov[/font] (degrees added).
+[*][font=Courier New]game_lag_scale = 3[/font]: multiplies the game's own camera lag speeds. The game lags its camera a little by itself, and two lags stacked feel mushy. Higher makes the game's part tighter, so SmoothCam's follow is the one you feel. 1 is the game's own.
 [*][font=Courier New]shoulder_swap = 0[/font]: 1 is the other shoulder. [font=Courier New]N[/font] switches it.
 [*][font=Courier New]position_transition = 0.5[/font]: seconds a position change or shoulder swap glides over. 0 snaps.
 [*][font=Courier New]pitch_min = -60[/font], [font=Courier New]pitch_max = 40[/font]: look down and up limits while exploring, sprinting and in focus. Aiming and combat already allow -89 / 89.
@@ -95,7 +100,7 @@ Without the Mod Menu, edit [font=Courier New]config\smoothcam.ini[/font] in the 
 
 [size=4][b]For mod authors: making a preset[/b][/size]
 [spoiler]
-The optional file [b]SmoothCam Example Preset[/b] (Files tab) installs one preset, Over the Shoulder, with every key commented: range, default and what it does. It is the quickest template to copy.
+If you land on a camera you like, share it. The optional file [b]SmoothCam Example Preset[/b] (Files tab) installs one preset, Over the Shoulder, with every key commented: range, default and what it does. It is the quickest template to copy.
 
 A preset is one [b].ini[/b] file in [i]ue4ss\Mods\DWSmoothCam\config\presets[/i]. SmoothCam reads that folder when the game starts, lists each file in V's cycle after the player's own slots, and adds it to the Preset entry on the Mod Menu page under its name.
 
@@ -119,7 +124,7 @@ exploration_fov = 5[/code]
 [*]One [b]key = value[/b] per line. A preset may list only the keys it wants to change; loading it leaves every other setting as the player has it.
 [*][b]name[/b]: up to 48 bytes. The characters [b]|[/b], [b];[/b] and [b]#[/b] cannot appear in it. Without a name line the file name is used.
 [*]Values outside a setting's range are clamped to the range, and 0/1 settings treat anything but 0 as 1.
-[*]Keys that are not listed below are ignored, so a preset cannot change the on/off switches, the shoulder side, banners or key bindings.
+[*]Keys that are not listed below are ignored, so a preset cannot change the on/off switches, the shoulder side, the aiming setting, banners or key bindings.
 [*]Up to 50 presets in the folder are used, in file-name order. Files over 64 KB, or without a single preset key, are skipped. [font=Courier New]UE4SS.log[/font] lists each preset it loaded.
 [/list]
 
@@ -136,5 +141,8 @@ exploration_fov = 5[/code]
 Pack the file with its folder path, [i]ue4ss\Mods\DWSmoothCam\config\presets\YourName - Low Chase.ini[/i], so players extract it into [i]Dawnwalker\Binaries\Win64[/i] as they did SmoothCam. List SmoothCam as a requirement. Give the file a name no other preset is likely to use; a file with the same name replaces the other on extract.
 [/spoiler]
 
+[size=4][b]Source and bug reports[/b][/size]
+The source is on [url=https://github.com/littleRabbit94/dawnwalker-smoothcam]GitHub[/url], with a design document that covers how the camera hook works and everything I measured along the way. If something looks wrong, a post with the DWSmoothCam lines from your [font=Courier New]UE4SS.log[/font], your game build and which UE4SS package you run is usually enough for me to find it.
+
 [size=4][b]Credits[/b][/size]
-Built on [url=https://github.com/UE4SS-RE/RE-UE4SS]UE4SS[/url] by the UE4SS-RE team (MIT). Runs on [url=https://www.nexusmods.com/thebloodofdawnwalker/mods/18]Vercadi's[/url] and [url=https://www.nexusmods.com/thebloodofdawnwalker/mods/283]Framecore's[/url] UE4SS packages for this game. GPL-3.0-or-later, included in the archive. Inspired by SmoothCam for Skyrim; not affiliated with it or its author.
+Built on [url=https://github.com/UE4SS-RE/RE-UE4SS]UE4SS[/url] by the UE4SS-RE team (MIT). Runs on [url=https://www.nexusmods.com/thebloodofdawnwalker/mods/18]Vercadi's[/url] and [url=https://www.nexusmods.com/thebloodofdawnwalker/mods/283]Framecore's[/url] UE4SS packages for this game, and the settings page exists thanks to [url=https://www.nexusmods.com/thebloodofdawnwalker/mods/271]Dawnwalker Mod Menu[/url]. GPL-3.0-or-later, included in the archive. Inspired by SmoothCam for Skyrim; not affiliated with it or its author.
