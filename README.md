@@ -1,21 +1,17 @@
 # SmoothWalker - Third Person Camera (DWSmoothWalker)
 
 A third-person camera for The Blood of Dawnwalker that trails your character and catches up smoothly while
-turning stays instant. While you aim, the trail eases down so the view stays on the crosshair. Distance,
-height, shoulder and FOV can be set per situation, with a shoulder swap on `V`. Presets and on/off live
-on the Mod Menu page and in the ini, and can be given keys there.
-
-I'm a hobbyist software engineer and I build utilities I want to use myself. This one exists because the
-game's camera is bolted to the character and I missed the follow from SmoothCam in Skyrim. `docs/design.md`
-records how it works and everything I measured along the way.
+turning stays responsive. While you aim, the trail eases down so the view stays on the crosshair. Distance,
+height, shoulder and FOV can be set per mode, with a shoulder swap on `V`. Presets and on/off live
+on the Mod Settings Menu page and in the ini, and can be given keys there.
 
 ## Requirements
 
-- The Blood of Dawnwalker, Steam build 25232147. On any other build the mod stays inactive.
+- The Blood of Dawnwalker, Steam build 1.0.5 (25232147).
 - UE4SS at commit `97b7e501`, from either:
   - Vercadi's UE4SS for Dawnwalker, rc6 (Nexus mod 18), or
   - Framecore's UE4SS for BoD, 2b, Performance or Compatibility profile (Nexus mod 283).
-- Optional: Dawnwalker Mod Menu (Nexus mod 271) for the in-game settings page. Without it, edit
+- Optional: Mod Settings Menu (Nexus mod 271) for the in-game settings page. Without it, edit
   `config/smoothwalker.ini`.
 
 ## Install (players)
@@ -79,4 +75,4 @@ GPL-3.0-or-later. See `LICENSE`.
 ## Credits
 
 Built on [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) by the UE4SS-RE team (MIT).
-Inspired by SmoothCam for Skyrim; not affiliated with it or its author.
+Inspired by SmoothCam for Skyrim
