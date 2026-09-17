@@ -1,4 +1,4 @@
-# SmoothCam - UE4SS (DWSmoothCam)
+# SmoothCam - BoD Edition (DWSmoothCam)
 
 A smoother third-person camera for The Blood of Dawnwalker: the camera trails your character and catches up
 smoothly while turning stays instant. Distance, height, shoulder and FOV can be set per situation, with
@@ -50,7 +50,7 @@ python release/Build-Package.py
 ```
 
 Checks versions, the Mod Menu manifest against `smoothcam.ini`, DLL freshness and the example preset, then
-writes `release/dist/SmoothCam-UE4SS-<version>.zip` and `release/dist/SmoothCam-Example-Preset-<version>.zip`.
+writes `release/dist/SmoothCam-BoD-Edition-<version>.zip` and `release/dist/SmoothCam-Example-Preset-<version>.zip`.
 
 ## Making presets
 
@@ -66,3 +66,4 @@ GPL-3.0-or-later. See `LICENSE`.
 ## Credits
 
 Built on [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) by the UE4SS-RE team (MIT).
+Inspired by SmoothCam for Skyrim; not affiliated with it or its author.

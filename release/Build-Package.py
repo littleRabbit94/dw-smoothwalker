@@ -1,6 +1,6 @@
-"""Build the SmoothCam - UE4SS (DWSmoothCam) archive for Nexus.
+"""Build the SmoothCam - BoD Edition (DWSmoothCam) archive for Nexus.
 
-Output: release/dist/SmoothCam-UE4SS-<version>.zip. The archive carries the ue4ss/Mods/DWSmoothCam/
+Output: release/dist/SmoothCam-BoD-Edition-<version>.zip. The archive carries the ue4ss/Mods/DWSmoothCam/
 path, so extracting it into Dawnwalker\Binaries\Win64 installs the mod:
 
     ue4ss/Mods/DWSmoothCam/dlls/main.dll
@@ -208,7 +208,7 @@ def main() -> int:
     check_example(examples[0], sections)
 
     DIST.mkdir(exist_ok=True)
-    out = DIST / f"SmoothCam-UE4SS-{ver}.zip"
+    out = DIST / f"SmoothCam-BoD-Edition-{ver}.zip"
     prefix = f"ue4ss/Mods/{MOD_NAME}/"
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(dll, prefix + "dlls/main.dll")

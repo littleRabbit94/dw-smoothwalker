@@ -1,4 +1,4 @@
-# Nexus page metadata for SmoothCam - UE4SS
+# Nexus page metadata for SmoothCam - BoD Edition
 
 Game page: https://www.nexusmods.com/thebloodofdawnwalker (game id 9719, domain
 `thebloodofdawnwalker`). Source: `src/` (DLL) and `mod/` (mod folder).
@@ -14,7 +14,7 @@ AI-Generated Content (read 2026-09-16).
 
 | Field | Value |
 |---|---|
-| Mod name | `SmoothCam - UE4SS` |
+| Mod name | `SmoothCam - BoD Edition` |
 | Summary | `A smoother third-person camera: it trails your character while turning stays instant. Distance, height, shoulder and FOV per situation; presets on V, on/off on O, shoulder swap on N. Optional Mod Menu page. Needs UE4SS, Steam build 25232147.` |
 | Version | `0.8.0` |
 | Category | `Utilities`, beside FreeCam (mod 350) |
@@ -28,10 +28,10 @@ AI-Generated Content (read 2026-09-16).
 
 | Field | Value |
 |---|---|
-| File name | `SmoothCam - UE4SS` |
+| File name | `SmoothCam - BoD Edition` |
 | Version | `0.8.0` |
 | Category | Main Files |
-| File | `dist/SmoothCam-UE4SS-0.8.0.zip`, 267,099 bytes, built 2026-09-16 |
+| File | `dist/SmoothCam-BoD-Edition-0.8.0.zip`, 267,099 bytes, built 2026-09-16 |
 | Description | `Close the game, then extract into the folder that holds the ue4ss folder (Dawnwalker/Binaries/Win64, the one with Dawnwalker.exe). The archive carries the folder path, so the mod lands in ue4ss/Mods/DWSmoothCam on its own. Needs UE4SS (mod 18 or mod 283) and Steam build 25232147. No mods.txt edit.` |
 
 Optional file:
