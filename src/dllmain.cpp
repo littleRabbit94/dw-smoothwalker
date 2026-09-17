@@ -567,13 +567,21 @@ class DWSmoothCam : public CppUserModBase
         bool load_map = hooks.bHookLoadMap && add(Hook::RegisterLoadMapPreCallback(
                                                       [this](auto&, UEngine*, FWorldContext&, FURL, UPendingNetGame*, FString&) { forget_world(); },
                                                       options));
-        // Runs on whatever thread constructs the object (async loading threads too): only a flag test, an FName
-        // compare and, on a match, an index read and a locked hand-off into m_new_controller.
+        // Runs on whatever thread constructs the object (async loading threads too): only a flag test, a pointer
+        // and an FName compare and, on a match, an index read and a locked hand-off (a mode pushed on the
+        // player's camera into m_tuner, the controller into m_new_controller).
         bool new_object = add(Hook::RegisterStaticConstructObjectPostCallback(
                 [this](auto& info, const FStaticConstructObjectParameters& params) {
                     if (static_cast<uint32_t>(params.SetFlags) & static_cast<uint32_t>(RF_ClassDefaultObject | RF_ArchetypeObject)) return;
                     auto* cls = const_cast<UClass*>(params.Class);
-                    if (!cls || cls->GetNamePrivate() != m_player_controller_name) return;
+                    if (!cls) return;
+                    auto* camera = g_player_camera.load(std::memory_order_relaxed);
+                    if (camera && params.Outer == camera)
+                    {
+                        if (auto* mode = info.GetCurrentResolvedReturnValue()) m_tuner.note_new(dwsc::LiveRef::of(mode));
+                        return;
+                    }
+                    if (cls->GetNamePrivate() != m_player_controller_name) return;
                     auto* object = info.GetCurrentResolvedReturnValue();
                     if (!object) return;
                     std::lock_guard guard(m_new_controller_mutex);
@@ -1498,6 +1506,7 @@ class DWSmoothCam : public CppUserModBase
         g_player_root.store(root.object);
         g_player_camera.store(camera.object);
         m_position_applied_generation = 0; // a new pawn: its modes get the current position
+        m_tuner.camera_changed();
         m_offset_wait = std::chrono::seconds(2);
         Output::send<LogLevel::Normal>(STR("[DWSmoothCam] following {}\n"), pawn->GetName());
     }

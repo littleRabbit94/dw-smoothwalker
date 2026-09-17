@@ -208,15 +208,20 @@ the centre (0.7.4).
   values. At unload the CDOs get the originals back; live instances keep their values until the game pushes
   new modes. `restore()` re-captures before writing, and does nothing unless this session applied. A neutral
   apply was checked live: every value equal to the shipped one.
-- **Where writes go.** Every captured CDO (new instances copy it), then the player camera's live modes. A
-  mode's outer is the `FollowCamera` it was pushed on (checked live), so each apply makes one
-  `ForEachUObject` pass comparing the outer pointer, then the class against the captured classes, and keeps
-  the hits as `LiveRef`s for the flip's two blend-time writes, each checked against the object array before
-  use. Until then every apply and both flip stages called `FindAllOf("RebelCameraModeTPP")`, which compares
-  names up every object's class chain: measured 58-64 ms a call on the game thread (435,100 objects), so
-  each N or V dropped 3-4 frames at the press, again on the next frame and again 0.25 s after the glide.
-  The apply log line carries its own duration. Modes on other cameras are left alone: new instances copy
-  the CDO and a new player camera gets its own apply.
+- **Where writes go.** Every captured CDO (new instances copy it), then the player camera's live modes, held
+  as `LiveRef`s and checked against the object array before every write (the apply and the flip's two
+  blend-time writes). A mode's outer is the `FollowCamera` it was pushed on (checked live). The list is
+  filled two ways. Once per camera or world, one `ForEachUObject` pass compares each object's outer with the
+  camera, then its class with the captured classes. After that the new-object callback hands over anything
+  constructed with the player's camera as outer (one pointer compare per constructed object, a locked
+  hand-off on a match, at most 256 waiting or the next apply scans again), and the apply sorts modes from
+  the rest and drops collected ones. History: every apply and both flip stages called
+  `FindAllOf("RebelCameraModeTPP")`, which compares names up every object's class chain: 58-64 ms a call on
+  the game thread (435,100 objects), so each N or V dropped 3-4 frames at the press, again on the next frame
+  and again 0.25 s after the glide. The outer-compare pass alone still read every object and measured
+  23-27 ms per press (UEBench over five presses: max frame 34.3 ms against a 19.7 ms mean, 0 stutters),
+  which is why it now runs only where a load hides it. The apply log line carries its own duration. Modes
+  on other cameras are left alone: new instances copy the CDO and a new player camera gets its own apply.
 - **The flip waits for the camera.** `CameraOffsets` is only read on a camera type change. 0.7.0 flipped the
   type over two engine ticks, and an Apply from the Mod Menu landed while the menu had the world paused:
   the camera never updated between the two flips and the new distance showed only later. 0.7.1 counts

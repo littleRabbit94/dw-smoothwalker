@@ -8,10 +8,12 @@
 
 #include "config.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -211,6 +213,22 @@ namespace dwsc
             m_flip_again = false;
             m_flip_camera = nullptr;
             m_live.clear();
+            m_scan_needed = true;
+        }
+
+        // A new player camera: its modes were made before the new-object callback could see them.
+        auto camera_changed() -> void
+        {
+            m_scan_needed = true;
+        }
+
+        // From the new-object callback, on whatever thread constructs the object, for an object whose outer is
+        // the player's camera: only the hand-off. adopt_new() sorts modes from the rest on the game thread.
+        auto note_new(LiveRef object) -> void
+        {
+            std::lock_guard guard(m_new_mutex);
+            if (m_new.size() < MAX_NEW) m_new.push_back(object);
+            else m_new_overflow = true;
         }
 
         auto apply(const PositionTuning& tuning, UObject* player_camera) -> void
@@ -226,7 +244,8 @@ namespace dwsc
                 ++classes;
             }
             int live = 0;
-            scan_instances(player_camera);
+            adopt_new();
+            if (m_scan_needed) scan_instances(player_camera);
             for_each_instance([&](UObject* instance, Mode& mode) {
                 write(instance, mode, tuning);
                 ++live;
@@ -350,7 +369,12 @@ namespace dwsc
             for (auto& spec : mode_classes()) modes.push_back({spec});
             return modes;
         }();
-        std::vector<std::pair<LiveRef, size_t>> m_live; // the player's live modes at the last apply, with their m_modes index
+        std::vector<std::pair<LiveRef, size_t>> m_live; // the player's live modes, with their m_modes index
+        bool m_scan_needed = true;                      // m_live does not cover this camera yet
+        static constexpr size_t MAX_NEW = 256;
+        std::mutex m_new_mutex;                         // m_new, m_new_overflow: written by note_new on any thread
+        std::vector<LiveRef> m_new;
+        bool m_new_overflow = false;
         Offsets m_off;
         bool m_layout_ok = false;
         bool m_layout_tried = false;
@@ -453,26 +477,51 @@ namespace dwsc
             memcpy(reinterpret_cast<uint8_t*>(object) + offset, &value, sizeof(value));
         }
 
-        // The player's live modes, once per apply: objects whose outer is the camera and whose class is a
-        // captured mode. Not FindAllOf: its name compares up every class chain took 60 ms a call, three calls a
-        // swap. Other cameras' modes are left alone: new instances copy the CDO, and a new player camera gets
-        // its own apply.
+        // m_live gains a live object if it is one of the captured modes and not held yet.
+        auto keep_if_mode(LiveRef ref) -> void
+        {
+            for (size_t i = 0; i < m_modes.size(); ++i)
+            {
+                if (!m_modes[i].captured || m_modes[i].cls != ref.cls || ref.object == m_modes[i].cdo) continue;
+                bool held = std::any_of(m_live.begin(), m_live.end(), [&](auto& entry) { return entry.first.object == ref.object; });
+                if (!held) m_live.push_back({ref, i});
+                return;
+            }
+        }
+
+        // The player's live modes: objects whose outer is the camera and whose class is a captured mode. It reads
+        // every object (24 ms measured; FindAllOf's name compares took 60), so it runs once per camera or world,
+        // where a load hides it, and note_new() supplies modes pushed later. Other cameras' modes are left
+        // alone: new instances copy the CDO, and a new player camera gets its own apply.
         auto scan_instances(UObject* player_camera) -> void
         {
             drop_dead_classes();
             m_live.clear();
             if (!player_camera) return;
             UObjectGlobals::ForEachUObject([&](UObject* object, int32, int32) {
-                if (object->GetOuterPrivate() != player_camera) return LoopAction::Continue;
-                auto* cls = object->GetClassPrivate();
-                for (size_t i = 0; i < m_modes.size(); ++i)
-                {
-                    if (!m_modes[i].captured || m_modes[i].cls != cls || object == m_modes[i].cdo) continue;
-                    m_live.push_back({LiveRef::of(object), i});
-                    break;
-                }
+                if (object->GetOuterPrivate() == player_camera) keep_if_mode(LiveRef::of(object));
                 return LoopAction::Continue;
             });
+            m_scan_needed = false;
+        }
+
+        // Game thread. Takes what note_new() handed over and drops collected modes. After an overflow the
+        // list may have missed a mode, so the next apply scans.
+        auto adopt_new() -> void
+        {
+            std::vector<LiveRef> fresh;
+            {
+                std::lock_guard guard(m_new_mutex);
+                fresh.swap(m_new);
+                if (m_new_overflow) m_scan_needed = true;
+                m_new_overflow = false;
+            }
+            drop_dead_classes();
+            std::erase_if(m_live, [](auto& entry) { return !entry.first.alive(); });
+            for (auto& ref : fresh)
+            {
+                if (ref.alive()) keep_if_mode(ref);
+            }
         }
 
         // LiveRefs, not pointers: a popped mode can be collected at any GC.
