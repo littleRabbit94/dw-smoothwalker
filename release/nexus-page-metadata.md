@@ -66,8 +66,8 @@ Credit field: `GPL-3.0-or-later. Built on UE4SS by the UE4SS-RE team (MIT). Runs
 
 | Image | File | Uploaded URL |
 |---|---|---|
-| Page header, 1300x372 | `dist/header-1300x372.png` | (fill in) |
-| Thumbnail, 1600x900 | `dist/thumbnail.png` | (fill in) |
+| Page header, 1300x372 | `dist/header-1300x372-coen.png` | (fill in) |
+| Thumbnail, 1600x900 | `dist/thumbnail-coen.png` | (fill in) |
 | Gallery | Wanted: the same spot on Balanced and on Cinematic; a sprint with distance raised; aiming over the other shoulder | |
 
 Nexus's header upload crops to 1300x372. How the two images were built (sources, fonts and their
