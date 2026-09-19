@@ -24,7 +24,7 @@
 namespace dwsc
 {
     // Saved preset slots, ids 1..MAX_SLOTS (60 ceiling: see MAX_DROPINS); mod_settings.ini lists them by hand.
-    inline constexpr int MAX_SLOTS = 10;
+    inline constexpr int MAX_SLOTS = 6;
 
     struct Settings
     {
@@ -70,12 +70,13 @@ namespace dwsc
         bool log_stats = false;
     };
 
-    // A preset carries follow, turning, safety and camera position; not the switches (enabled, camera_tuning,
-    // shoulder_swap, show_banner, log_stats), aiming_follow, the key names, or preset/preset_save.
-    inline const std::array<const char*, 36> PRESET_KEYS{
+    // A preset is a camera look: follow, turning, the look limits and camera position. Not the switches (enabled,
+    // camera_tuning, shoulder_swap, show_banner, log_stats), aiming_follow, the safety values (wall_clamp,
+    // reset_distance, reset_gap), position_transition, the key names, or preset/preset_save.
+    inline const std::array<const char*, 32> PRESET_KEYS{
             "follow_rate_h", "follow_rate_v", "curve_h", "curve_v", "catchup_distance", "min_rate_scale", "max_lag_h", "max_lag_v",
-            "soft_leash", "rotation_smoothing", "rotation_rate", "wall_clamp", "reset_distance", "reset_gap",
-            "position_transition", "pitch_min", "pitch_max", "exploration_distance", "exploration_height", "exploration_shoulder",
+            "soft_leash", "rotation_smoothing", "rotation_rate",
+            "pitch_min", "pitch_max", "exploration_distance", "exploration_height", "exploration_shoulder",
             "exploration_fov", "sprint_distance", "sprint_height", "sprint_shoulder", "sprint_fov", "combat_distance", "combat_height",
             "combat_shoulder", "combat_fov", "aiming_distance", "aiming_height", "aiming_shoulder", "aiming_fov", "traversal_distance",
             "traversal_height", "traversal_fov"};
@@ -425,8 +426,7 @@ namespace dwsc
         static const std::vector<NamedPreset> presets{
                 {101, "Tight", {{"follow_rate_h", 12}, {"follow_rate_v", 20}, {"curve_h", 0}, {"curve_v", 0}, {"catchup_distance", 100},
                                 {"min_rate_scale", 0.5}, {"max_lag_h", 40}, {"max_lag_v", 20}, {"soft_leash", 1},
-                                {"rotation_smoothing", 0}, {"rotation_rate", 20}, {"wall_clamp", 1},
-                                {"reset_distance", 500}, {"reset_gap", 0.25}, {"position_transition", 0.4},
+                                {"rotation_smoothing", 0}, {"rotation_rate", 20},
                                 {"pitch_min", -60}, {"pitch_max", 40},
                                 {"exploration_distance", 90}, {"exploration_height", 0}, {"exploration_shoulder", 0}, {"exploration_fov", 0},
                                 {"sprint_distance", 90}, {"sprint_height", 0}, {"sprint_shoulder", 0}, {"sprint_fov", 0},
@@ -435,8 +435,7 @@ namespace dwsc
                                 {"traversal_distance", 95}, {"traversal_height", 0}, {"traversal_fov", 0}}},
                 {102, "Balanced", {{"follow_rate_h", 6.5}, {"follow_rate_v", 10}, {"curve_h", 2}, {"curve_v", 0}, {"catchup_distance", 150},
                                    {"min_rate_scale", 0.35}, {"max_lag_h", 85}, {"max_lag_v", 50}, {"soft_leash", 1},
-                                   {"rotation_smoothing", 0}, {"rotation_rate", 20}, {"wall_clamp", 1},
-                                   {"reset_distance", 500}, {"reset_gap", 0.25}, {"position_transition", 0.5},
+                                   {"rotation_smoothing", 0}, {"rotation_rate", 20},
                                    {"pitch_min", -60}, {"pitch_max", 40},
                                    {"exploration_distance", 100}, {"exploration_height", 0}, {"exploration_shoulder", 0}, {"exploration_fov", 0},
                                    {"sprint_distance", 100}, {"sprint_height", 0}, {"sprint_shoulder", 0}, {"sprint_fov", 0},
@@ -445,8 +444,7 @@ namespace dwsc
                                    {"traversal_distance", 100}, {"traversal_height", 0}, {"traversal_fov", 0}}},
                 {103, "Cinematic", {{"follow_rate_h", 4}, {"follow_rate_v", 6}, {"curve_h", 3}, {"curve_v", 2}, {"catchup_distance", 200},
                                     {"min_rate_scale", 0.35}, {"max_lag_h", 120}, {"max_lag_v", 80}, {"soft_leash", 1},
-                                    {"rotation_smoothing", 1}, {"rotation_rate", 25}, {"wall_clamp", 1},
-                                    {"reset_distance", 500}, {"reset_gap", 0.25}, {"position_transition", 0.8},
+                                    {"rotation_smoothing", 1}, {"rotation_rate", 25},
                                     {"pitch_min", -70}, {"pitch_max", 55},
                                     {"exploration_distance", 115}, {"exploration_height", 10}, {"exploration_shoulder", 10}, {"exploration_fov", 5},
                                     {"sprint_distance", 110}, {"sprint_height", 10}, {"sprint_shoulder", 10}, {"sprint_fov", 8},
@@ -579,12 +577,14 @@ namespace dwsc
         return out;
     }
 
-    inline auto slot_file_content(int slot, const Values& values) -> std::string
+    // name: the slot's display name, kept across saves.
+    inline auto slot_file_content(int slot, const std::string& name, const Values& values) -> std::string
     {
         auto n = std::to_string(slot);
         std::string out = "; DWSmoothWalker Slot " + n + ", written by the mod when you save to it from the Mod Menu.\n"
-                          "; To make a drop-in preset from it, copy this file, give the copy any other name, and change name below.\n";
-        out += "name = Slot " + n + "\n";
+                          "; Change name below to rename the slot: the menu and the banner show it after the next game start.\n"
+                          "; To make a drop-in preset from it, copy this file and give the copy any other file name.\n";
+        out += "name = " + name + "\n";
         for (auto& [key, value] : values) out += key + " = " + format_number(value) + "\n";
         return out;
     }
@@ -637,9 +637,9 @@ namespace dwsc
         return out;
     }
 
-    // nullopt if the section or either line is missing.
-    inline auto with_preset_choices(const std::string& manifest, const std::string& values, const std::string& labels)
-            -> std::optional<std::string>
+    // section: "[Setting.preset]" or "[Setting.preset_save]". nullopt if the section or either line is missing.
+    inline auto with_preset_choices(const std::string& manifest, const std::string& section, const std::string& values,
+                                    const std::string& labels) -> std::optional<std::string>
     {
         std::string out;
         out.reserve(manifest.size() + values.size() + labels.size());
@@ -655,7 +655,7 @@ namespace dwsc
             auto t = trim(line);
             if (!t.empty() && t.front() == '[' && t.back() == ']')
             {
-                in_section = t == "[Setting.preset]";
+                in_section = t == section;
             }
             else if (in_section && !t.empty() && t[0] != ';' && t[0] != '#')
             {

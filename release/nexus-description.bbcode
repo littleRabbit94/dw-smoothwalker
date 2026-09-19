@@ -98,7 +98,7 @@ A preset is one [b].ini[/b] file in [i]ue4ss\Mods\DWSmoothWalker\config\presets[
 
 [b]1)[/b] Set the camera up in game, from the Mod Menu or the ini.
 [b]2)[/b] On the SmoothWalker page, pick a slot under Save current settings to and press Apply. This writes [i]presets\Slot N.ini[/i] with every setting a preset carries.
-[b]3)[/b] Copy that file under a name of your own, for example [i]presets\YourName - Low Chase.ini[/i]. Don't use [b]Slot 1.ini[/b] to [b]Slot 10.ini[/b]: those are the player's save slots and the mod overwrites them.
+[b]3)[/b] Copy that file under a name of your own, for example [i]presets\YourName - Low Chase.ini[/i]. Don't use [b]Slot 1.ini[/b] to [b]Slot 6.ini[/b]: those are the player's save slots and the mod overwrites them.
 [b]4)[/b] Change the [b]name[/b] line. That's what the banner and the Mod Menu show. Comments starting with [b];[/b] stay in the file; the mod never rewrites a preset it didn't save.
 [b]5)[/b] Restart the game. The preset appears after the slots.
 
@@ -117,7 +117,7 @@ exploration_fov = 5[/code]
 [*][b]name[/b]: up to 48 bytes, no [b]|[/b], [b];[/b] or [b]#[/b]. Without a name line the file name is used.
 [*]Values outside a setting's range are clamped, and 0/1 settings treat anything but 0 as 1.
 [*]Keys not listed below are ignored, so a preset can't change the on/off switches, the shoulder side, the aiming setting, banners or key bindings.
-[*]Up to 50 presets are read, in file-name order. Files over 64 KB, or without a single preset key, are skipped. [font=Courier New]UE4SS.log[/font] lists each preset it loaded.
+[*]Up to 54 presets are read, in file-name order. Files over 64 KB, or without a single preset key, are skipped. [font=Courier New]UE4SS.log[/font] lists each preset it loaded.
 [/list]
 
 [b]Keys[/b] (range, shipped default)

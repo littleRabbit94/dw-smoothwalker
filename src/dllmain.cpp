@@ -1011,7 +1011,8 @@ class DWSmoothWalker : public CppUserModBase
             {
                 derived = true;
                 m_loaded_id = m_settings.preset_save; // the slot holds the live values; a load in this Apply still wins
-                request_banner(std::format(STR("SmoothWalker: saved to Slot {}"), m_settings.preset_save));
+                auto* slot = find_preset(m_settings.preset_save);
+                request_banner(STR("SmoothWalker: saved to ") + dwsc::to_wide(slot ? slot->name : "Slot " + std::to_string(m_settings.preset_save)));
             }
         }
         m_settings.preset_save = 0;
@@ -1066,7 +1067,11 @@ class DWSmoothWalker : public CppUserModBase
 
         for (auto& [slot, name] : files.slots)
         {
-            if (auto parsed = read_preset(name)) m_presets.push_back({slot, "Slot " + std::to_string(slot), dwsc::normalize_preset(parsed->second)});
+            // The file's name line is the slot's display name; the file name stays "Slot N.ini".
+            if (auto parsed = read_preset(name))
+            {
+                m_presets.push_back({slot, dwsc::display_name(parsed->first, "Slot " + std::to_string(slot), slot), dwsc::normalize_preset(parsed->second)});
+            }
         }
 
         std::vector<dwsc::Preset> dropins;
@@ -1089,22 +1094,44 @@ class DWSmoothWalker : public CppUserModBase
             Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] {} presets over the limit of {} skipped\n"), over_limit, dwsc::MAX_DROPINS);
         }
 
+        // Picker order: saved slots, drop-ins, then the empty slots, so nothing empty sits between the presets that
+        // load. Empty slots stay listed: the page fails to open if the ini's preset id is not among the values, and
+        // a slot saved this session becomes the active id.
         std::string values = "0|101|102|103", labels = "Custom|Tight|Balanced|Cinematic";
+        std::string empty_values, empty_labels, save_values = "0", save_labels = "None";
         for (int n = 1; n <= dwsc::MAX_SLOTS; ++n)
         {
-            values += "|" + std::to_string(n);
-            labels += "|Slot " + std::to_string(n);
+            auto id = std::to_string(n);
+            auto plain = "Slot " + id;
+            auto* saved = find_preset(n); // m_presets holds the built-ins and the slots here
+            if (saved)
+            {
+                values += "|" + id;
+                labels += "|" + saved->name;
+            }
+            else
+            {
+                empty_values += "|" + id;
+                empty_labels += "|" + plain + " (empty)";
+            }
+            save_values += "|" + id;
+            save_labels += "|" + (!saved ? plain + " (empty)" : saved->name == plain ? plain : plain + ": " + saved->name);
         }
         for (auto& p : dropins)
         {
             values += "|" + std::to_string(p.id);
             labels += "|" + p.name;
         }
+        values += empty_values;
+        labels += empty_labels;
         bool listed = false;
         if (auto manifest = dwsc::read_file(MANIFEST_PATH))
         {
-            if (auto updated = dwsc::with_preset_choices(*manifest, values, labels))
+            if (auto updated = dwsc::with_preset_choices(*manifest, "[Setting.preset]", values, labels))
             {
+                // The save picker shows the slot names too; without its section the page still works.
+                if (auto both = dwsc::with_preset_choices(*updated, "[Setting.preset_save]", save_values, save_labels)) updated = both;
+                else Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] mod_settings.ini: [Setting.preset_save] PresetValues or PresetLabels missing\n"));
                 listed = *updated == *manifest || dwsc::write_file(MANIFEST_PATH, *updated);
                 if (!listed) Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] could not write mod_settings.ini\n"));
             }
@@ -1138,8 +1165,10 @@ class DWSmoothWalker : public CppUserModBase
         values = dwsc::normalize_preset(values);
         CreateDirectoryA(PRESETS_DIR, nullptr);
         auto path = std::string(PRESETS_DIR) + "/Slot " + std::to_string(slot) + ".ini";
-        if (!dwsc::write_file(path, dwsc::slot_file_content(slot, values))) return false;
-        if (auto* known = find_preset(slot))
+        auto* known = find_preset(slot);
+        auto name = known ? known->name : "Slot " + std::to_string(slot); // a renamed slot keeps its name
+        if (!dwsc::write_file(path, dwsc::slot_file_content(slot, name, values))) return false;
+        if (known)
         {
             known->values = std::move(values);
             return true;

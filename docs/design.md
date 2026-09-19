@@ -282,7 +282,7 @@ the centre (0.7.4).
 - **Diff-based reload** (0.8.0). The DLL keeps a baseline: every numeric key as last known in the file (after
   it parsed or wrote it). Startup parses everything. A later change (same 250 ms mtime poll, stamp before
   read, a missing file keeps the live settings) applies only keys whose number differs from the baseline,
-  onto the live settings, then clamps. Order within one reload: (a) ordinary edits; (b) `preset_save` 1-10
+  onto the live settings, then clamps. Order within one reload: (a) ordinary edits; (b) `preset_save` 1-6
   saves the slot from the live settings (`presets/Slot N.ini` is written at once: the menu does not watch it);
   (c) a changed non-zero `preset` loads that preset, then the preset keys edited in the same Apply are
   applied again on top. An empty slot logs and loads nothing. `enabled` changes the live switch only when
@@ -317,15 +317,16 @@ the centre (0.7.4).
 
 ### Presets
 
-- **Presets carry 36 keys** (0.8.0): follow, turning, `wall_clamp`, `reset_distance`, `reset_gap`,
-  `position_transition`, the look limits and every group's distance, height, shoulder and
+- **Presets carry 32 keys** (0.8.0; 36 until 2026-09-19, when `wall_clamp`, `reset_distance`, `reset_gap` and
+  `position_transition` left: a preset is a camera look, and the first three are off the menu page, so a
+  preset would have changed settings the player cannot see): follow, turning, the look limits and every group's distance, height, shoulder and
   FOV. Not `enabled`, `camera_tuning`, `shoulder_swap`, `show_banner`, `log_stats`, the key names,
   `preset` or `preset_save`. A preset file holding fewer keys loads and matches on the keys it has.
 - **Built-ins** (cycle order): Tight, Balanced, Cinematic. Follow values, horizontal retuned 2026-09-19 for the game's lag being off (it had
   added up to 30 cm of trail; before: 25 cm 18/s, 70 cm 8/s; Cinematic was tried at 145 cm 3/s, too much, and kept as it was): Tight (lag 40/20 cm,
   12/20 per s, constant), Balanced (the shipped default: 85/50 cm, 6.5/10 per s; 95 cm 5.5/s was tried and read too loose, smoothstep h), Cinematic
   (120/80 cm, 4/6 per s, ease in-out, floor 0.35, turning smoothed at 25). Balanced equals the shipped
-  `smoothwalker.ini` on all 36 keys.
+  `smoothwalker.ini` on all 32 keys.
 
   | Key | Tight | Balanced | Cinematic |
   |---|---|---|---|
@@ -346,7 +347,9 @@ the centre (0.7.4).
   rest was 1/s, a drift of about 3 s after stopping (the "floaty" of 0.5.0). Its exploring distance went
   125 to 115 because 125 % and +5 FOV both shrink the character; sprint sells speed with FOV (+8) rather
   than distance (110). Balanced still leaves the camera where the game puts it.
-- **Ten slots** (0.7 had 6): one constant, `dwsc::MAX_SLOTS = 10` in `config.hpp`, bounds the slot file
+- **Six slots** (0.7 had 6, 0.8 drafts 10; back to 6 on 2026-09-19 with names). A slot's display name is the
+  `name` line of its `Slot N.ini`, read at startup, shown in both pickers and the banner, and kept when the
+  slot is saved again (picker order, rename after restart and name kept on re-save confirmed in game 2026-09-19). One constant, `dwsc::MAX_SLOTS = 6` in `config.hpp`, bounds the slot file
   names, the save range and the slot ids. The menu caps a picker at 64 values (`choices.lua`), and the
   Preset picker also carries Custom and the three built-ins, so 60 slots is the ceiling.
 - **Presets folder** (`config/presets/`, replaces `presets.ini`; created at startup if missing). A
@@ -357,9 +360,9 @@ the centre (0.7.4).
   (the game path and file names may be non-ASCII). `release/example-preset/Template.ini` is a commented
   drop-in.
 - **Scanned once per session**, in the constructor before anything reads presets: `Slot 1.ini` to
-  `Slot 10.ini` (exact name, any case), then the drop-ins sorted case-insensitively by file name as ids
+  `Slot 6.ini` (exact name, any case), then the drop-ins sorted case-insensitively by file name as ids
   201, 202, ... Presets are cached for the session (a slot save updates its entry); files added or removed
-  while the game runs are ignored until the next start. At most 64 - 4 - 10 = **50 drop-ins**; the rest
+  while the game runs are ignored until the next start. At most 64 - 4 - 6 = **54 drop-ins**; the rest
   are skipped with one log line. Label: `name`, else the file stem, with control characters and `|`
   stripped, trimmed, cut to 48 bytes on a code point boundary, and valid UTF-8 (invalid UTF-8 anywhere makes
   the menu skip the whole manifest); else `Preset <id>`. Slots are always labelled `Slot N`. Banners and log
@@ -373,7 +376,10 @@ the centre (0.7.4).
   session, the first time its settings UI is built (`main.lua`, `Providers.discover` cached in
   `s.providers`), and the DLL constructor runs before that. So the constructor rewrites only the
   `PresetValues` and `PresetLabels` lines of `[Setting.preset]` to `0|101|102|103|1..10|201..` and
-  `Custom|Tight|Balanced|Cinematic|Slot 1..Slot 10|<names>`, keeping every other byte and the line endings,
+  `Custom|Tight|Balanced|Cinematic|<saved slots by name>|<drop-in names>|<empty slots>` (empty slots last, so
+  the picker has nothing dead between the presets that load; they stay listed because the page fails to open
+  if the ini's `preset` id is not among the values, and a slot saved this session becomes that id), and the
+  `[Setting.preset_save]` labels likewise, keeping every other byte and the line endings,
   and writes (temp plus rename) only if the content changed. The shipped manifest lists no drop-ins. If the
   section or lines are missing or the write fails, it logs and turns drop-ins off for the session, so the
   indicator never reports an id the page lacks. Checked with the menu's parser: 64 values with 48-byte
@@ -382,9 +388,9 @@ the centre (0.7.4).
   Adding or removing drop-ins and reloading rescans and regenerates the manifest, and the
   menu picks it up: Ctrl+R uninstalls Lua mods too, the Mod Menu's state is rebuilt and discovery rereads
   every manifest. A `preset` id that no longer exists is rewritten by the startup flush.
-- **The Preset picker** (`preset`, replaces `preset_load`; 0 Custom, 101-103, 1-10, 201+; default 102). The
+- **The Preset picker** (`preset`, replaces `preset_load`; 0 Custom, 101-103, 1-6, 201+; default 102). The
   active preset is the last one loaded or cycled if all its keys still match the live values (within 1e-4),
-  else the first match among the built-ins, slots 1-10, then drop-ins, else Custom. It is recomputed after
+  else the first match among the built-ins, slots 1-6, then drop-ins, else Custom. It is recomputed after
   every reload, save, load, cycle and shoulder swap, from the session cache. At startup the
   file's `preset` is not a load request, only the preferred match. The menu has no read-only type, so the
   indicator is the same picker the user changes to load a preset; the page shows the new value on reopen.
@@ -554,7 +560,7 @@ cancelled itself; the four captures above then ran clean. The fix is in UEBench 
   After a preset load or slot save the file is written at once, so that page refuses another Apply
   until it is reopened.
 - **Drop-ins are read at startup.** Files added to or removed from `config/presets/` while the game runs are
-  ignored until the next start or mod reload. At most 50 drop-ins.
+  ignored until the next start or mod reload. At most 54 drop-ins.
 - **Finisher and shadowstep attack cameras** (~40 classes) are left as shipped.
 - **Stats race.** The stats accumulator's load-then-store race is not fixed (stats only).
 - **The `FindFirstOf` fallback's cost** for one object walk is not measured.
@@ -658,7 +664,7 @@ was active, and V and N wrote `smoothwalker.ini` at once, so every Mod Menu Appl
 anything written behind an open page made its next Apply fail.
 
 Changes, each described above: diff-based reload, deferred write-back, the pending side file and the
-startup flush ("The settings file"); presets carrying 37 keys (36 now), ten slots, the presets folder with drop-ins,
+startup flush ("The settings file"); presets carrying 37 keys (32 now), ten slots (6 now), the presets folder with drop-ins,
 normalized cached values, the regenerated manifest, the Preset picker and V cycling through all of them
 ("Presets"); the crossfade ("Crossfade"); banners needing a player ("Banners"); and discovery that works in
 every loader profile ("Loader profiles").
