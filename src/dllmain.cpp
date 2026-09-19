@@ -886,13 +886,19 @@ class DWSmoothWalker : public CppUserModBase
         g_log_stats.store(m_settings.log_stats);
         m_show_banner.store(m_settings.show_banner);
 
+        // enabled off is the game as shipped, camera modes and its own lag included (position_of).
         auto position = dwsc::position_of(m_settings);
-        position.active = position.active && m_settings.enabled; // off is the game as shipped, camera modes included
         std::lock_guard guard(m_position_mutex);
-        // camera_tuning off before and after: every write would be the game's own value, and the apply's flip
-        // would swing the camera for nothing. The values are kept, so switching it on applies the latest.
-        bool idle = !position.active && !m_position.active;
-        if (!(position == m_position) && !idle) m_position_generation.fetch_add(1);
+        // With camera_tuning off only the lag switch is written, so a changed position number applies nothing.
+        // The values are kept, so switching it on applies the latest.
+        auto written = [](dwsc::PositionTuning p) {
+            if (p.active) return p;
+            dwsc::PositionTuning lag_only;
+            lag_only.active = false;
+            lag_only.own_lag = p.own_lag;
+            return lag_only;
+        };
+        if (!(written(position) == written(m_position))) m_position_generation.fetch_add(1);
         m_position = position;
     }
 

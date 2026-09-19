@@ -33,13 +33,13 @@ namespace dwsc
         std::string preset_key;
         std::string shoulder_key = "V";
 
-        double follow_rate_h = 8.0;       // 1/s
+        double follow_rate_h = 6.5;       // 1/s
         double follow_rate_v = 10.0;      // 1/s
         int curve_h = 2;                  // 0 constant, 1 linear, 2 smoothstep, 3 ease in-out
         int curve_v = 0;
         double catchup_distance = 150.0;  // cm of lag at which a curve reaches full rate
         double min_rate_scale = 0.35;     // rate multiplier at zero lag, curves 1-3
-        double max_lag_h = 70.0;          // cm
+        double max_lag_h = 85.0;          // cm
         double max_lag_v = 50.0;
         bool soft_leash = true;
         double aiming_follow = 30.0;      // percent of the trail and the turning smoothing kept while aiming
@@ -60,7 +60,6 @@ namespace dwsc
         double combat_distance = 100, combat_height = 0, combat_shoulder = 0, combat_fov = 0;
         double aiming_distance = 100, aiming_height = 0, aiming_shoulder = 0, aiming_fov = 0;
         double traversal_distance = 100, traversal_height = 0, traversal_fov = 0;
-        double game_lag_scale = 3;        // higher is tighter
         bool shoulder_swap = false;
         double pitch_min = -60, pitch_max = 40;
         double position_transition = 0.5; // s; 0 snaps
@@ -73,22 +72,22 @@ namespace dwsc
 
     // A preset carries follow, turning, safety and camera position; not the switches (enabled, camera_tuning,
     // shoulder_swap, show_banner, log_stats), aiming_follow, the key names, or preset/preset_save.
-    inline const std::array<const char*, 37> PRESET_KEYS{
+    inline const std::array<const char*, 36> PRESET_KEYS{
             "follow_rate_h", "follow_rate_v", "curve_h", "curve_v", "catchup_distance", "min_rate_scale", "max_lag_h", "max_lag_v",
-            "soft_leash", "rotation_smoothing", "rotation_rate", "wall_clamp", "reset_distance", "reset_gap", "game_lag_scale",
+            "soft_leash", "rotation_smoothing", "rotation_rate", "wall_clamp", "reset_distance", "reset_gap",
             "position_transition", "pitch_min", "pitch_max", "exploration_distance", "exploration_height", "exploration_shoulder",
             "exploration_fov", "sprint_distance", "sprint_height", "sprint_shoulder", "sprint_fov", "combat_distance", "combat_height",
             "combat_shoulder", "combat_fov", "aiming_distance", "aiming_height", "aiming_shoulder", "aiming_fov", "traversal_distance",
             "traversal_height", "traversal_fov"};
 
     // Every numeric setting: the ones the Mod Menu can move and the mod writes back.
-    inline const std::array<const char*, 45> NUMERIC_KEYS{
+    inline const std::array<const char*, 44> NUMERIC_KEYS{
             "enabled", "follow_rate_h", "follow_rate_v", "curve_h", "curve_v", "catchup_distance", "min_rate_scale", "max_lag_h",
             "max_lag_v", "soft_leash", "aiming_follow", "rotation_smoothing", "rotation_rate", "wall_clamp", "reset_distance", "reset_gap", "show_banner",
             "camera_tuning", "exploration_distance", "exploration_height", "exploration_shoulder", "exploration_fov", "sprint_distance",
             "sprint_height", "sprint_shoulder", "sprint_fov", "combat_distance", "combat_height", "combat_shoulder", "combat_fov",
             "aiming_distance", "aiming_height", "aiming_shoulder", "aiming_fov", "traversal_distance", "traversal_height", "traversal_fov",
-            "game_lag_scale", "shoulder_swap", "pitch_min", "pitch_max", "position_transition", "preset", "preset_save", "log_stats"};
+            "shoulder_swap", "pitch_min", "pitch_max", "position_transition", "preset", "preset_save", "log_stats"};
 
     inline auto is_preset_key(const std::string& key) -> bool
     {
@@ -180,7 +179,6 @@ namespace dwsc
         else if (key == "traversal_distance") number(s.traversal_distance);
         else if (key == "traversal_height") number(s.traversal_height);
         else if (key == "traversal_fov") number(s.traversal_fov);
-        else if (key == "game_lag_scale") number(s.game_lag_scale);
         else if (key == "pitch_min") number(s.pitch_min);
         else if (key == "pitch_max") number(s.pitch_max);
         else if (key == "preset") integer(s.preset);
@@ -220,7 +218,6 @@ namespace dwsc
         {
             *f = std::clamp(*f, -30.0, 30.0);
         }
-        s.game_lag_scale = std::clamp(s.game_lag_scale, 1.0, 20.0);
         s.pitch_min = std::clamp(s.pitch_min, -89.0, -30.0);
         s.pitch_max = std::clamp(s.pitch_max, 20.0, 89.0);
         s.position_transition = std::clamp(s.position_transition, 0.0, 2.0);
@@ -312,7 +309,6 @@ namespace dwsc
         if (key == "traversal_distance") return s.traversal_distance;
         if (key == "traversal_height") return s.traversal_height;
         if (key == "traversal_fov") return s.traversal_fov;
-        if (key == "game_lag_scale") return s.game_lag_scale;
         if (key == "shoulder_swap") return flag(s.shoulder_swap);
         if (key == "pitch_min") return s.pitch_min;
         if (key == "pitch_max") return s.pitch_max;
@@ -427,20 +423,20 @@ namespace dwsc
     inline auto builtin_presets() -> const std::vector<NamedPreset>&
     {
         static const std::vector<NamedPreset> presets{
-                {101, "Tight", {{"follow_rate_h", 18}, {"follow_rate_v", 20}, {"curve_h", 0}, {"curve_v", 0}, {"catchup_distance", 100},
-                                {"min_rate_scale", 0.5}, {"max_lag_h", 25}, {"max_lag_v", 20}, {"soft_leash", 1},
+                {101, "Tight", {{"follow_rate_h", 12}, {"follow_rate_v", 20}, {"curve_h", 0}, {"curve_v", 0}, {"catchup_distance", 100},
+                                {"min_rate_scale", 0.5}, {"max_lag_h", 40}, {"max_lag_v", 20}, {"soft_leash", 1},
                                 {"rotation_smoothing", 0}, {"rotation_rate", 20}, {"wall_clamp", 1},
-                                {"reset_distance", 500}, {"reset_gap", 0.25}, {"game_lag_scale", 4}, {"position_transition", 0.4},
+                                {"reset_distance", 500}, {"reset_gap", 0.25}, {"position_transition", 0.4},
                                 {"pitch_min", -60}, {"pitch_max", 40},
                                 {"exploration_distance", 90}, {"exploration_height", 0}, {"exploration_shoulder", 0}, {"exploration_fov", 0},
                                 {"sprint_distance", 90}, {"sprint_height", 0}, {"sprint_shoulder", 0}, {"sprint_fov", 0},
                                 {"combat_distance", 95}, {"combat_height", 0}, {"combat_shoulder", 0}, {"combat_fov", 0},
                                 {"aiming_distance", 100}, {"aiming_height", 0}, {"aiming_shoulder", 0}, {"aiming_fov", 0},
                                 {"traversal_distance", 95}, {"traversal_height", 0}, {"traversal_fov", 0}}},
-                {102, "Balanced", {{"follow_rate_h", 8}, {"follow_rate_v", 10}, {"curve_h", 2}, {"curve_v", 0}, {"catchup_distance", 150},
-                                   {"min_rate_scale", 0.35}, {"max_lag_h", 70}, {"max_lag_v", 50}, {"soft_leash", 1},
+                {102, "Balanced", {{"follow_rate_h", 6.5}, {"follow_rate_v", 10}, {"curve_h", 2}, {"curve_v", 0}, {"catchup_distance", 150},
+                                   {"min_rate_scale", 0.35}, {"max_lag_h", 85}, {"max_lag_v", 50}, {"soft_leash", 1},
                                    {"rotation_smoothing", 0}, {"rotation_rate", 20}, {"wall_clamp", 1},
-                                   {"reset_distance", 500}, {"reset_gap", 0.25}, {"game_lag_scale", 3}, {"position_transition", 0.5},
+                                   {"reset_distance", 500}, {"reset_gap", 0.25}, {"position_transition", 0.5},
                                    {"pitch_min", -60}, {"pitch_max", 40},
                                    {"exploration_distance", 100}, {"exploration_height", 0}, {"exploration_shoulder", 0}, {"exploration_fov", 0},
                                    {"sprint_distance", 100}, {"sprint_height", 0}, {"sprint_shoulder", 0}, {"sprint_fov", 0},
@@ -450,7 +446,7 @@ namespace dwsc
                 {103, "Cinematic", {{"follow_rate_h", 4}, {"follow_rate_v", 6}, {"curve_h", 3}, {"curve_v", 2}, {"catchup_distance", 200},
                                     {"min_rate_scale", 0.35}, {"max_lag_h", 120}, {"max_lag_v", 80}, {"soft_leash", 1},
                                     {"rotation_smoothing", 1}, {"rotation_rate", 25}, {"wall_clamp", 1},
-                                    {"reset_distance", 500}, {"reset_gap", 0.25}, {"game_lag_scale", 2}, {"position_transition", 0.8},
+                                    {"reset_distance", 500}, {"reset_gap", 0.25}, {"position_transition", 0.8},
                                     {"pitch_min", -70}, {"pitch_max", 55},
                                     {"exploration_distance", 115}, {"exploration_height", 10}, {"exploration_shoulder", 10}, {"exploration_fov", 5},
                                     {"sprint_distance", 110}, {"sprint_height", 10}, {"sprint_shoulder", 10}, {"sprint_fov", 8},

@@ -180,8 +180,8 @@ Measured live on the running game.
 ### Position tuning (`mode_tuning.hpp`)
 
 Per group (exploring, sprinting, combat, aiming, claw ride and anti-grav): distance %, height, shoulder
-and FOV. For every mode: the game's own lag as a multiplier, a shoulder swap (`N`), the
-look up/down limits and a transition time. 45 settings on the menu page (44 in 0.7, plus `aiming_follow`), validated with the menu's
+and FOV. For every mode: a shoulder swap (`N`), the
+look up/down limits and a transition time. 41 settings on the menu page (the three safety keys and `game_lag_scale` left it on 2026-09-19; the safety keys stay in the ini), validated with the menu's
 parser. The groups cover 21 `BP_CameraMode_*` classes; the ~40 finisher and shadowstep attack cameras are
 left alone. All 21 are loaded at session start (checked 2026-09-16).
 
@@ -207,7 +207,11 @@ the centre (0.7.4).
   0x54, `ViewPitchMin/Max` 0x58/0x5C, lag speeds 0x68/0x6C (`RebelCameraMode`), `CameraOffsets` 0x898 and
   `CameraTypeBlendArgs` 0x8E8 (`RebelCameraModeTPP`), `BlendTime` +0x08 in `AlphaBlendArgs`, `TargetOffset`
   0x10 and `OverriddenFieldOfView` 0x08 in `CameraOffset` (584 bytes). The lag enables are bitfields sharing
-  the byte at 0x64, so the lag is scaled, never switched. The map is walked with
+  the byte at 0x64, written through `FBoolProperty` and its mask, never as a byte: the game's lag is switched
+  off while `enabled` is 1 (independent of `camera_tuning`) and put back at 0 and at unload. Tested live
+  2026-09-19: with both speeds at 1.0 the camera floated on jumps, and clearing the two bits on the live
+  `Base_LongRange` made it rigid at once, so the game reads them every frame. Before that the lag speeds were
+  scaled by a `game_lag_scale` setting (removed), which at its default 3 still left the game about half the delay. The map is walked with
   `FScriptMap::GetScriptLayout(1, 1, size, align)` (ECameraType key, value at 0x08). Before the first write
   each captured original must look like a camera (FOV 30-170, 1-3 keys in 1..3, offsets within 2000 cm),
   or that mode alone is left as shipped (0.7.4; before, one implausible mode switched tuning off
@@ -313,18 +317,18 @@ the centre (0.7.4).
 
 ### Presets
 
-- **Presets carry 37 keys** (0.8.0): follow, turning, `wall_clamp`, `reset_distance`, `reset_gap`,
-  `game_lag_scale`, `position_transition`, the look limits and every group's distance, height, shoulder and
+- **Presets carry 36 keys** (0.8.0): follow, turning, `wall_clamp`, `reset_distance`, `reset_gap`,
+  `position_transition`, the look limits and every group's distance, height, shoulder and
   FOV. Not `enabled`, `camera_tuning`, `shoulder_swap`, `show_banner`, `log_stats`, the key names,
   `preset` or `preset_save`. A preset file holding fewer keys loads and matches on the keys it has.
-- **Built-ins** (cycle order): Tight, Balanced, Cinematic. Follow values as 0.6.0: Tight (lag 25/20 cm,
-  18/20 per s, constant), Balanced (the shipped default: 70/50 cm, 8/10 per s, smoothstep h), Cinematic
+- **Built-ins** (cycle order): Tight, Balanced, Cinematic. Follow values, horizontal retuned 2026-09-19 for the game's lag being off (it had
+  added up to 30 cm of trail; before: 25 cm 18/s, 70 cm 8/s; Cinematic was tried at 145 cm 3/s, too much, and kept as it was): Tight (lag 40/20 cm,
+  12/20 per s, constant), Balanced (the shipped default: 85/50 cm, 6.5/10 per s; 95 cm 5.5/s was tried and read too loose, smoothstep h), Cinematic
   (120/80 cm, 4/6 per s, ease in-out, floor 0.35, turning smoothed at 25). Balanced equals the shipped
-  `smoothwalker.ini` on all 37 keys.
+  `smoothwalker.ini` on all 36 keys.
 
   | Key | Tight | Balanced | Cinematic |
   |---|---|---|---|
-  | `game_lag_scale` | 4 | 3 | 2 |
   | `position_transition` | 0.4 | 0.5 | 0.8 |
   | pitch min / max | -60 / 40 | -60 / 40 | -70 / 55 |
   | exploring distance / height / shoulder / FOV | 90 / 0 / 0 / 0 | 100 / 0 / 0 / 0 | 115 / 10 / 10 / 5 |
@@ -336,9 +340,9 @@ the centre (0.7.4).
   `reset_distance` / `reset_gap` are 500 / 0.25 in all three. Every value sits on its slider step.
 
   Why these values (0.8.0, before release). The game's exploring and sprint modes lag the camera
-  themselves (speed 3, up to 30 cm), and with `game_lag_scale` 1 that filter ran in series with the follow,
-  which reads as mushy rather than smooth: every preset now raises it (4 / 3 / 2) so the follow owns the
-  lag, and 3 is the shipped default. Cinematic's `min_rate_scale` went 0.25 to 0.35: at 4/s the rate at
+  themselves (speed 3, up to 30 cm), a filter in series with the follow. It is now switched off (see
+  "Layout from reflection"); the presets were tuned with part of it still present, so they may read
+  tighter: retune by feel. Cinematic's `min_rate_scale` went 0.25 to 0.35: at 4/s the rate at
   rest was 1/s, a drift of about 3 s after stopping (the "floaty" of 0.5.0). Its exploring distance went
   125 to 115 because 125 % and +5 FOV both shrink the character; sprint sells speed with FOV (+8) rather
   than distance (110). Balanced still leaves the camera where the game puts it.
@@ -654,7 +658,7 @@ was active, and V and N wrote `smoothwalker.ini` at once, so every Mod Menu Appl
 anything written behind an open page made its next Apply fail.
 
 Changes, each described above: diff-based reload, deferred write-back, the pending side file and the
-startup flush ("The settings file"); presets carrying 37 keys, ten slots, the presets folder with drop-ins,
+startup flush ("The settings file"); presets carrying 37 keys (36 now), ten slots, the presets folder with drop-ins,
 normalized cached values, the regenerated manifest, the Preset picker and V cycling through all of them
 ("Presets"); the crossfade ("Crossfade"); banners needing a player ("Banners"); and discovery that works in
 every loader profile ("Loader profiles").

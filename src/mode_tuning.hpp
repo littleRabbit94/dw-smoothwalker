@@ -1,5 +1,5 @@
-// Camera position tuning: per-group distance, height, shoulder and FOV, the game's own lag and the look
-// limits, written into the game's camera modes. Game thread only, except note_new() (any thread) and
+// Camera position tuning: per-group distance, height, shoulder and FOV, and the look limits, plus the
+// switch for the game's own camera lag, written into the game's camera modes. Game thread only, except note_new() (any thread) and
 // restore() at unload.
 //
 // Every write is computed from the CDO values captured the first time a class is seen, never from the
@@ -101,9 +101,9 @@ namespace dwsc
 
     struct PositionTuning
     {
-        bool active = true;
+        bool active = true;   // camera_tuning and enabled
+        bool own_lag = true;  // enabled: the game's camera lag is off, so the follow is the only lag
         GroupTuning groups[5];
-        double game_lag_scale = 1;
         bool shoulder_swap = false;
         double pitch_min = -60;
         double pitch_max = 40;
@@ -121,20 +121,20 @@ namespace dwsc
         {
             if (!(a.groups[i] == b.groups[i])) return false;
         }
-        return a.active == b.active && a.game_lag_scale == b.game_lag_scale && a.shoulder_swap == b.shoulder_swap &&
+        return a.active == b.active && a.own_lag == b.own_lag && a.shoulder_swap == b.shoulder_swap &&
                a.pitch_min == b.pitch_min && a.pitch_max == b.pitch_max && a.transition == b.transition;
     }
 
     inline auto position_of(const Settings& s) -> PositionTuning
     {
         PositionTuning p;
-        p.active = s.camera_tuning;
+        p.active = s.camera_tuning && s.enabled;
+        p.own_lag = s.enabled;
         p.groups[Exploration] = {s.exploration_distance, s.exploration_height, s.exploration_shoulder, s.exploration_fov};
         p.groups[Sprint] = {s.sprint_distance, s.sprint_height, s.sprint_shoulder, s.sprint_fov};
         p.groups[Combat] = {s.combat_distance, s.combat_height, s.combat_shoulder, s.combat_fov};
         p.groups[Aiming] = {s.aiming_distance, s.aiming_height, s.aiming_shoulder, s.aiming_fov};
         p.groups[Traversal] = {s.traversal_distance, s.traversal_height, 0.0, s.traversal_fov};
-        p.game_lag_scale = s.game_lag_scale;
         p.shoulder_swap = s.shoulder_swap;
         p.pitch_min = s.pitch_min;
         p.pitch_max = s.pitch_max;
@@ -173,8 +173,9 @@ namespace dwsc
                     if (std::wstring_view(mode.spec.name) == L"Base_LongRange" && !mode.original.offsets.empty())
                     {
                         auto& first = mode.original.offsets.front();
-                        Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] Base_LongRange: fov {}, lag {}/{}, pitch {}/{}, {} offsets, key {} at ({}, {}, {})\n"),
-                                                       mode.original.fov, mode.original.hlag, mode.original.vlag, mode.original.pitch_min,
+                        Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] Base_LongRange: fov {}, game lag {}/{}, pitch {}/{}, {} offsets, key {} at ({}, {}, {})\n"),
+                                                       mode.original.fov, mode.original.hlag_on ? STR("on") : STR("off"),
+                                                       mode.original.vlag_on ? STR("on") : STR("off"), mode.original.pitch_min,
                                                        mode.original.pitch_max, mode.original.offsets.size(), first.key, first.x, first.y, first.z);
                     }
                 }
@@ -270,7 +271,9 @@ namespace dwsc
             });
             m_applied = true;
             m_transition = static_cast<float>(tuning.transition);
-            request_flip(player_camera);
+            // Only CameraOffsets needs the flip; the lag switch and an inactive tuning move none.
+            if (tuning.active || m_was_active) request_flip(player_camera);
+            m_was_active = tuning.active;
             auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
             Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] camera position applied: {} mode classes, {} live modes, {:.1f} ms\n"), classes, live, ms);
         }
@@ -285,6 +288,7 @@ namespace dwsc
             if (m_flip_stage != Idle) set_blend(false); // unloaded mid-glide: the game's blend time back, a plain write
             PositionTuning neutral;
             neutral.active = false;
+            neutral.own_lag = false;
             for (auto& mode : m_modes)
             {
                 if (mode.captured) write(mode.cdo, mode, neutral);
@@ -358,7 +362,8 @@ namespace dwsc
 
         struct Original
         {
-            float fov{}, hlag{}, vlag{}, pitch_min{}, pitch_max{}, type_blend{};
+            float fov{}, pitch_min{}, pitch_max{}, type_blend{};
+            bool hlag_on{}, vlag_on{};
             std::vector<OffsetOriginal> offsets;
         };
 
@@ -376,7 +381,7 @@ namespace dwsc
 
         struct Offsets
         {
-            int32_t fov = -1, pitch_min = -1, pitch_max = -1, vlag = -1, hlag = -1;
+            int32_t fov = -1, pitch_min = -1, pitch_max = -1;
             int32_t offsets_map = -1, type_blend = -1; // type_blend: CameraTypeBlendArgs.BlendTime
             int32_t offset_target = -1, offset_fov = -1;
             int32_t offset_size = 0, offset_align = 0;
@@ -394,9 +399,14 @@ namespace dwsc
         std::vector<LiveRef> m_new;
         bool m_new_overflow = false;
         Offsets m_off;
+        // bEnableCameraHorizontalLag / VerticalLag: bitfields sharing a byte, written through their masks.
+        // Properties of a native class, so the pointers hold for the session.
+        FBoolProperty* m_hlag_on = nullptr;
+        FBoolProperty* m_vlag_on = nullptr;
         bool m_layout_ok = false;
         bool m_layout_tried = false;
         bool m_applied = false;
+        bool m_was_active = false;
         FScriptMapLayout m_map_layout{};
 
         UFunction* m_set_type = nullptr;
@@ -417,6 +427,16 @@ namespace dwsc
         uint64_t m_flip_seen = 0;
         float m_transition = 0.5f;
         double m_flip_back_at = 0.0; // view_seconds at the switch back
+
+        static auto bool_in(UStruct* owner, const wchar_t* name) -> FBoolProperty*
+        {
+            if (!owner) return nullptr;
+            for (FProperty* property : owner->ForEachProperty())
+            {
+                if (property->GetName() == name) return CastField<FBoolProperty>(property);
+            }
+            return nullptr;
+        }
 
         static auto offset_in(UStruct* owner, const wchar_t* name) -> int32_t
         {
@@ -444,8 +464,10 @@ namespace dwsc
             m_off.fov = offset_in(mode, STR("DefaultFieldOfView"));
             m_off.pitch_min = offset_in(mode, STR("ViewPitchMin"));
             m_off.pitch_max = offset_in(mode, STR("ViewPitchMax"));
-            m_off.vlag = offset_in(mode, STR("CameraVerticalLagSpeed"));
-            m_off.hlag = offset_in(mode, STR("CameraHorizontalLagSpeed"));
+            m_hlag_on = bool_in(mode, STR("bEnableCameraHorizontalLag"));
+            m_vlag_on = bool_in(mode, STR("bEnableCameraVerticalLag"));
+            if (!m_hlag_on) m_hlag_on = bool_in(tpp, STR("bEnableCameraHorizontalLag"));
+            if (!m_vlag_on) m_vlag_on = bool_in(tpp, STR("bEnableCameraVerticalLag"));
             m_off.offsets_map = offset_in(tpp, STR("CameraOffsets"));
             auto type_blend_args = offset_in(tpp, STR("CameraTypeBlendArgs"));
             auto blend_time = offset_in(blend, STR("BlendTime"));
@@ -458,7 +480,7 @@ namespace dwsc
                 m_off.offset_align = offset->GetMinAlignment();
             }
 
-            bool ok = m_off.fov >= 0 && m_off.pitch_min >= 0 && m_off.pitch_max >= 0 && m_off.vlag >= 0 && m_off.hlag >= 0 &&
+            bool ok = m_off.fov >= 0 && m_off.pitch_min >= 0 && m_off.pitch_max >= 0 && m_hlag_on && m_vlag_on &&
                       m_off.offsets_map >= 0 && m_off.type_blend >= 0 && m_off.offset_target >= 0 && m_off.offset_fov >= 0 &&
                       m_off.offset_size > 0 && m_off.offset_align > 0 && m_set_type && m_get_type;
             if (!ok)
@@ -584,8 +606,8 @@ namespace dwsc
             out.fov = read_float(cdo, m_off.fov);
             out.pitch_min = read_float(cdo, m_off.pitch_min);
             out.pitch_max = read_float(cdo, m_off.pitch_max);
-            out.vlag = read_float(cdo, m_off.vlag);
-            out.hlag = read_float(cdo, m_off.hlag);
+            out.hlag_on = m_hlag_on->GetPropertyValueInContainer(cdo);
+            out.vlag_on = m_vlag_on->GetPropertyValueInContainer(cdo);
             out.type_blend = read_float(cdo, m_off.type_blend);
             out.offsets.clear();
             for_each_offset(cdo, [&](uint8_t key, uint8_t* value) {
@@ -607,8 +629,9 @@ namespace dwsc
             bool on = t.active;
 
             write_float(object, m_off.fov, on ? static_cast<float>(o.fov + g.fov) : o.fov);
-            write_float(object, m_off.hlag, on ? static_cast<float>(o.hlag * t.game_lag_scale) : o.hlag);
-            write_float(object, m_off.vlag, on ? static_cast<float>(o.vlag * t.game_lag_scale) : o.vlag);
+            // The game reads these every frame (tested live, 2026-09-19): off, the follow is the only lag.
+            m_hlag_on->SetPropertyValueInContainer(object, o.hlag_on && !t.own_lag);
+            m_vlag_on->SetPropertyValueInContainer(object, o.vlag_on && !t.own_lag);
             // Aiming and combat ship wider limits; only the -60 / 40 modes take the setting.
             bool game_range = o.pitch_min == -60.0f && o.pitch_max == 40.0f;
             write_float(object, m_off.pitch_min, on && game_range ? static_cast<float>(t.pitch_min) : o.pitch_min);

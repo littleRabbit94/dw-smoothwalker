@@ -59,7 +59,7 @@ writes `release/dist/SmoothWalker-<version>.zip` and `release/dist/SmoothWalker-
 
 Copy `release/example-preset/Template.ini` into `ue4ss/Mods/DWSmoothWalker/config/presets/` under a new name,
 change the `name` line and the values, and restart the game. Every key is commented with its range and
-default. The preset format and rules (37 keys, clamping, the 50 drop-in limit) are in `docs/design.md`,
+default. The preset format and rules (36 keys, clamping, the 50 drop-in limit) are in `docs/design.md`,
 "Presets". Switches and `aiming_follow` are not preset keys; a preset that sets them is ignored on those lines.
 
 ## Checking a change in game
