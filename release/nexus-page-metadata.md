@@ -104,10 +104,10 @@ differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 - The description's Settings spoiler lists the shipped defaults by hand; after changing a default
   in `smoothwalker.ini`, update it. `aiming_follow` is a setting but not a preset key: it belongs in the
   Settings spoiler and must stay out of the preset authors' key list.
-- Voice: the description is first person, a hobbyist engineer explaining a utility he built. Say what
+- Voice: the description is first person and short, a hobbyist engineer explaining a utility they built, technical but casual. Say what
   was measured and why a choice was made; no sales language, no em dashes.
 - The description links the GitHub repo: make it public (after the hygiene sweep) before posting, or
-  drop the "Source and bug reports" section.
+  drop the "Source" section.
 - Game build: the DLL hooks `RebelCameraComponent` vtable slot 214 (`docs/design.md`, "The
   per-frame hook") and refuses to hook when that slot is not overridden. A game patch that moves the
   slot leaves the mod inactive rather than crashing; the build, the page requirements and the Known
