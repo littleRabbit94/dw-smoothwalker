@@ -35,7 +35,7 @@ namespace dwsc
 
         double follow_rate_h = 8.0;       // 1/s
         double follow_rate_v = 10.0;      // 1/s
-        int curve_h = 2;                  // 0 exponential, 1 linear, 2 smoothstep, 3 ease in-out
+        int curve_h = 2;                  // 0 constant, 1 linear, 2 smoothstep, 3 ease in-out
         int curve_v = 0;
         double catchup_distance = 150.0;  // cm of lag at which a curve reaches full rate
         double min_rate_scale = 0.35;     // rate multiplier at zero lag, curves 1-3

@@ -156,6 +156,10 @@ def check_example(path: Path, sections: dict[str, dict[str, str]]) -> None:
     if len(names[0].encode("utf-8")) > 48 or re.search(r"[|;#\x00-\x1f\x7f]", names[0]):
         fail(f"{path.name}: name {names[0]!r} is over 48 bytes or holds | ; # or a control character")
     by_key = {s["ConfigKey"]: s for s in sections.values() if "ConfigKey" in s}
+    # Preset keys kept in smoothwalker.ini but off the menu page: the ranges of sanitize() in config.hpp.
+    by_key.setdefault("wall_clamp", {"PresetValues": "0|1"})
+    by_key.setdefault("reset_distance", {"Minimum": "100", "Maximum": "3000", "Step": "50"})
+    by_key.setdefault("reset_gap", {"Minimum": "0.05", "Maximum": "2", "Step": "0.05"})
     keys = preset_keys()
     errors = [f"{k} missing" for k in keys if k not in values]
     for key, got in values.items():
