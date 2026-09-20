@@ -20,7 +20,7 @@ AI-Generated Content (read 2026-09-16).
 | Category | `Utilities`, beside FreeCam (mod 350) |
 | Tags | `Camera`, `Quality of Life`, `Utilities for Players`, `AI-Generated Content` |
 | Adult content | No |
-| Requirements | Two entries, either one. UE4SS for Dawnwalker: https://www.nexusmods.com/thebloodofdawnwalker/mods/18 (Vercadi). Note field: `Or Framecore's UE4SS for BoD. Use file Dawnwalker-UE4SS-v1.2.1-rc6-build25232147 (version 1.3).` Current MAIN file on 2026-09-16. UE4SS for BoD: https://www.nexusmods.com/thebloodofdawnwalker/mods/283 (Framecore). Note field: `Or Vercadi's UE4SS for Dawnwalker. Version 2b, Performance or Compatibility profile.` Its UE4SS.dll is the official RE-UE4SS experimental CI build of 97b7e501 (PE timestamp 2026-09-02 02:02:56 UTC, inside the "Make Experimental Release" run on that commit); tested 2026-09-16 on both profiles. |
+| Requirements | Two entries, either one. UE4SS for Dawnwalker: https://www.nexusmods.com/thebloodofdawnwalker/mods/18 (Vercadi). Note field: `Or Framecore's UE4SS for BoD. Use file Dawnwalker-UE4SS-v1.2.1-rc6-build25232147 (version 1.3).` Current MAIN file on 2026-09-16. UE4SS for BoD: https://www.nexusmods.com/thebloodofdawnwalker/mods/283 (Framecore). Note field: `Or Vercadi's UE4SS for Dawnwalker. Version 2c or 2b, Performance or Compatibility profile.` Its UE4SS.dll is the official RE-UE4SS experimental CI build of 97b7e501 (PE timestamp 2026-09-02 02:02:56 UTC, inside the "Make Experimental Release" run on that commit); tested 2026-09-16 on both profiles. |
 | Optional | Dawnwalker Mod Menu: https://www.nexusmods.com/thebloodofdawnwalker/mods/271 (Nexus title "Mod Setting Menu", mmarcussa, 1.0.6.2 on 2026-09-16). Note field: `Adds the in-game settings page. Without it, edit config/smoothwalker.ini.` |
 | Description | `nexus-description.bbcode` |
 
@@ -88,7 +88,7 @@ differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 - Presets Tight, Balanced and Cinematic, each with its own follow feel and camera position, plus six save slots you can name and up to 54 presets from other authors dropped into config/presets. A preset carries follow, turning, the look limits and camera position; not the on/off switches, the shoulder side, banners, the snap thresholds or keys.
 - V swaps shoulders. Cycling presets and switching the mod on and off can be bound to keys too, and ship unbound, as a blank key means no key. None of them costs a frame: eight presses in a 20-second capture, worst frame 23 ms against an 18 ms average, no stutters.
 - Settings in config/smoothwalker.ini apply within a quarter second while the game runs. Optional page for Dawnwalker Mod Menu covering every setting except the key bindings, with a Preset entry that shows which preset your settings match.
-- Built for UE4SS 97b7e501: Vercadi's rc6 (mod 18) or Framecore's 2b (mod 283, Performance or Compatibility profile). Steam build 25232147 only. On any other build the mod stays inactive and says so in UE4SS.log.
+- Built for UE4SS 97b7e501: Vercadi's rc6 (mod 18) or Framecore's 2c or 2b (mod 283, Performance or Compatibility profile). Steam build 25232147 only. On any other build the mod stays inactive and says so in UE4SS.log.
 ```
 
 ## Maintenance

@@ -471,7 +471,9 @@ signature comments still named build 25129649.
 ### Framecore's UE4SS for BoD
 
 Framecore's "UE4SS for BoD" (Nexus 283) ships the official RE-UE4SS experimental build
-of 97b7e501, the commit this DLL builds against, with `HotReloadKey = F11` (mod reload is `Ctrl+F11`). Its
+of 97b7e501, the commit this DLL builds against, with `HotReloadKey = F11` (mod reload is `Ctrl+F11`).
+2c ships the same UE4SS.dll and dwmapi.dll as 2b, byte for byte; it only sets `HookProcessConsoleExec = 1`
+(unused here) and moves the GUI key from O to P. Its
 default "Performance" profile sets `HookBeginPlay = 0`, `HookEndPlay = 0`, `HookLoadMap = 0`,
 `HookEngineTick = 1`, `HookUObjectProcessEvent = 1`, `DefaultExecuteInGameThreadMethod = EngineTick`; its
 "Compatibility" profile turns BeginPlay, EndPlay and LoadMap on and `HookUObjectProcessEvent` off. UE4SS

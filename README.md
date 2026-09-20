@@ -10,7 +10,7 @@ the mod on/off and cycling presets can be set in the ini for convenience.
 - The Blood of Dawnwalker, Steam build 1.0.5 (25232147).
 - UE4SS at commit `97b7e501`, from either:
   - Vercadi's UE4SS for Dawnwalker, rc6 (Nexus mod 18), or
-  - Framecore's UE4SS for BoD, 2b, Performance or Compatibility profile (Nexus mod 283).
+  - Framecore's UE4SS for BoD, 2c or 2b, Performance or Compatibility profile (Nexus mod 283).
 - Optional: Mod Setting Menu (Nexus mod 271) for the in-game settings page. Without it, edit
   `config/smoothwalker.ini`.
 
