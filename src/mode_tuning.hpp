@@ -72,7 +72,8 @@ namespace dwsc
     struct ModeClassSpec
     {
         Group group;
-        const wchar_t* name; // BP_CameraMode_<name>
+        const wchar_t* name;         // BP_CameraMode_<name>
+        const wchar_t* folder = L""; // under Modes/, with its slash
     };
 
     // Finisher and shadowstep attack cameras are scripted shots and stay as shipped.
@@ -84,9 +85,11 @@ namespace dwsc
                 {Sprint, L"Sprint"}, {Sprint, L"Sprint_VampiricFastTraversal"},
                 {Combat, L"CombatNear"}, {Combat, L"CombatFromArm"}, {Combat, L"CombatFromArm_LongRange"},
                 {Combat, L"CombatFromArm_VeryLongRange"}, {Combat, L"CombatFistFightMode"}, {Combat, L"FocusMode"},
+                {Combat, L"CombatSprinting"},
                 {Aiming, L"Aiming"}, {Aiming, L"AimingOnLadder"}, {Aiming, L"AimingClawRide"}, {Aiming, L"AimingClawRideLedge"},
                 {Aiming, L"AntiGravAiming"},
                 {Traversal, L"AntiGrav"}, {Traversal, L"ClawRide"}, {Traversal, L"ClawRideLedge"},
+                {Traversal, L"Shadowstep_2_Base", L"Shadowstep/"},
         };
         return specs;
     }
@@ -153,11 +156,17 @@ namespace dwsc
             drop_dead_classes();
             for (auto& mode : m_modes)
             {
-                if (mode.captured || !mode.usable) continue;
-                auto path = std::wstring(L"/Game/_Dawnwalker/Player/Camera/Modes/BP_CameraMode_") + mode.spec.name + L".Default__BP_CameraMode_" +
+                if (mode.captured || !mode.usable || mode.missing) continue;
+                auto path = std::wstring(L"/Game/_Dawnwalker/Player/Camera/Modes/") + mode.spec.folder + L"BP_CameraMode_" + mode.spec.name + L".Default__BP_CameraMode_" +
                             mode.spec.name + L"_C";
                 auto* cdo = UObjectGlobals::StaticFindObject<UObject*>(nullptr, nullptr, path.c_str());
-                if (!cdo) continue;
+                if (!cdo)
+                {
+                    // A failed lookup costs about 50 ms (measured 2026-09-20, CombatSprinting at night), so an
+                    // unloaded class is not asked for again until a map load or one of its modes is pushed.
+                    mode.missing = true;
+                    continue;
+                }
                 if (!mode.has_original)
                 {
                     read_original(cdo, mode.original);
@@ -207,6 +216,7 @@ namespace dwsc
             for (auto& mode : m_modes)
             {
                 mode.captured = false;
+                mode.missing = false;
                 mode.cdo = nullptr;
                 mode.cls = nullptr;
                 mode.cdo_ref = mode.cls_ref = {};
@@ -270,6 +280,7 @@ namespace dwsc
                 ++live;
             });
             m_applied = true;
+            m_last = tuning;
             m_transition = static_cast<float>(tuning.transition);
             // Only CameraOffsets needs the flip; the lag switch and an inactive tuning move none.
             if (tuning.active || m_was_active) request_flip(player_camera);
@@ -374,6 +385,7 @@ namespace dwsc
             UClass* cls = nullptr;
             LiveRef cdo_ref, cls_ref; // checked before cdo or cls is used
             bool captured = false;
+            bool missing = false; // not loaded at the last lookup
             bool has_original = false;
             bool usable = true;
             Original original;
@@ -393,6 +405,7 @@ namespace dwsc
             return modes;
         }();
         std::vector<std::pair<LiveRef, size_t>> m_live; // the player's live modes, with their m_modes index
+        PositionTuning m_last;                          // what the last apply wrote, for a class that loads later
         bool m_scan_needed = true;                      // m_live does not cover this camera yet
         static constexpr size_t MAX_NEW = 256;
         std::mutex m_new_mutex;                         // m_new, m_new_overflow: written by note_new on any thread
@@ -521,15 +534,16 @@ namespace dwsc
         }
 
         // m_live gains a live object if it is one of the captured modes and not held yet.
-        auto keep_if_mode(LiveRef ref) -> void
+        auto keep_if_mode(LiveRef ref) -> bool
         {
             for (size_t i = 0; i < m_modes.size(); ++i)
             {
                 if (!m_modes[i].captured || m_modes[i].cls != ref.cls || ref.object == m_modes[i].cdo) continue;
                 bool held = std::any_of(m_live.begin(), m_live.end(), [&](auto& entry) { return entry.first.object == ref.object; });
                 if (!held) m_live.push_back({ref, i});
-                return;
+                return true;
             }
+            return false;
         }
 
         // The player's live modes: objects whose outer is the camera and whose class is a captured mode. It reads
@@ -563,7 +577,29 @@ namespace dwsc
             std::erase_if(m_live, [](auto& entry) { return !entry.first.alive(); });
             for (auto& ref : fresh)
             {
-                if (ref.alive()) keep_if_mode(ref);
+                if (ref.alive() && !keep_if_mode(ref)) adopt_late(ref);
+            }
+        }
+
+        // A mode whose class loaded after the last apply (CombatSprinting is loaded by day only): its
+        // CDO and this first instance still hold the game's values. The name is compared first, so the effect
+        // cameras pushed on the same camera cost no object lookup.
+        auto adopt_late(LiveRef ref) -> void
+        {
+            if (!m_applied) return;
+            auto name = ref.cls->GetName();
+            for (auto& mode : m_modes)
+            {
+                if (mode.captured || !mode.usable) continue;
+                if (name != std::wstring(L"BP_CameraMode_") + mode.spec.name + L"_C") continue;
+                mode.missing = false;
+                capture();
+                Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] {} loaded late: {}\n"), mode.spec.name, mode.captured ? STR("tuned") : STR("not found"));
+                if (!mode.captured || !keep_if_mode(ref)) return;
+                write(mode.cdo, mode, m_last);
+                write(ref.object, mode, m_last);
+                if (m_last.active) request_flip(ref.object->GetOuterPrivate());
+                return;
             }
         }
 

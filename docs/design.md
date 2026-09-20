@@ -131,9 +131,9 @@ the LongRange instance stays below it. The component itself has no reflected pro
 69 mode classes under `/Game/_Dawnwalker/Player/Camera/Modes/`. The ones a player sees for more than
 a moment: `Base`, `Base_LongRange`, `Base_CloseRange`, `Base_CloseRange_Mantle2m`, `Sprint`,
 `Sprint_VampiricFastTraversal`, `Aiming`, `AimingOnLadder`, `AimingClawRide(Ledge)`, `FocusMode`,
-`GapSqueeze`, `ClawRide`, `ClawRideLedge`, `AntiGrav`, `AntiGravAiming`, `Shadowstep_2_Base`, and the
+`GapSqueeze`, `ClawRide`, `ClawRideLedge`, `AntiGrav`, `AntiGravAiming`, `Shadowstep_2_Base` (in `Modes/Shadowstep/`), and the
 combat set `CombatNear`, `CombatFromArm`, `CombatFromArm_LongRange`, `CombatFromArm_VeryLongRange`,
-`CombatFistFightMode`. The other ~40 are `Finisher_*` / `ShadowStepAttack*` effect cameras.
+`CombatFistFightMode`, `CombatSprinting`. The other ~40 are `Finisher_*` / `ShadowStepAttack*` effect cameras.
 
 ### Tunables
 
@@ -182,8 +182,17 @@ Measured live on the running game.
 Per group (exploring, sprinting, combat, aiming, claw ride and anti-grav): distance %, height, shoulder
 and FOV. For every mode: a shoulder swap (`N`), the
 look up/down limits and a transition time. 41 settings on the menu page (the three safety keys and `game_lag_scale` left it on 2026-09-19; the safety keys stay in the ini), validated with the menu's
-parser. The groups cover 21 `BP_CameraMode_*` classes; the ~40 finisher and shadowstep attack cameras are
-left alone. All 21 are loaded at session start (checked 2026-09-16).
+parser. The groups cover 23 `BP_CameraMode_*` classes; the finisher and shadowstep attack cameras are
+left alone. 22 are loaded at session start (21 checked 2026-09-16, `Shadowstep_2_Base` 2026-09-20).
+`CombatSprinting` is day Coen's camera for sprinting with a weapon drawn, and its class is loaded by day only
+(at night: absent, a lookup miss costs about 50 ms, so a miss is remembered until a map load or a push; the
+vampire modes stay loaded by day). A save load by day captures it in the normal apply. For a night that turns
+to day with no map load: a mode pushed from a class not captured yet is matched by
+class name in `adopt_new()`, which captures the class, writes its CDO and that instance from the last apply
+and requests the flip. Both were added 2026-09-20; `Shadowstep_2_Base` (Traversal) is a `RebelCameraModeTPP`
+child branched off `Base` (FOV 100, pitch -60 / 40, key 1 at -400 70 50), `CombatSprinting` a
+`CombatCameraMode` (FOV 90, pitch -89 / 89, key 1 at -200 50 0). The class count under `Modes/` moves with
+streaming (60 to 76 seen in one session).
 
 The shipped values differ widely, so every setting is relative:
 
