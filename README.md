@@ -1,9 +1,9 @@
-# SmoothWalker - Third Person Camera (DWSmoothWalker)
+# Smoothwalker - Third Person Camera
 
-A third-person camera for The Blood of Dawnwalker that trails your character and catches up smoothly while
-turning stays responsive. While you aim, the trail eases down so the view stays on the crosshair. Distance,
-height, shoulder and FOV can be set per mode, with a shoulder swap on `V`. Presets and on/off live
-on the Mod Settings Menu page and in the ini, and can be given keys there.
+A third-person camera mod for The Blood of Dawnwalker that replaces the game's camera lag with a custom 
+implementation that can be configured into presets using pure ini files or the optional in-game Mod Setting Menu. 
+Distance, height, shoulder and FOV can be set per mode, with a shoulder swap on `V`. Keybinds for turning
+the mod on/off and cycling presets can be set in the ini for convenience.
 
 ## Requirements
 
