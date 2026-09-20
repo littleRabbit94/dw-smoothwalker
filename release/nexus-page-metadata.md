@@ -31,7 +31,7 @@ AI-Generated Content (read 2026-09-16).
 | File name | `Smoothwalker` |
 | Version | `0.8.0` |
 | Category | Main Files |
-| File | `dist/Smoothwalker-0.8.0.zip`, 271,404 bytes, built 2026-09-17 |
+| File | `dist/Smoothwalker-0.8.0.zip`, 187,927 bytes, built 2026-09-20 |
 | Description | `Close the game, then extract into the folder that holds the ue4ss folder (Dawnwalker/Binaries/Win64, the one with Dawnwalker.exe). The archive carries the folder path, so the mod lands in ue4ss/Mods/DWSmoothwalker by itself. Needs UE4SS (mod 18 or mod 283) and Steam build 25232147. No mods.txt edit.` |
 
 Optional file:
@@ -41,7 +41,7 @@ Optional file:
 | File name | `Smoothwalker Example Preset` |
 | Version | `0.8.0` |
 | Category | Optional Files |
-| File | `dist/Smoothwalker-Example-Preset-0.8.0.zip`, 1,401 bytes, built 2026-09-17 |
+| File | `dist/Smoothwalker-Example-Preset-0.8.0.zip`, 1,212 bytes, built 2026-09-20 |
 | Description | `One preset, Over the Shoulder: a closer camera further out over the shoulder, with a quicker follow to match. I commented every key with its range and default, so it doubles as a template for your own. Extract into Dawnwalker/Binaries/Win64 like the main file; it lands in ue4ss/Mods/DWSmoothwalker/config/presets. Restart the game, then pick it from the Mod Menu or with preset in the ini. Needs the main file.` |
 
 Source: `example-preset/`. The build checks it holds a name and all 32 preset keys, each once, inside
