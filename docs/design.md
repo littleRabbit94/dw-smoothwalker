@@ -1,4 +1,4 @@
-# SmoothWalker: design and measurements
+# Smoothwalker: design and measurements
 
 ## Overview
 
@@ -16,7 +16,7 @@ Source in `src/`, superbuild `CMakeLists.txt` against an RE-UE4SS checkout at `9
 cache variable `DW_RE_UE4SS_SOURCE_DIR`), output copied to `mod/dlls/main.dll` (git-ignored). Build:
 
 ```
-cmake --build <build dir> --config Game__Shipping__Win64 --target DWSmoothWalker --parallel
+cmake --build <build dir> --config Game__Shipping__Win64 --target DWSmoothwalker --parallel
 ```
 
 `--parallel`, not `-- /m`: Git Bash rewrites `/m` into a path and MSBuild refuses it. A loaded
@@ -273,7 +273,7 @@ the centre (0.7.4).
   It also refuses an Apply when the file changed since the page opened ("config changed externally;
   reopen this mod"), which is why the 0.7 Load preset description said to reopen the page. 0.8.0 never
   writes the file while a page can be open, so that advice is gone.
-- **Config lives in `ue4ss/Mods/DWSmoothWalker/config/`, not `scripts/config/`.** UE4SS creates a Lua mod for any
+- **Config lives in `ue4ss/Mods/DWSmoothwalker/config/`, not `scripts/config/`.** UE4SS creates a Lua mod for any
   mod folder with a `scripts` subfolder (`UE4SSProgram.cpp` 1424) and then logs a missing `main.lua` on every
   start; this mod has no Lua. `mod_settings.ini` points at `config/smoothwalker.ini`.
 
@@ -422,7 +422,7 @@ live; its `enabled` change is written back like the others, once the camera is l
 - **The region banner.** There is no free-text notification: every `NotificationSystemLibrary` push is
   typed. But `PushRegionEnteredNotification(WorldContextObject, FRegionData, bool IsNewlyDiscovered)` shows
   `RegionData.RegionDisplayText` in the region banner. Verified live 2026-09-16 with
-  `FText("SmoothWalker: Cinematic")` and `IsNewlyDiscovered = false`: the banner appeared. Parameter layout:
+  `FText("Smoothwalker: Cinematic")` and `IsNewlyDiscovered = false`: the banner appeared. Parameter layout:
   WorldContextObject 0x00, RegionData 0x08 (RegionTag, GlossaryEntry, LootRegionTag as FNames at 0x00,
   0x08, 0x10; RegionDisplayText at 0x20), IsNewlyDiscovered 0x40, 0x48 total. The DLL checks those
   offsets against reflection once and turns banners off on a mismatch, builds the buffer zeroed, lends
@@ -445,7 +445,7 @@ live; its `enabled` change is written back like the others, once the camera is l
   subsystem is looked up once and kept as a `LiveRef`: `FindFirstOf("NotificationSubsystem")` measured 28 ms,
   0.4 s into every V glide.
 - **Ours are recognised by class and text** (0.7.4). No addresses are kept: a queued entry is ours only if it
-  is a `RegionEnteredNotificationInfo` whose text starts with `SmoothWalker:`. (0.7.3 recorded the new last
+  is a `RegionEnteredNotificationInfo` whose text starts with `Smoothwalker:`. (0.7.3 recorded the new last
   entry of `NotificationQueue`, found by reflection, straight after each push and compared pointers only; a
   stale pointer could match the game's own notification at a reused address.) The banner flag is cleared
   under the mutex.
@@ -538,7 +538,7 @@ toggling the smoothing between captures (so "off" means the DLL loaded with the 
 original, the fair A/B for the math), order on, off, on, off. Poll sampler, 20 s per capture after a 2 s
 settle, all four valid with identical stamps (`sg.*` 2, ViewDistance 3, `r.ScreenPercentage` 58):
 
-| Capture | SmoothWalker | n | mean ms | p50 ms | p95 ms | p99 ms | stutters |
+| Capture | Smoothwalker | n | mean ms | p50 ms | p95 ms | p99 ms | stutters |
 |---|---|---|---|---|---|---|---|
 | 13:17:08 | on | 945 | 21.25 | 21.14 | 23.28 | 24.23 | 0 |
 | 13:21:21 | off | 945 | 21.26 | 21.21 | 23.21 | 24.26 | 0 |
@@ -648,7 +648,7 @@ waits for running callbacks (`RemoveCallback` -> `WaitForExecutorsToFinish`).
 | `restore()` skipped CDOs dropped by `LoadMap`, so a reload could capture tuned values as originals | `restore()` re-captures before writing |
 | NaN from the ini (`std::stod` takes `nan`/`inf`) or a bad read stuck in the follow state and reached the view | Non-finite ini values ignored; non-finite pivot, view or result skips the frame |
 | The Mod Menu's rename leaves the ini briefly absent; a poll then reset every setting to defaults | A missing file after startup keeps the live settings and retries |
-| A stale banner pointer could match the game's own notification at a reused address | No addresses kept: a queued entry is ours only if it is a `RegionEnteredNotificationInfo` whose text starts with `SmoothWalker:` |
+| A stale banner pointer could match the game's own notification at a reused address | No addresses kept: a queued entry is ours only if it is a `RegionEnteredNotificationInfo` whose text starts with `Smoothwalker:` |
 | `enabled`/O described as "the game's camera" but position tuning stayed on | Descriptions say it switches the follow only |
 | A negative shoulder offset could cross to the other shoulder | Offset stops at the centre |
 | After a mid-game hot reload the controller was only found on O, which also toggled smoothing off | One controller lookup requested at init |

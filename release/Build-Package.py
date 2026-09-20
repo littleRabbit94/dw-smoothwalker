@@ -1,18 +1,18 @@
-"""Build the SmoothWalker - Third Person Camera (DWSmoothWalker) archive for Nexus.
+"""Build the Smoothwalker - Third Person Camera (DWSmoothwalker) archive for Nexus.
 
-Output: release/dist/SmoothWalker-<version>.zip. The archive carries the ue4ss/Mods/DWSmoothWalker/
+Output: release/dist/Smoothwalker-<version>.zip. The archive carries the ue4ss/Mods/DWSmoothwalker/
 path, so extracting it into Dawnwalker\Binaries\Win64 installs the mod:
 
-    ue4ss/Mods/DWSmoothWalker/dlls/main.dll
-    ue4ss/Mods/DWSmoothWalker/enabled.txt
-    ue4ss/Mods/DWSmoothWalker/LICENSE
-    ue4ss/Mods/DWSmoothWalker/mod_settings.ini
-    ue4ss/Mods/DWSmoothWalker/config/smoothwalker.ini
+    ue4ss/Mods/DWSmoothwalker/dlls/main.dll
+    ue4ss/Mods/DWSmoothwalker/enabled.txt
+    ue4ss/Mods/DWSmoothwalker/LICENSE
+    ue4ss/Mods/DWSmoothwalker/mod_settings.ini
+    ue4ss/Mods/DWSmoothwalker/config/smoothwalker.ini
 
 No PDB and no presets folder: the mod creates config/presets/ at startup.
 
-Optional file: release/dist/SmoothWalker-Example-Preset-<version>.zip, the commented example in
-release/example-preset/ at ue4ss/Mods/DWSmoothWalker/config/presets/<file name>.
+Optional file: release/dist/Smoothwalker-Example-Preset-<version>.zip, the commented example in
+release/example-preset/ at ue4ss/Mods/DWSmoothwalker/config/presets/<file name>.
 
 Source: mod/ in this repo; mod/dlls/main.dll is the git-ignored build output of src/.
 Version: ModVersion in src/dllmain.cpp. The build fails if:
@@ -42,10 +42,10 @@ SRC = REPO / "src"
 SHEET = HERE / "nexus-page-metadata.md"
 EXAMPLE_DIR = HERE / "example-preset"
 DIST = HERE / "dist"
-MOD_NAME = "DWSmoothWalker"
+MOD_NAME = "DWSmoothwalker"
 
 BUILD_HINT = ("cmake --build build "
-              "--config Game__Shipping__Win64 --target DWSmoothWalker --parallel")
+              "--config Game__Shipping__Win64 --target DWSmoothwalker --parallel")
 
 
 def fail(msg: str) -> None:
@@ -208,7 +208,7 @@ def main() -> int:
     check_example(examples[0], sections)
 
     DIST.mkdir(exist_ok=True)
-    out = DIST / f"SmoothWalker-{ver}.zip"
+    out = DIST / f"Smoothwalker-{ver}.zip"
     prefix = f"ue4ss/Mods/{MOD_NAME}/"
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(dll, prefix + "dlls/main.dll")
@@ -222,7 +222,7 @@ def main() -> int:
     for i in zipfile.ZipFile(out).infolist():
         print(f"  {i.file_size:>9,} {i.filename}")
 
-    example_zip = DIST / f"SmoothWalker-Example-Preset-{ver}.zip"
+    example_zip = DIST / f"Smoothwalker-Example-Preset-{ver}.zip"
     with zipfile.ZipFile(example_zip, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(examples[0], prefix + "config/presets/" + examples[0].name)
     print(example_zip, f"{example_zip.stat().st_size:,} bytes")

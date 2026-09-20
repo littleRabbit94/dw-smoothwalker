@@ -1,7 +1,7 @@
 # Smoothwalker - Third Person Camera
 
-A third-person camera mod for The Blood of Dawnwalker that replaces the game's camera lag with a custom 
-implementation that can be configured into presets using pure ini files or the optional in-game Mod Setting Menu. 
+A third-person camera mod for The Blood of Dawnwalker that replaces the game's camera lag with a custom
+implementation that can be configured into presets using pure ini files or the optional in-game Mod Setting Menu.
 Distance, height, shoulder and FOV can be set per mode, with a shoulder swap on `V`. Keybinds for turning
 the mod on/off and cycling presets can be set in the ini for convenience.
 
@@ -11,7 +11,7 @@ the mod on/off and cycling presets can be set in the ini for convenience.
 - UE4SS at commit `97b7e501`, from either:
   - Vercadi's UE4SS for Dawnwalker, rc6 (Nexus mod 18), or
   - Framecore's UE4SS for BoD, 2b, Performance or Compatibility profile (Nexus mod 283).
-- Optional: Mod Settings Menu (Nexus mod 271) for the in-game settings page. Without it, edit
+- Optional: Mod Setting Menu (Nexus mod 271) for the in-game settings page. Without it, edit
   `config/smoothwalker.ini`.
 
 ## Install (players)
@@ -27,12 +27,12 @@ submodules and build prerequisites (see RE-UE4SS's own build instructions). The 
 ```
 git -C <RE-UE4SS> checkout 97b7e501
 cmake -S . -B <build dir> -G "Visual Studio 17 2022" -DDW_RE_UE4SS_SOURCE_DIR=<RE-UE4SS>
-cmake --build <build dir> --config Game__Shipping__Win64 --target DWSmoothWalker --parallel
+cmake --build <build dir> --config Game__Shipping__Win64 --target DWSmoothwalker --parallel
 ```
 
 The first build compiles UE4SS too. The output is copied to `mod/dlls/main.dll` (and `main.pdb`). Use
 `--parallel`, not `-- /m`: Git Bash rewrites `/m` into a path. To deploy, close the game and copy `mod/`
-to `Dawnwalker/Binaries/Win64/ue4ss/Mods/DWSmoothWalker/`. An installed `config/smoothwalker.ini` holds
+to `Dawnwalker/Binaries/Win64/ue4ss/Mods/DWSmoothwalker/`. An installed `config/smoothwalker.ini` holds
 the player's settings: when a new setting is added, add its line there instead of overwriting the file. The Mod Menu page
 will not open while a `ConfigKey` is missing from it.
 
@@ -40,9 +40,9 @@ will not open while a `ConfigKey` is missing from it.
 
 | Path | Contents |
 |---|---|
-| `CMakeLists.txt` | Superbuild: RE-UE4SS from `DW_RE_UE4SS_SOURCE_DIR`, then the `DWSmoothWalker` target |
+| `CMakeLists.txt` | Superbuild: RE-UE4SS from `DW_RE_UE4SS_SOURCE_DIR`, then the `DWSmoothwalker` target |
 | `src/` | The DLL source: `dllmain.cpp` (hook, follow, settings, player discovery), `config.hpp` (settings and presets), `mode_tuning.hpp` (camera position in the game's modes, aiming state), `smoothing.hpp` (math) |
-| `mod/` | Exactly what ships under `ue4ss/Mods/DWSmoothWalker/`: `enabled.txt`, `LICENSE`, `mod_settings.ini` (Mod Menu page), `config/smoothwalker.ini`; `dlls/` is build output |
+| `mod/` | Exactly what ships under `ue4ss/Mods/DWSmoothwalker/`: `enabled.txt`, `LICENSE`, `mod_settings.ini` (Mod Menu page), `config/smoothwalker.ini`; `dlls/` is build output |
 | `release/` | `Build-Package.py`, the Nexus page description and metadata, `example-preset/` |
 | `docs/design.md` | How the mod works, the game's camera, measurements and version history |
 
@@ -53,11 +53,11 @@ python release/Build-Package.py
 ```
 
 Checks versions, the Mod Menu manifest against `smoothwalker.ini`, DLL freshness and the example preset, then
-writes `release/dist/SmoothWalker-<version>.zip` and `release/dist/SmoothWalker-Example-Preset-<version>.zip`.
+writes `release/dist/Smoothwalker-<version>.zip` and `release/dist/Smoothwalker-Example-Preset-<version>.zip`.
 
 ## Making presets
 
-Copy `release/example-preset/Template.ini` into `ue4ss/Mods/DWSmoothWalker/config/presets/` under a new name,
+Copy `release/example-preset/Template.ini` into `ue4ss/Mods/DWSmoothwalker/config/presets/` under a new name,
 change the `name` line and the values, and restart the game. Every key is commented with its range and
 default. The preset format and rules (32 keys, clamping, the 54 drop-in limit) are in `docs/design.md`,
 "Presets". Switches and `aiming_follow` are not preset keys; a preset that sets them is ignored on those lines.

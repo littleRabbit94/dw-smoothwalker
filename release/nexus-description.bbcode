@@ -1,6 +1,6 @@
-[size=5][b]SmoothWalker - Third Person Camera[/b][/size]
+[size=5][b]Smoothwalker - Third Person Camera[/b][/size]
 
-SmoothWalker is a C++ mod for UE4SS that lets the third-person camera trail your character and catch up smoothly, while turning stays instant. It ships with three presets: Tight, Balanced and Cinematic. Cinematic is the only one that smooths turning as well. Distance, height, shoulder and FOV can be set per camera mode, and [font=Courier New]V[/font] swaps shoulders.
+Smoothwalker is a C++ mod for UE4SS that lets the third-person camera trail your character and catch up smoothly, while turning stays instant. It ships with three presets: Tight, Balanced and Cinematic. Cinematic is the only one that smooths turning as well. Distance, height, shoulder and FOV can be set per camera mode, and [font=Courier New]V[/font] swaps shoulders.
 
 This is a pre-release. The camera works as intended, performance is fine, and I've kept it as compatible as I could, but I haven't put many hours of real gameplay on it yet. The three presets feel good to me without being perfect. I'm more curious what presets other people come up with.
 
@@ -22,21 +22,21 @@ This is a pre-release. The camera works as intended, performance is fine, and I'
 Extract the archive into the folder that holds the [i]ue4ss[/i] folder and Dawnwalker.exe:
 [code]<Steam library>\steamapps\common\The Blood of Dawnwalker\Dawnwalker\Binaries\Win64[/code]
 No mods.txt edit needed. [font=Courier New]UE4SS.log[/font] shows these two lines once it has loaded:
-[code][DWSmoothWalker] v0.8.0 loaded, on
-[DWSmoothWalker] GetCameraView hooked (slot 214)[/code]
-To uninstall, close the game and delete ue4ss\Mods\DWSmoothWalker. Nothing is written to save games.
+[code][DWSmoothwalker] v0.8.0 loaded, on
+[DWSmoothwalker] GetCameraView hooked (slot 214)[/code]
+To uninstall, close the game and delete ue4ss\Mods\DWSmoothwalker. Nothing is written to save games.
 
 [size=4][b]Presets and keys[/b][/size]
 [list]
 [*][font=Courier New]V[/font]: swap shoulders. The camera glides across in half a second.
-[*]Presets: pick one on the Mod Settings page or with [font=Courier New]preset[/font] in the ini. [b]Tight[/b] barely trails, camera a little closer. [b]Balanced[/b] (default) trails clearly and settles fast. [b]Cinematic[/b] trails heavily, smooths turning, sits further back and higher, and widens the view when you sprint. After those come your ten save slots, then any presets installed from other authors.
+[*]Presets: pick one on the Mod Settings page or with [font=Courier New]preset[/font] in the ini. [b]Tight[/b] barely trails, camera a little closer. [b]Balanced[/b] (default) trails clearly and settles fast. [b]Cinematic[/b] trails heavily, smooths turning, sits further back and higher, and widens the view when you sprint. After those come your six save slots, then any presets installed from other authors.
 [*]On and off: the [font=Courier New]enabled[/font] switch, same page or ini. Off is the game's own camera, untouched.
 [/list]
 Only [font=Courier New]V[/font] is bound by default, and the game leaves that key free. To cycle presets or toggle the mod from a key, set [font=Courier New]preset_key[/font] or [font=Courier New]toggle_key[/font] in the ini. A banner at the left of the screen confirms preset changes and on/off.
 
 A preset carries most of the camera settings; a few can't be changed per preset yet (see the Settings spoiler).
 
-[b]With Mod Setting Menu.[/b] SmoothWalker gets its own page under Mod Settings, in both the main and pause menus. It covers everything except the three key bindings. The Preset entry at the top shows which preset your settings match, or Custom. Pick another, press Apply, and it's live within a quarter second. No restart.
+[b]With Mod Setting Menu.[/b] Smoothwalker gets its own page under Mod Settings, in both the main and pause menus. It covers everything except the three key bindings. The Preset entry at the top shows which preset your settings match, or Custom. Pick another, press Apply, and it's live within a quarter second. No restart.
 
 [b]Without it.[/b] Edit [font=Courier New]config\smoothwalker.ini[/font] in the mod folder. Save, tab back in, and the change is live within a quarter second. Key bindings are the exception: they're read at game start.
 
@@ -60,44 +60,44 @@ The camera math runs once per frame inside the game's own camera update. Measure
 [list]
 [*][font=Courier New]toggle_key =[/font], [font=Courier New]preset_key =[/font] (blank, no key), [font=Courier New]shoulder_key = V[/font]
 [/list]
-[b]Follow[/b] (in presets, except enabled and aiming_follow)
+[b]Follow[/b] (in presets, except enabled, aiming_follow and wall_clamp)
 [list]
 [*][font=Courier New]enabled = 1[/font]: 0 is the game's own camera: no follow, no camera position changes, and the preset and shoulder keys do nothing.
-[*][font=Courier New]follow_rate_h = 8[/font], [font=Courier New]follow_rate_v = 10[/font]: catch-up rate per second, horizontal and vertical. Higher is tighter.
+[*][font=Courier New]follow_rate_h = 6.5[/font], [font=Courier New]follow_rate_v = 10[/font]: catch-up rate per second, horizontal and vertical. Higher is tighter.
 [*][font=Courier New]curve_h = 2[/font], [font=Courier New]curve_v = 0[/font]: 0 constant, 1 linear, 2 smoothstep, 3 ease in-out. The curves start gently and reach full rate at [font=Courier New]catchup_distance = 150[/font] cm; [font=Courier New]min_rate_scale = 0.35[/font] is the rate at zero lag.
-[*][font=Courier New]max_lag_h = 70[/font], [font=Courier New]max_lag_v = 50[/font]: the furthest the camera may fall behind, in cm.
+[*][font=Courier New]max_lag_h = 85[/font], [font=Courier New]max_lag_v = 50[/font]: the furthest the camera may fall behind, in cm.
 [*][font=Courier New]soft_leash = 1[/font]: eases into the lag limit instead of stopping hard at it.
 [*][font=Courier New]aiming_follow = 30[/font]: percent of the trail and turning smoothing kept while you aim. 0 locks the camera to your aim, 100 trails as everywhere else. Not part of a preset.
 [*][font=Courier New]rotation_smoothing = 0[/font], [font=Courier New]rotation_rate = 20[/font]: smooth turning too, and how fast it catches up.
 [*][font=Courier New]wall_clamp = 1[/font]: keeps the smoothed camera in front of walls the game pulled its camera in for.
 [/list]
-[b]Safety and display[/b] (the two thresholds are in presets)
+[b]Safety and display[/b] (not in presets)
 [list]
 [*][font=Courier New]reset_distance = 500[/font]: cm moved in one frame that counts as a teleport and snaps the camera.
 [*][font=Courier New]reset_gap = 0.25[/font]: seconds without camera updates (cutscene, free camera, load) before a snap.
 [*][font=Courier New]show_banner = 1[/font]: the preset and on/off banner.
 [*][font=Courier New]log_stats = 0[/font]: 1 writes smoothing statistics and the per-frame cost to [font=Courier New]UE4SS.log[/font] every 5 seconds.
 [/list]
-[b]Camera position[/b] (100 / 0 / 0 / 0 is the game as shipped; in presets except the two switches)
+[b]Camera position[/b] (100 / 0 / 0 / 0 is the game as shipped; in presets except camera_tuning, shoulder_swap and position_transition)
 [list]
 [*][font=Courier New]camera_tuning = 1[/font]: 0 puts every camera mode back as the game ships it.
 [*]Per group, with the prefix [font=Courier New]exploration_[/font], [font=Courier New]sprint_[/font], [font=Courier New]combat_[/font], [font=Courier New]aiming_[/font] or [font=Courier New]traversal_[/font]: [font=Courier New]distance[/font] (% of the game's, 50 to 250), [font=Courier New]height[/font] (cm), [font=Courier New]shoulder[/font] (cm further out; centered cameras stay centered; not for traversal), [font=Courier New]fov[/font] (degrees added).
-[*]The game's own camera lag is switched off while SmoothWalker is on, so the follow settings above are the only lag. Off puts it back.
+[*]The game's own camera lag is switched off while Smoothwalker is on, so the follow settings above are the only lag. Off puts it back.
 [*][font=Courier New]shoulder_swap = 0[/font]: 1 is the other shoulder. [font=Courier New]V[/font] switches it.
 [*][font=Courier New]position_transition = 0.5[/font]: seconds a position change or shoulder swap glides over. 0 snaps.
 [*][font=Courier New]pitch_min = -60[/font], [font=Courier New]pitch_max = 40[/font]: look down and up limits while exploring, sprinting and in focus. Aiming and combat already allow -89 / 89.
 [/list]
-[b]Presets[/b]: [font=Courier New]preset = 102[/font] shows the matching preset (0 Custom, 101 Tight, 102 Balanced, 103 Cinematic, 1 to 10 a slot, 201 and up an installed preset); change it to load one. [font=Courier New]preset_save[/font] (1 to 10) saves to a slot, then resets to 0. The mod writes these, and key presses that change them, back to the ini only while you play, never behind an open Mod Menu page. Slots go to [font=Courier New]config\presets\Slot N.ini[/font]; the mod creates the folder.
+[b]Presets[/b]: [font=Courier New]preset = 102[/font] shows the matching preset (0 Custom, 101 Tight, 102 Balanced, 103 Cinematic, 1 to 6 a slot, 201 and up an installed preset); change it to load one. [font=Courier New]preset_save[/font] (1 to 6) saves to a slot, then resets to 0. The mod writes these, and key presses that change them, back to the ini only while you play, never behind an open Mod Menu page. Slots go to [font=Courier New]config\presets\Slot N.ini[/font]; the mod creates the folder.
 [/spoiler]
 
 [size=4][b]For mod authors: making a preset[/b][/size]
 [spoiler]
-If you land on a camera you like, share it. The optional file [b]SmoothWalker Example Preset[/b] (Files tab) installs one preset, Over the Shoulder, with every key commented: range, default and what it does. It's the quickest template to copy.
+If you land on a camera you like, share it. The optional file [b]Smoothwalker Example Preset[/b] (Files tab) installs one preset, Over the Shoulder, with every key commented: range, default and what it does. It's the quickest template to copy.
 
-A preset is one [b].ini[/b] file in [i]ue4ss\Mods\DWSmoothWalker\config\presets[/i]. SmoothWalker reads that folder at game start, adds each file to the preset cycle after the player's own slots, and lists it by name in the Preset entry on the Mod Menu page.
+A preset is one [b].ini[/b] file in [i]ue4ss\Mods\DWSmoothwalker\config\presets[/i]. Smoothwalker reads that folder at game start, adds each file to the preset cycle after the player's own slots, and lists it by name in the Preset entry on the Mod Menu page.
 
 [b]1)[/b] Set the camera up in game, from the Mod Menu or the ini.
-[b]2)[/b] On the SmoothWalker page, pick a slot under Save current settings to and press Apply. This writes [i]presets\Slot N.ini[/i] with every setting a preset carries.
+[b]2)[/b] On the Smoothwalker page, pick a slot under Save current settings to and press Apply. This writes [i]presets\Slot N.ini[/i] with every setting a preset carries.
 [b]3)[/b] Copy that file under a name of your own, for example [i]presets\YourName - Low Chase.ini[/i]. Don't use [b]Slot 1.ini[/b] to [b]Slot 6.ini[/b]: those are the player's save slots and the mod overwrites them.
 [b]4)[/b] Change the [b]name[/b] line. That's what the banner and the Mod Menu show. Comments starting with [b];[/b] stay in the file; the mod never rewrites a preset it didn't save.
 [b]5)[/b] Restart the game. The preset appears after the slots.
@@ -122,19 +122,18 @@ exploration_fov = 5[/code]
 
 [b]Keys[/b] (range, shipped default)
 [list]
-[*]Follow: [font=Courier New]follow_rate_h[/font] and [font=Courier New]follow_rate_v[/font] (0.5 to 30, 8 and 10), [font=Courier New]curve_h[/font] and [font=Courier New]curve_v[/font] (0 constant, 1 linear, 2 smoothstep, 3 ease in-out; 2 and 0), [font=Courier New]catchup_distance[/font] (10 to 500 cm, 150), [font=Courier New]min_rate_scale[/font] (0.05 to 1, 0.35), [font=Courier New]max_lag_h[/font] (0 to 300 cm, 70), [font=Courier New]max_lag_v[/font] (0 to 200 cm, 50), [font=Courier New]soft_leash[/font] (0 or 1, 1)
-[*]Turning and walls: [font=Courier New]rotation_smoothing[/font] (0 or 1, 0), [font=Courier New]rotation_rate[/font] (1 to 60, 20), [font=Courier New]wall_clamp[/font] (0 or 1, 1)
-[*]Snaps: [font=Courier New]reset_distance[/font] (100 to 3000 cm, 500), [font=Courier New]reset_gap[/font] (0.05 to 2 s, 0.25)
-[*]Camera, all modes: [font=Courier New]position_transition[/font] (0 to 2 s, 0.5), [font=Courier New]pitch_min[/font] (-89 to -30, -60), [font=Courier New]pitch_max[/font] (20 to 89, 40)
+[*]Follow: [font=Courier New]follow_rate_h[/font] and [font=Courier New]follow_rate_v[/font] (0.5 to 30, 6.5 and 10), [font=Courier New]curve_h[/font] and [font=Courier New]curve_v[/font] (0 constant, 1 linear, 2 smoothstep, 3 ease in-out; 2 and 0), [font=Courier New]catchup_distance[/font] (10 to 500 cm, 150), [font=Courier New]min_rate_scale[/font] (0.05 to 1, 0.35), [font=Courier New]max_lag_h[/font] (0 to 300 cm, 85), [font=Courier New]max_lag_v[/font] (0 to 200 cm, 50), [font=Courier New]soft_leash[/font] (0 or 1, 1)
+[*]Turning: [font=Courier New]rotation_smoothing[/font] (0 or 1, 0), [font=Courier New]rotation_rate[/font] (1 to 60, 20)
+[*]Camera, all modes: [font=Courier New]pitch_min[/font] (-89 to -30, -60), [font=Courier New]pitch_max[/font] (20 to 89, 40)
 [*]Per situation, with the prefix [font=Courier New]exploration_[/font], [font=Courier New]sprint_[/font], [font=Courier New]combat_[/font], [font=Courier New]aiming_[/font] or [font=Courier New]traversal_[/font]: [font=Courier New]distance[/font] (50 to 250 %, 100), [font=Courier New]height[/font] (-50 to 100 cm, 0), [font=Courier New]shoulder[/font] (-60 to 100 cm, 0; not for traversal), [font=Courier New]fov[/font] (-30 to 30 degrees, 0)
 [/list]
 
 [b]Sharing a preset on Nexus[/b]
-Pack the file with its folder path, [i]ue4ss\Mods\DWSmoothWalker\config\presets\YourName - Low Chase.ini[/i], so players extract it into [i]Dawnwalker\Binaries\Win64[/i] like SmoothWalker itself. List SmoothWalker as a requirement, and pick a file name no other preset is likely to use; same-named files replace each other on extract.
+Pack the file with its folder path, [i]ue4ss\Mods\DWSmoothwalker\config\presets\YourName - Low Chase.ini[/i], so players extract it into [i]Dawnwalker\Binaries\Win64[/i] like Smoothwalker itself. List Smoothwalker as a requirement, and pick a file name no other preset is likely to use; same-named files replace each other on extract.
 [/spoiler]
 
 [size=4][b]Source[/b][/size]
-Source is on [url=https://github.com/littleRabbit94/dw-smoothwalker]GitHub[/url]. For bug reports, the DWSmoothWalker lines from your [font=Courier New]UE4SS.log[/font], your game build and which UE4SS package you run are usually enough.
+Source is on [url=https://github.com/littleRabbit94/dw-smoothwalker]GitHub[/url]. For bug reports, the DWSmoothwalker lines from your [font=Courier New]UE4SS.log[/font], your game build and which UE4SS package you run are usually enough.
 
 [size=4][b]Credits[/b][/size]
 Built on [url=https://github.com/UE4SS-RE/RE-UE4SS]UE4SS[/url] by the UE4SS-RE team (MIT).

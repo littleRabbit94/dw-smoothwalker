@@ -64,7 +64,7 @@ namespace dwsc
         double pitch_min = -60, pitch_max = 40;
         double position_transition = 0.5; // s; 0 snaps
 
-        int preset = 102;                 // the preset the live settings match: 0 Custom, 101-103 built-in, 1-MAX_SLOTS slot
+        int preset = 102;                 // the preset the live settings match: 0 Custom, 101-103 built-in, 1-MAX_SLOTS slot, FIRST_DROPIN_ID on drop-in
         int preset_save = 0;              // menu action, reset to 0: 1-MAX_SLOTS slot
 
         bool log_stats = false;
@@ -581,7 +581,7 @@ namespace dwsc
     inline auto slot_file_content(int slot, const std::string& name, const Values& values) -> std::string
     {
         auto n = std::to_string(slot);
-        std::string out = "; DWSmoothWalker Slot " + n + ", written by the mod when you save to it from the Mod Menu.\n"
+        std::string out = "; DWSmoothwalker Slot " + n + ", written by the mod when you save to it from the Mod Menu.\n"
                           "; Change name below to rename the slot: the menu and the banner show it after the next game start.\n"
                           "; To make a drop-in preset from it, copy this file and give the copy any other file name.\n";
         out += "name = " + name + "\n";

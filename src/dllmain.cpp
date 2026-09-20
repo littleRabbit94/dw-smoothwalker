@@ -1,4 +1,4 @@
-// DWSmoothWalker: lags the character pivot the game's camera view is built around (GetCameraView, vtable
+// DWSmoothwalker: lags the character pivot the game's camera view is built around (GetCameraView, vtable
 // slot 214). Design and measurements: docs/design.md.
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
@@ -9,13 +9,17 @@
 #include <atomic>
 #include <cmath>
 #include <chrono>
-#include <format>
+#include <functional>
+#include <map>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <algorithm>
 #include <mutex>
+#include <utility>
 #include <vector>
 
 #include <DynamicOutput/DynamicOutput.hpp>
@@ -42,11 +46,11 @@ namespace
 {
     constexpr size_t GET_CAMERA_VIEW_SLOT = 214;
     // Not under scripts/: UE4SS makes a Lua mod of any folder with a scripts subfolder and logs a missing main.lua.
-    constexpr const char* SETTINGS_PATH = "ue4ss/Mods/DWSmoothWalker/config/smoothwalker.ini";
-    constexpr const char* PENDING_PATH = "ue4ss/Mods/DWSmoothWalker/config/smoothwalker.pending";
-    constexpr const char* PRESETS_DIR = "ue4ss/Mods/DWSmoothWalker/config/presets";
-    constexpr const wchar_t* PRESETS_DIR_W = L"ue4ss\\Mods\\DWSmoothWalker\\config\\presets";
-    constexpr const char* MANIFEST_PATH = "ue4ss/Mods/DWSmoothWalker/mod_settings.ini";
+    constexpr const char* SETTINGS_PATH = "ue4ss/Mods/DWSmoothwalker/config/smoothwalker.ini";
+    constexpr const char* PENDING_PATH = "ue4ss/Mods/DWSmoothwalker/config/smoothwalker.pending";
+    constexpr const char* PRESETS_DIR = "ue4ss/Mods/DWSmoothwalker/config/presets";
+    constexpr const wchar_t* PRESETS_DIR_W = L"ue4ss\\Mods\\DWSmoothwalker\\config\\presets";
+    constexpr const char* MANIFEST_PATH = "ue4ss/Mods/DWSmoothwalker/mod_settings.ini";
 
     // Prefix of UE 5.5 FMinimalViewInfo: Location, Rotation, FOV.
     struct ViewHead
@@ -55,7 +59,7 @@ namespace
         double rotation[3];
         float fov;
     };
-    constexpr size_t VIEW_BYTES = offsetof(ViewHead, fov) + sizeof(float); // not the padding over DesiredFOV
+    constexpr size_t VIEW_BYTES = offsetof(ViewHead, fov) + sizeof(float); // stops at FOV: not the padding, not DesiredFOV
 
     // Numbers only, so the hook's copy allocates nothing on a worker thread.
     struct Tuning
@@ -217,7 +221,7 @@ namespace
         g_follow.blending = false;
     }
 
-    // enabled false still runs while a crossfade to the game's own view (toggled off) is under way.
+    // Runs with enabled false too, while the crossfade back to the game's own view is under way.
     auto update_view(void* desired_view, float delta_time, bool enabled) -> void
     {
         AcquireSRWLockShared(&g_tuning_lock);
@@ -453,7 +457,7 @@ namespace
         QueryPerformanceCounter(&stamp);
         g_last_view_qpc.store(stamp.QuadPart, std::memory_order_relaxed);
         bool enabled = g_enabled.load(std::memory_order_relaxed);
-        // Off and settled: the game's view untouched, as before. The next toggle starts from a fresh output.
+        // Off and settled: the game's view untouched. The next toggle starts from a fresh output.
         if (!enabled && !g_follow.blending && g_toggle_generation.load(std::memory_order_relaxed) == g_follow.seen_toggle)
         {
             g_follow.valid = false;
@@ -516,12 +520,12 @@ namespace
     }
 } // namespace
 
-class DWSmoothWalker : public CppUserModBase
+class DWSmoothwalker : public CppUserModBase
 {
   public:
-    DWSmoothWalker() : CppUserModBase()
+    DWSmoothwalker() : CppUserModBase()
     {
-        ModName = STR("DWSmoothWalker");
+        ModName = STR("DWSmoothwalker");
         ModVersion = STR("0.8.0");
         ModDescription = STR("Frame-interpolated third-person camera");
         ModAuthors = STR("littleRabbit6");
@@ -533,12 +537,12 @@ class DWSmoothWalker : public CppUserModBase
         // Once, without the camera_live() gate: no Mod Menu page can be open this early (docs/design.md, "Startup
         // flush"). Fixes a preset id the regenerated manifest may not list yet, before the page can fail on it.
         if (m_flush_pending.load()) flush_locked(std::chrono::steady_clock::now());
-        Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] v{} loaded, {}\n"), ModVersion, g_enabled.load() ? STR("on") : STR("off"));
+        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] v{} loaded, {}\n"), ModVersion, g_enabled.load() ? STR("on") : STR("off"));
     }
 
     // UE4SS frees the DLL right after this (hot reload). UnregisterCallback waits for running callbacks, so the
     // game thread is out of m_tuner before restore(); a call already in the hook must return before unload.
-    ~DWSmoothWalker() override
+    ~DWSmoothwalker() override
     {
         for (auto id : m_callbacks) Hook::UnregisterCallback(id);
         if (g_vtable_entry && g_original)
@@ -552,7 +556,7 @@ class DWSmoothWalker : public CppUserModBase
             // A worker may have read the old entry just before the restore and not entered the hook yet.
             Sleep(50);
             for (int i = 0; i < 500 && g_in_hook.load() != 0; ++i) Sleep(10);
-            if (g_in_hook.load() != 0) Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] unload: a camera update is still in the hook\n"));
+            if (g_in_hook.load() != 0) Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] unload: a camera update is still in the hook\n"));
         }
         m_tuner.restore();
     }
@@ -566,7 +570,7 @@ class DWSmoothWalker : public CppUserModBase
         // UE4SS only installs BeginPlay, EndPlay and LoadMap when [Hooks] enables them (off in a "Performance"
         // profile); StaticConstructObject is always installed. Registering on an uninstalled hook logs an error,
         // so each optional hook is guarded by its flag; the engine tick covers world change, liveness and lookup.
-        Hook::FCallbackOptions options{false, true, STR("DWSmoothWalker"), STR("")};
+        Hook::FCallbackOptions options{false, true, STR("DWSmoothwalker"), STR("")};
         auto& hooks = UnrealInitializer::StaticStorage::GlobalConfig;
         auto add = [&](Hook::GlobalCallbackId id) {
             if (id != Hook::ERROR_ID) m_callbacks.push_back(id);
@@ -603,10 +607,10 @@ class DWSmoothWalker : public CppUserModBase
         bool engine_tick =
                 hooks.bHookEngineTick && add(Hook::RegisterEngineTickPostCallback([this](auto&, UEngine* engine, float, bool) { on_engine_tick(engine); }, options));
         auto state = [](bool on) { return on ? STR("on") : STR("off"); };
-        Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] player discovery: new-object callback {}, BeginPlay {}, EndPlay {}, LoadMap {}; engine tick "
+        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] player discovery: new-object callback {}, BeginPlay {}, EndPlay {}, LoadMap {}; engine tick "
                                            "checks world and liveness, FindFirstOf fallback from 2 s backing off to 60 s without a controller\n"),
                                        state(new_object), state(begin_play), state(end_play), state(load_map));
-        if (!engine_tick) Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] UE4SS EngineTick hook is off: the camera cannot find the player\n"));
+        if (!engine_tick) Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] UE4SS EngineTick hook is off: the camera cannot find the player\n"));
 
         bind(m_toggle_key, STR("toggle_key"), [this]() {
             std::lock_guard guard(m_file_mutex);
@@ -614,8 +618,8 @@ class DWSmoothWalker : public CppUserModBase
             set_enabled_locked(now);
             publish_locked();
             mark_pending_locked();
-            Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] smoothing {}\n"), now ? STR("on") : STR("off"));
-            request_banner(now ? STR("SmoothWalker: On") : STR("SmoothWalker: Off"));
+            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] smoothing {}\n"), now ? STR("on") : STR("off"));
+            request_banner(now ? STR("Smoothwalker: On") : STR("Smoothwalker: Off"));
         });
         bind(m_preset_key, STR("preset_key"), [this]() {
             if (key_live(STR("preset"))) cycle_preset();
@@ -655,7 +659,7 @@ class DWSmoothWalker : public CppUserModBase
         auto ticks = g_ticks_spent.exchange(0);
         double micros = timed ? 1e6 * static_cast<double>(ticks) / static_cast<double>(g_qpc_frequency.QuadPart) / timed : 0.0;
         Output::send<LogLevel::Normal>(
-                STR("[DWSmoothWalker] {:.1f} smoothed frames/s, mean shown lag {:.1f} cm, wall clamp {:.0f}%, {:.1f} us per frame in the hook\n"),
+                STR("[DWSmoothwalker] {:.1f} smoothed frames/s, mean shown lag {:.1f} cm, wall clamp {:.0f}%, {:.1f} us per frame in the hook\n"),
                 frames / elapsed, frames ? lag / frames : 0.0, frames ? 100.0 * clamped / frames : 0.0, micros);
     }
 
@@ -681,7 +685,7 @@ class DWSmoothWalker : public CppUserModBase
 
     std::mutex m_file_mutex; // the config files, m_settings, m_baseline, m_presets, m_loaded_id; the engine tick never takes it
     dwsc::Settings m_settings{};
-    uint64_t m_settings_stamp = 0;                // write time of the smoothwalker.ini last read or written
+    uint64_t m_settings_stamp = 0;                // write time of smoothwalker.ini as last read or written
     std::map<std::string, double> m_baseline;     // each numeric key as last known to be in smoothwalker.ini
     int m_loaded_id = 0;                          // last preset loaded or cycled; shown while it still matches
     std::vector<dwsc::Preset> m_presets;          // built-ins, slots, drop-ins, in cycle order; scanned once per session
@@ -774,7 +778,7 @@ class DWSmoothWalker : public CppUserModBase
         return text->ToString().starts_with(BANNER_PREFIX);
     }
 
-    static constexpr const wchar_t* BANNER_PREFIX = L"SmoothWalker:";
+    static constexpr const wchar_t* BANNER_PREFIX = L"Smoothwalker:";
 
     // The region banner shows RegionData.RegionDisplayText. The hard-coded parameter layout must match
     // reflection, or banners stay off.
@@ -787,7 +791,7 @@ class DWSmoothWalker : public CppUserModBase
         auto* region = UObjectGlobals::StaticFindObject<UStruct*>(nullptr, nullptr, STR("/Script/DogwoodSystem.RegionData"));
         if (!m_banner_function || !m_banner_library || !region)
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] notification function not found, banners off\n"));
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] notification function not found, banners off\n"));
             return false;
         }
 
@@ -804,7 +808,7 @@ class DWSmoothWalker : public CppUserModBase
         auto text = offset_of(region, STR("RegionDisplayText"));
         if (world != BANNER_WORLD || data != BANNER_DATA || flag != BANNER_FLAG || text != BANNER_TEXT)
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] notification layout changed ({}, {}, {}, {}), banners off\n"), world, data, flag, text);
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] notification layout changed ({}, {}, {}, {}), banners off\n"), world, data, flag, text);
             return false;
         }
         m_banner_state = 1;
@@ -847,7 +851,7 @@ class DWSmoothWalker : public CppUserModBase
         int key = parse_key(name);
         if (key < 0)
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] unknown {} '{}', not bound\n"), setting, widen(name));
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] unknown {} '{}', not bound\n"), setting, widen(name));
             return;
         }
         register_keydown_event(static_cast<Input::Key>(key), std::move(action));
@@ -857,8 +861,8 @@ class DWSmoothWalker : public CppUserModBase
     // so nothing may move; under a pause the change would land in smoothwalker.ini behind an open Mod Menu page.
     auto key_live(const TCHAR* key) -> bool
     {
-        const TCHAR* why = !g_enabled.load() ? STR("SmoothWalker is off") : !camera_live() ? STR("the camera is paused") : nullptr;
-        if (why) Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] {} key ignored while {}\n"), key, why);
+        const TCHAR* why = !g_enabled.load() ? STR("Smoothwalker is off") : !camera_live() ? STR("the camera is paused") : nullptr;
+        if (why) Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] {} key ignored while {}\n"), key, why);
         return !why;
     }
 
@@ -911,7 +915,7 @@ class DWSmoothWalker : public CppUserModBase
         publish_locked();
         mark_pending_locked();
         // No banner: the camera moving to the other shoulder is the feedback.
-        Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] shoulder {}{}\n"), m_settings.shoulder_swap ? STR("swapped") : STR("as the game has it"),
+        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] shoulder {}{}\n"), m_settings.shoulder_swap ? STR("swapped") : STR("as the game has it"),
                                        m_settings.camera_tuning ? STR("") : STR(" (camera_tuning is 0: shows once it is on)"));
     }
 
@@ -952,7 +956,7 @@ class DWSmoothWalker : public CppUserModBase
         {
             // The Mod Menu replaces the file by rename, so it is briefly absent: keep what is live and retry.
             if (!startup) return;
-            Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] smoothwalker.ini not found, using defaults\n"));
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] smoothwalker.ini not found, using defaults\n"));
             m_settings = dwsc::Settings{};
             m_toggle_key = m_settings.toggle_key;
             m_preset_key = m_settings.preset_key;
@@ -1006,13 +1010,13 @@ class DWSmoothWalker : public CppUserModBase
         if (edited("preset_save") && m_settings.preset_save >= 1 && m_settings.preset_save <= dwsc::MAX_SLOTS)
         {
             bool ok = save_slot_locked(m_settings.preset_save, dwsc::preset_of(m_settings));
-            Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] saved slot {}{}\n"), m_settings.preset_save, ok ? STR("") : STR(": write failed"));
+            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] saved slot {}{}\n"), m_settings.preset_save, ok ? STR("") : STR(": write failed"));
             if (ok)
             {
                 derived = true;
                 m_loaded_id = m_settings.preset_save; // the slot holds the live values; a load in this Apply still wins
                 auto* slot = find_preset(m_settings.preset_save);
-                request_banner(STR("SmoothWalker: saved to ") + dwsc::to_wide(slot ? slot->name : "Slot " + std::to_string(m_settings.preset_save)));
+                request_banner(STR("Smoothwalker: saved to ") + dwsc::to_wide(slot ? slot->name : "Slot " + std::to_string(m_settings.preset_save)));
             }
         }
         m_settings.preset_save = 0;
@@ -1036,7 +1040,7 @@ class DWSmoothWalker : public CppUserModBase
         // loaded sliders. The page still open refuses its next Apply ("reopen this mod"); its sliders were stale
         // anyway. A plain slider Apply stays deferred, so tuning with the page open keeps working.
         if (derived && m_flush_pending.load()) flush_locked(std::chrono::steady_clock::now());
-        Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] settings applied\n"));
+        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] settings applied\n"));
     }
 
     // Once per session, in the constructor, before anything reads presets or the Mod Menu reads mod_settings.ini:
@@ -1053,13 +1057,13 @@ class DWSmoothWalker : public CppUserModBase
             auto content = dwsc::read_small_file(std::wstring(PRESETS_DIR_W) + L"\\" + name, dwsc::MAX_PRESET_FILE);
             if (!content)
             {
-                Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] presets/{}: unreadable or over 64 KiB, skipped\n"), name);
+                Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] presets/{}: unreadable or over 64 KiB, skipped\n"), name);
                 return std::nullopt;
             }
             auto parsed = dwsc::parse_preset_file(std::move(*content));
             if (parsed.second.empty())
             {
-                Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] presets/{}: no preset settings, skipped\n"), name);
+                Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] presets/{}: no preset settings, skipped\n"), name);
                 return std::nullopt;
             }
             return parsed;
@@ -1091,7 +1095,7 @@ class DWSmoothWalker : public CppUserModBase
         }
         if (over_limit)
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] {} presets over the limit of {} skipped\n"), over_limit, dwsc::MAX_DROPINS);
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] {} presets over the limit of {} skipped\n"), over_limit, dwsc::MAX_DROPINS);
         }
 
         // Picker order: saved slots, drop-ins, then the empty slots, so nothing empty sits between the presets that
@@ -1131,32 +1135,32 @@ class DWSmoothWalker : public CppUserModBase
             {
                 // The save picker shows the slot names too; without its section the page still works.
                 if (auto both = dwsc::with_preset_choices(*updated, "[Setting.preset_save]", save_values, save_labels)) updated = both;
-                else Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] mod_settings.ini: [Setting.preset_save] PresetValues or PresetLabels missing\n"));
+                else Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] mod_settings.ini: [Setting.preset_save] PresetValues or PresetLabels missing\n"));
                 listed = *updated == *manifest || dwsc::write_file(MANIFEST_PATH, *updated);
-                if (!listed) Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] could not write mod_settings.ini\n"));
+                if (!listed) Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] could not write mod_settings.ini\n"));
             }
             else
             {
-                Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] mod_settings.ini: [Setting.preset] PresetValues or PresetLabels missing\n"));
+                Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] mod_settings.ini: [Setting.preset] PresetValues or PresetLabels missing\n"));
             }
         }
         else
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] mod_settings.ini not found\n"));
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] mod_settings.ini not found\n"));
         }
         if (!listed && !dropins.empty())
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] {} presets from the presets folder off for this session: the Mod Menu page could not list them\n"),
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] {} presets from the presets folder off for this session: the Mod Menu page could not list them\n"),
                                             dropins.size());
             dropins.clear();
         }
         for (auto& p : dropins)
         {
-            Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] preset {} from the presets folder: {}\n"), p.id, dwsc::to_wide(p.name));
+            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] preset {} from the presets folder: {}\n"), p.id, dwsc::to_wide(p.name));
         }
         size_t slots = m_presets.size() - dwsc::builtin_presets().size();
         m_presets.insert(m_presets.end(), std::make_move_iterator(dropins.begin()), std::make_move_iterator(dropins.end()));
-        Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] presets: {} saved slots, {} from the presets folder\n"), slots,
+        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] presets: {} saved slots, {} from the presets folder\n"), slots,
                                        m_presets.size() - slots - dwsc::builtin_presets().size());
     }
 
@@ -1190,14 +1194,14 @@ class DWSmoothWalker : public CppUserModBase
         auto* preset = find_preset(id);
         if (!preset)
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] preset {} is empty, nothing loaded\n"), id);
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] preset {} is empty, nothing loaded\n"), id);
             return false;
         }
         dwsc::apply_values(m_settings, preset->values);
         m_loaded_id = id;
         auto name = dwsc::to_wide(preset->name);
-        Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] loaded preset {}\n"), name);
-        request_banner(STR("SmoothWalker: ") + name);
+        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] loaded preset {}\n"), name);
+        request_banner(STR("Smoothwalker: ") + name);
         return true;
     }
 
@@ -1230,8 +1234,8 @@ class DWSmoothWalker : public CppUserModBase
         mark_pending_locked();
     }
 
-    // The live numbers that differ from the file: preset holds the active preset and preset_save 0 (both kept so
-    // in m_settings). Compared as written (%.6g), so a value the file cannot hold exactly does not rewrite forever.
+    // The live numbers that differ from the file; preset and preset_save are written as m_settings holds them (the
+    // active preset, and 0). Compared as written (%.6g), so a value the file cannot hold exactly is not rewritten forever.
     auto pending_writes_locked() -> dwsc::Values
     {
         dwsc::Values writes;
@@ -1254,7 +1258,7 @@ class DWSmoothWalker : public CppUserModBase
         std::string content;
         if (!writes.empty())
         {
-            content = "; DWSmoothWalker: settings not yet written to smoothwalker.ini. Applied at the next start only while\n"
+            content = "; DWSmoothwalker: settings not yet written to smoothwalker.ini. Applied at the next start only while\n"
                       "; smoothwalker.ini's write time still equals stamp.\n"
                       "stamp = " + std::to_string(m_settings_stamp) + "\n";
             char buffer[64];
@@ -1271,7 +1275,7 @@ class DWSmoothWalker : public CppUserModBase
         }
         else if (!dwsc::write_file(PENDING_PATH, content))
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] could not write smoothwalker.pending\n"));
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] could not write smoothwalker.pending\n"));
             return;
         }
         m_pending_file = std::move(content);
@@ -1302,12 +1306,12 @@ class DWSmoothWalker : public CppUserModBase
         }
         if (!stamp || *stamp != m_settings_stamp)
         {
-            Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] smoothwalker.pending ignored: smoothwalker.ini changed since\n"));
+            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] smoothwalker.pending ignored: smoothwalker.ini changed since\n"));
             return;
         }
         auto numbers = dwsc::parse_numbers(*content);
         dwsc::apply_values(m_settings, dwsc::Values(numbers.begin(), numbers.end()));
-        Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] applied {} settings the last session had not written yet\n"), numbers.size());
+        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] applied {} settings the last session had not written yet\n"), numbers.size());
     }
 
     // Runs only while the camera is live, so no Mod Menu page is open to refuse its next Apply over the change.
@@ -1333,7 +1337,7 @@ class DWSmoothWalker : public CppUserModBase
         bool changed = content && updated != *content;
         if (!content || (changed && !dwsc::write_file(SETTINGS_PATH, updated)))
         {
-            if (!m_flush_failing) Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] could not write smoothwalker.ini, retrying\n"));
+            if (!m_flush_failing) Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] could not write smoothwalker.ini, retrying\n"));
             m_flush_failing = true;
             m_next_flush = now + std::chrono::milliseconds(250);
             return;
@@ -1351,14 +1355,14 @@ class DWSmoothWalker : public CppUserModBase
         auto* rebel = UObjectGlobals::StaticFindObject<UObject*>(nullptr, nullptr, STR("/Script/RebelCamera.Default__RebelCameraComponent"));
         if (!camera || !rebel)
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] camera class defaults not found, mod inactive\n"));
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] camera class defaults not found, mod inactive\n"));
             return false;
         }
         auto** base = *reinterpret_cast<uintptr_t***>(camera);
         auto** vtable = *reinterpret_cast<uintptr_t***>(rebel);
         if (base[GET_CAMERA_VIEW_SLOT] == vtable[GET_CAMERA_VIEW_SLOT])
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] slot {} not overridden: unsupported game build, mod inactive\n"), GET_CAMERA_VIEW_SLOT);
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] slot {} not overridden: unsupported game build, mod inactive\n"), GET_CAMERA_VIEW_SLOT);
             return false;
         }
 
@@ -1366,14 +1370,14 @@ class DWSmoothWalker : public CppUserModBase
         DWORD prev{};
         if (!VirtualProtect(entry, sizeof(*entry), PAGE_READWRITE, &prev))
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] vtable protect failed, mod inactive\n"));
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] vtable protect failed, mod inactive\n"));
             return false;
         }
         g_original = reinterpret_cast<GetCameraViewFn>(*entry);
         *entry = reinterpret_cast<uintptr_t*>(&get_camera_view_hook);
         VirtualProtect(entry, sizeof(*entry), prev, &prev);
         g_vtable_entry = entry;
-        Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] GetCameraView hooked (slot {})\n"), GET_CAMERA_VIEW_SLOT);
+        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] GetCameraView hooked (slot {})\n"), GET_CAMERA_VIEW_SLOT);
         return true;
     }
 
@@ -1423,7 +1427,7 @@ class DWSmoothWalker : public CppUserModBase
         forget_player();
         m_controller = controller;
         m_player_known.store(true);
-        Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] player controller found\n"));
+        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] player controller found\n"));
     }
 
     // GEngine->GameViewport->World, both reflected properties (not hard offsets); compared only, never followed.
@@ -1438,7 +1442,7 @@ class DWSmoothWalker : public CppUserModBase
         if (m_viewport_offset < 0) m_viewport_offset = offset_of(object, STR("GameViewport"));
         if (m_viewport_offset < 0)
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] UEngine has no GameViewport property: level changes rely on the LoadMap hook\n"));
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] UEngine has no GameViewport property: level changes rely on the LoadMap hook\n"));
             return;
         }
         auto* viewport = *reinterpret_cast<UObject**>(reinterpret_cast<uint8_t*>(object) + m_viewport_offset);
@@ -1448,7 +1452,7 @@ class DWSmoothWalker : public CppUserModBase
             if (m_world_offset < 0) m_world_offset = offset_of(viewport, STR("World"));
             if (m_world_offset < 0)
             {
-                Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] GameViewportClient has no World property: level changes rely on the LoadMap hook\n"));
+                Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] GameViewportClient has no World property: level changes rely on the LoadMap hook\n"));
                 return;
             }
             world = *reinterpret_cast<UObject**>(reinterpret_cast<uint8_t*>(viewport) + m_world_offset);
@@ -1497,7 +1501,7 @@ class DWSmoothWalker : public CppUserModBase
         }
         else if (requested)
         {
-            Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] player controller not found yet\n"));
+            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] player controller not found yet\n"));
         }
     }
 
@@ -1507,7 +1511,7 @@ class DWSmoothWalker : public CppUserModBase
         check_world(engine);
         if (m_controller.object && !m_controller.alive())
         {
-            Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] player controller gone\n"));
+            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] player controller gone\n"));
             forget_player();
             rescan_now();
         }
@@ -1527,7 +1531,7 @@ class DWSmoothWalker : public CppUserModBase
             auto** slot = m_controller.object->GetValuePtrByPropertyNameInChain<UObject*>(STR("Pawn"));
             if (!slot)
             {
-                Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] controller has no Pawn property\n"));
+                Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] controller has no Pawn property\n"));
                 m_controller = {};
                 m_player_known.store(false);
                 return;
@@ -1550,7 +1554,7 @@ class DWSmoothWalker : public CppUserModBase
         // m_pawn stays set on failure, so a pawn without them is reported once, not every tick.
         if (!camera.alive() || !root.alive())
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] pawn {} has no FollowCamera or RootComponent\n"), pawn->GetName());
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] pawn {} has no FollowCamera or RootComponent\n"), pawn->GetName());
             return;
         }
         if (g_translation_offset.load() < 0 && !find_translation_offset(root.object))
@@ -1568,7 +1572,7 @@ class DWSmoothWalker : public CppUserModBase
         m_position_applied_generation = 0; // a new pawn: its modes get the current position
         m_tuner.camera_changed();
         m_offset_wait = std::chrono::seconds(2);
-        Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] following {}\n"), pawn->GetName());
+        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] following {}\n"), pawn->GetName());
     }
 
     // ComponentToWorld is not reflected. A root's world translation equals its RelativeLocation, so the offset
@@ -1578,7 +1582,7 @@ class DWSmoothWalker : public CppUserModBase
         auto* relative = root->GetValuePtrByPropertyNameInChain<double>(STR("RelativeLocation"));
         if (!relative)
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] RelativeLocation not found, smoothing inactive\n"));
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] RelativeLocation not found, smoothing inactive\n"));
             return false;
         }
         auto base = reinterpret_cast<uint8_t*>(root);
@@ -1602,11 +1606,11 @@ class DWSmoothWalker : public CppUserModBase
         }
         if (matches != 1)
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothWalker] ComponentToWorld translation: {} matches, smoothing inactive\n"), matches);
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] ComponentToWorld translation: {} matches, smoothing inactive\n"), matches);
             return false;
         }
         g_translation_offset.store(found);
-        Output::send<LogLevel::Normal>(STR("[DWSmoothWalker] ComponentToWorld translation at 0x{:X} (RelativeLocation 0x{:X})\n"), found,
+        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] ComponentToWorld translation at 0x{:X} (RelativeLocation 0x{:X})\n"), found,
                                        relative_offset);
         return true;
     }
@@ -1617,7 +1621,7 @@ extern "C"
 {
     DW_SMOOTHWALKER_API CppUserModBase* start_mod()
     {
-        return new DWSmoothWalker();
+        return new DWSmoothwalker();
     }
 
     DW_SMOOTHWALKER_API void uninstall_mod(CppUserModBase* mod)

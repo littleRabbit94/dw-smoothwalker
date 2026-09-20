@@ -1,4 +1,4 @@
-# Nexus page metadata for SmoothWalker - Third Person Camera
+# Nexus page metadata for Smoothwalker - Third Person Camera
 
 Game page: https://www.nexusmods.com/thebloodofdawnwalker (game id 9719, domain
 `thebloodofdawnwalker`). Source: `src/` (DLL) and `mod/` (mod folder).
@@ -14,7 +14,7 @@ AI-Generated Content (read 2026-09-16).
 
 | Field | Value |
 |---|---|
-| Mod name | `SmoothWalker - Third Person Camera` |
+| Mod name | `Smoothwalker - Third Person Camera` |
 | Summary | `A third-person camera that trails your character while turning stays instant, and eases off when you aim. Distance, height, shoulder and FOV per situation. Shoulder swap on V; presets and on/off in ini or Mod Menu. Needs UE4SS and Steam build 25232147.` |
 | Version | `0.8.0` |
 | Category | `Utilities`, beside FreeCam (mod 350) |
@@ -28,23 +28,23 @@ AI-Generated Content (read 2026-09-16).
 
 | Field | Value |
 |---|---|
-| File name | `SmoothWalker` |
+| File name | `Smoothwalker` |
 | Version | `0.8.0` |
 | Category | Main Files |
-| File | `dist/SmoothWalker-0.8.0.zip`, 271,404 bytes, built 2026-09-17 |
-| Description | `Close the game, then extract into the folder that holds the ue4ss folder (Dawnwalker/Binaries/Win64, the one with Dawnwalker.exe). The archive carries the folder path, so the mod lands in ue4ss/Mods/DWSmoothWalker by itself. Needs UE4SS (mod 18 or mod 283) and Steam build 25232147. No mods.txt edit.` |
+| File | `dist/Smoothwalker-0.8.0.zip`, 271,404 bytes, built 2026-09-17 |
+| Description | `Close the game, then extract into the folder that holds the ue4ss folder (Dawnwalker/Binaries/Win64, the one with Dawnwalker.exe). The archive carries the folder path, so the mod lands in ue4ss/Mods/DWSmoothwalker by itself. Needs UE4SS (mod 18 or mod 283) and Steam build 25232147. No mods.txt edit.` |
 
 Optional file:
 
 | Field | Value |
 |---|---|
-| File name | `SmoothWalker Example Preset` |
+| File name | `Smoothwalker Example Preset` |
 | Version | `0.8.0` |
 | Category | Optional Files |
-| File | `dist/SmoothWalker-Example-Preset-0.8.0.zip`, 1,401 bytes, built 2026-09-17 |
-| Description | `One preset, Over the Shoulder: a closer camera further out over the shoulder, with a quicker follow to match. I commented every key with its range and default, so it doubles as a template for your own. Extract into Dawnwalker/Binaries/Win64 like the main file; it lands in ue4ss/Mods/DWSmoothWalker/config/presets. Restart the game, then pick it from the Mod Menu or with preset in the ini. Needs the main file.` |
+| File | `dist/Smoothwalker-Example-Preset-0.8.0.zip`, 1,401 bytes, built 2026-09-17 |
+| Description | `One preset, Over the Shoulder: a closer camera further out over the shoulder, with a quicker follow to match. I commented every key with its range and default, so it doubles as a template for your own. Extract into Dawnwalker/Binaries/Win64 like the main file; it lands in ue4ss/Mods/DWSmoothwalker/config/presets. Restart the game, then pick it from the Mod Menu or with preset in the ini. Needs the main file.` |
 
-Source: `example-preset/`. The build checks it holds a name and all 37 preset keys, each once, inside
+Source: `example-preset/`. The build checks it holds a name and all 32 preset keys, each once, inside
 the Mod Menu range and on its step.
 
 Contents: `dlls/main.dll` (no PDB), `mod_settings.ini`, `config/smoothwalker.ini`, empty
@@ -85,7 +85,7 @@ differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 - While you aim, the trail and any smoothed turning ease down to 30% so the view stays on your crosshair, and ease back afterwards. aiming_follow sets how much stays.
 - Stays in front of walls the game pulls its camera in for; snaps back after cutscenes, loads, the free camera and teleports.
 - Camera position per situation (exploring, sprinting, combat and focus, aiming, claw ride and anti-grav): distance, height, shoulder offset and field of view. The game's own camera lag is switched off while the mod is on, so the follow is the only lag. Also look up/down limits and a glide time for position changes.
-- Presets Tight, Balanced and Cinematic, each with its own follow feel and camera position, plus six save slots you can name and up to 54 presets from other authors dropped into config/presets. A preset carries follow, turning, snap thresholds and camera position; not the on/off switches, the shoulder side, banners or keys.
+- Presets Tight, Balanced and Cinematic, each with its own follow feel and camera position, plus six save slots you can name and up to 54 presets from other authors dropped into config/presets. A preset carries follow, turning, the look limits and camera position; not the on/off switches, the shoulder side, banners, the snap thresholds or keys.
 - V swaps shoulders. Cycling presets and switching the mod on and off can be bound to keys too, and ship unbound, as a blank key means no key. None of them costs a frame: eight presses in a 20-second capture, worst frame 23 ms against an 18 ms average, no stutters.
 - Settings in config/smoothwalker.ini apply within a quarter second while the game runs. Optional page for Dawnwalker Mod Menu covering every setting except the key bindings, with a Preset entry that shows which preset your settings match.
 - Built for UE4SS 97b7e501: Vercadi's rc6 (mod 18) or Framecore's 2b (mod 283, Performance or Compatibility profile). Steam build 25232147 only. On any other build the mod stays inactive and says so in UE4SS.log.
@@ -121,4 +121,4 @@ differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 - The config lives in `config/`, not `scripts/config/`: UE4SS starts a Lua mod for any mod folder with a
   `scripts` subfolder and logs a red "main.lua not found" error when there is no script. Do not add a
   `scripts` folder to this mod.
-- Log lines in the description are inside `[code]`: `[DWSmoothWalker]` outside one parses as a BBCode tag.
+- Log lines in the description are inside `[code]`: `[DWSmoothwalker]` outside one parses as a BBCode tag.
