@@ -14,6 +14,9 @@ add_subdirectory("${DW_RE_UE4SS_SOURCE_DIR}" RE-UE4SS)
 
 add_library(DWSmoothwalker SHARED "${CMAKE_CURRENT_SOURCE_DIR}/src/dllmain.cpp")
 target_link_libraries(DWSmoothwalker PUBLIC UE4SS)
+# Record the PDB by file name rather than absolute path. The name is literal because the Visual Studio
+# generator escapes the percent signs in %_PDB%.
+target_link_options(DWSmoothwalker PRIVATE "/PDBALTPATH:main.pdb")
 
 # UE4SS loads Mods/<Name>/dlls/main.dll; the build lands in this repo's mod folder, deployed from there.
 set(DW_MOD_DLLS "${CMAKE_CURRENT_SOURCE_DIR}/mod/dlls")
