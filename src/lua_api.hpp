@@ -405,21 +405,33 @@ namespace dwapi
         l.active = true;
         l.expires = ttl > 0 ? qpc_now() + static_cast<int64_t>(ttl * qpc_frequency()) : 0;
 
-        std::lock_guard guard(g_mutex);
-        auto* c = consumer_of(L);
-        if (!c) return fail(L, "unknown_state");
-        if (c->slot < 0)
+        lua_State* me = main_state(L);
+        const char* reason = nullptr;
         {
-            for (int i = 0; i < MAX_LAYERS && c->slot < 0; ++i)
-                if (g_slot_owner[i].empty()) c->slot = i;
-            if (c->slot < 0) return fail(L, "no_slot");
-            g_slot_owner[c->slot] = c->mod;
+            std::lock_guard guard(g_mutex);
+            auto it = g_states.find(me);
+            if (it == g_states.end()) reason = "unknown_state";
+            else
+            {
+                Consumer& c = it->second;
+                if (c.slot < 0)
+                {
+                    for (int i = 0; i < MAX_LAYERS && c.slot < 0; ++i)
+                        if (g_slot_owner[i].empty()) c.slot = i;
+                    if (c.slot >= 0) g_slot_owner[c.slot] = c.mod;
+                }
+                if (c.slot < 0) reason = "no_slot";
+                else
+                {
+                    AcquireSRWLockExclusive(&g_layers_lock);
+                    l.generation = ++g_layer_generation;
+                    g_layers[c.slot] = l;
+                    ReleaseSRWLockExclusive(&g_layers_lock);
+                    g_layers_any.store(true, std::memory_order_relaxed);
+                }
+            }
         }
-        AcquireSRWLockExclusive(&g_layers_lock);
-        l.generation = ++g_layer_generation;
-        g_layers[c->slot] = l;
-        ReleaseSRWLockExclusive(&g_layers_lock);
-        g_layers_any.store(true, std::memory_order_relaxed);
+        if (reason) return fail(L, reason);
         lua_pushboolean(L, 1);
         return 1;
     }
@@ -439,10 +451,15 @@ namespace dwapi
     inline auto l_layer_clear(lua_State* L) -> int
     {
         if (auto why = wrong_thread()) return fail(L, why);
-        std::lock_guard guard(g_mutex);
-        auto* c = consumer_of(L);
-        if (!c) return fail(L, "unknown_state");
-        clear_slot(c->slot);
+        lua_State* me = main_state(L);
+        const char* reason = nullptr;
+        {
+            std::lock_guard guard(g_mutex);
+            auto it = g_states.find(me);
+            if (it == g_states.end()) reason = "unknown_state";
+            else clear_slot(it->second.slot);
+        }
+        if (reason) return fail(L, reason);
         lua_pushboolean(L, 1);
         return 1;
     }
@@ -574,14 +591,15 @@ namespace dwapi
         return 1;
     }
 
-    // Smoothwalker.owner() -> the owning mod's name, or nil. Reads under g_mutex only, so any thread may call it.
+    // Smoothwalker.owner() -> the owning mod's name, or nil. Reads under g_mutex only, so any thread may call it:
+    // an expired lease reads as nobody here, and the drop itself is left to claim/release on the game thread.
     inline auto l_owner(lua_State* L) -> int
     {
         std::string mod;
         {
             std::lock_guard guard(g_mutex);
-            drop_expired_locked();
-            mod = g_owner_mod;
+            auto expires = g_owner_expires.load(std::memory_order_relaxed);
+            if (g_owner_state && (expires == 0 || qpc_now() < expires)) mod = g_owner_mod;
         }
         if (mod.empty()) lua_pushnil(L);
         else lua_pushstring(L, mod.c_str());

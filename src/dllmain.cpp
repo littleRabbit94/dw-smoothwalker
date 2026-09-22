@@ -197,6 +197,7 @@ namespace
         dwsc::Quat from_rotation{};
         float from_fov = NAN;
         uint64_t seen_tuning = 0, seen_toggle = 0, seen_position = 0, seen_release = 0;
+        bool was_owned = false; // another mod owned the camera on the last update: the falling edge is a cut
     };
     Follow g_follow;
     LARGE_INTEGER g_qpc_frequency{};
@@ -303,10 +304,18 @@ namespace
         // could see the release already published and the camera still owned, or the other way round, and write a
         // full follow offset for one frame, which turns a glide into a cut and a cut into a double snap. A lease
         // that has run out is not a claim; the game thread drops the identity the next time it looks (lua_api.hpp).
+        // The slot is read before the lease, so a fresh claim never pairs with the previous owner's stale expiry.
+        const bool owner_held = dwapi::g_owner_slot.load(std::memory_order_acquire) >= 0;
         const int64_t owner_expires = dwapi::g_owner_expires.load(std::memory_order_relaxed);
-        const bool owned = dwapi::g_owner_slot.load(std::memory_order_acquire) >= 0 &&
-                           (owner_expires == 0 || dwapi::qpc_now() < owner_expires);
+        const bool owned = owner_held && (owner_expires == 0 || dwapi::qpc_now() < owner_expires);
         const bool owner_keeps_layers = owned && dwapi::g_owner_keep_layers.load(std::memory_order_relaxed);
+        // The camera stops being owned. A release has already said how to come back (g_reset for a cut, the release
+        // generation for a glide), but a lease running out says nothing, and writing the follow offset that piled up
+        // while owned would pop the camera in that one frame and pop it again when the game thread later notices the
+        // expiry and sets g_reset. Every falling edge restarts the follow from the capsule here, which is what a cut
+        // does; a release("glide") keeps its crossfade, which runs off out_* and `changed`, not off the follow state.
+        if (g_follow.was_owned && !owned) g_follow.valid = false;
+        g_follow.was_owned = owned;
 
         AcquireSRWLockShared(&g_tuning_lock);
         const Tuning t = g_tuning;

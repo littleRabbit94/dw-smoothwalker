@@ -864,7 +864,10 @@ update passes rather than answering `must_keep`; the stranded fade is then disca
 the next update and the owner has the screen, which is the point of the claim.
 
 `ttl` is a lease, like the one on a layer: past it the hook stops treating the claim as ownership and the game
-thread drops the identity the next time `claim`, `release` or `owner` looks, which is a `release("cut")`. An
+thread drops the identity the next time `claim` or `release` looks (`owner()` stays a pure read and simply
+reports `nil` on an expired lease), which is a `release("cut")`. The hook makes that cut itself: every falling
+edge of ownership (`was_owned` on `g_follow`) sets `g_follow.valid = false` in the same update, so the follow
+restarts from the capsule instead of writing the offset that piled up while owned, whatever ended the claim. An
 expired owner's `release` answers `not_owner`. A claim without a `ttl` is the consumer's own responsibility and
 holds the camera until it releases or stops, so anything that can crash or hang should take a lease and refresh
 it. Three things end a claim besides `release`: the lease, the consumer stopping (`uninstall`, which
