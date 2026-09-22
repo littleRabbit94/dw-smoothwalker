@@ -42,7 +42,7 @@ A preset carries most of the camera settings; a few can't be changed per preset 
 
 [size=4][b]Known issues[/b][/size]
 [list]
-[*]After loading a preset from the Mod Menu, the open page keeps showing the old slider values until you reopen it, and refuses another Apply until then.
+[*]After loading a preset from the Mod Menu, the open page keeps showing the old slider values. Leave the menu and come back to see them.
 [/list]
 
 [size=4][b]Compatibility[/b][/size]
@@ -77,6 +77,7 @@ The camera math runs once per frame inside the game's own camera update. Measure
 [*][font=Courier New]reset_gap = 0.25[/font]: seconds without camera updates (cutscene, free camera, load) before a snap.
 [*][font=Courier New]show_banner = 1[/font]: the preset and on/off banner.
 [*][font=Courier New]log_stats = 0[/font]: 1 writes smoothing statistics and the per-frame cost to [font=Courier New]UE4SS.log[/font] every 5 seconds.
+[*][font=Courier New]log_trace = 0[/font]: 1 writes a per-frame trace of the vertical follow to [font=Courier New]UE4SS.log[/font] around every crouch and stand.
 [/list]
 [b]Camera position[/b] (100 / 0 / 0 / 0 is the game as shipped; in presets except camera_tuning, shoulder_swap and position_transition)
 [list]
@@ -87,7 +88,7 @@ The camera math runs once per frame inside the game's own camera update. Measure
 [*][font=Courier New]position_transition = 0.5[/font]: seconds a position change or shoulder swap glides over. 0 snaps.
 [*][font=Courier New]pitch_min = -60[/font], [font=Courier New]pitch_max = 40[/font]: look down and up limits while exploring, sprinting and in focus. Aiming and combat already allow -89 / 89.
 [/list]
-[b]Presets[/b]: [font=Courier New]preset = 102[/font] shows the matching preset (0 Custom, 101 Tight, 102 Balanced, 103 Cinematic, 1 to 6 a slot, 201 and up an installed preset); change it to load one. [font=Courier New]preset_save[/font] (1 to 6) saves to a slot, then resets to 0. The mod writes these, and key presses that change them, back to the ini only while you play, never behind an open Mod Menu page. Slots go to [font=Courier New]config\presets\Slot N.ini[/font]; the mod creates the folder.
+[b]Presets[/b]: [font=Courier New]preset = 102[/font] shows the matching preset (0 Custom, 101 Tight, 102 Balanced, 103 Cinematic, 1 to 6 a slot, 201 and up an installed preset); change it to load one. Set it to a slot number you have not used yet and the mod saves your current settings into that slot instead; with a saved slot set, every later change is saved into it too. The mod writes this, and key presses that change it, back to the ini only while you play, never behind an open Mod Menu page. Slots go to [font=Courier New]config\presets\Slot N.ini[/font]; the mod creates the folder.
 [/spoiler]
 
 [size=4][b]For mod authors: making a preset[/b][/size]
@@ -97,7 +98,7 @@ If you land on a camera you like, share it. The optional file [b]Smoothwalker Ex
 A preset is one [b].ini[/b] file in [i]ue4ss\Mods\DWSmoothwalker\config\presets[/i]. Smoothwalker reads that folder at game start, adds each file to the preset cycle after the player's own slots, and lists it by name in the Preset entry on the Mod Menu page.
 
 [b]1)[/b] Set the camera up in game, from the Mod Menu or the ini.
-[b]2)[/b] On the Smoothwalker page, pick a slot under Save current settings to and press Apply. This writes [i]presets\Slot N.ini[/i] with every setting a preset carries.
+[b]2)[/b] On the Smoothwalker page, set Preset to a slot marked [b](empty)[/b] and press Apply. This writes [i]presets\Slot N.ini[/i] with every setting a preset carries. Leave that slot picked and every further Apply saves your changes into it, so you can keep tuning.
 [b]3)[/b] Copy that file under a name of your own, for example [i]presets\YourName - Low Chase.ini[/i]. Don't use [b]Slot 1.ini[/b] to [b]Slot 6.ini[/b]: those are the player's save slots and the mod overwrites them.
 [b]4)[/b] Change the [b]name[/b] line. That's what the banner and the Mod Menu show. Comments starting with [b];[/b] stay in the file; the mod never rewrites a preset it didn't save.
 [b]5)[/b] Restart the game. The preset appears after the slots.

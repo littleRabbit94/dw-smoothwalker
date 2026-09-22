@@ -106,10 +106,12 @@ namespace
     std::atomic<uint64_t> g_toggle_generation{0};   // toggle key
     std::atomic<uint64_t> g_position_generation{0}; // mode writes; their FOV lands on the next camera update
     std::atomic<bool> g_log_stats{false};
+    std::atomic<bool> g_log_trace{false};
     std::atomic<bool> g_aiming{false}; // an aiming camera mode is blending in or active
     std::atomic<void*> g_player_camera{nullptr};
     std::atomic<void*> g_player_root{nullptr};
     std::atomic<int32_t> g_translation_offset{-1}; // USceneComponent::ComponentToWorld.Translation
+    std::atomic<int32_t> g_half_height_offset{-1};  // UCapsuleComponent::CapsuleHalfHeight; -1: the vertical follow tracks the centre
 
     std::atomic<uint64_t> g_frames{0};
     std::atomic<uint64_t> g_clamped{0};
@@ -151,7 +153,17 @@ namespace
     struct Follow
     {
         bool valid = false;
-        dwsc::Vec3 pivot_smoothed{};
+        dwsc::Vec3 pivot_smoothed{}; // x, y: the capsule centre; z: the capsule bottom (feet), see update_view
+        // A crouch or stand: the game eases its camera height over about a third of a second, and the game's own
+        // vertical lag (off while the mod is on) used to delay that further. The change is lagged here through the
+        // vertical follow: crouch_drop is the game's height change so far, feet-relative (root motion cancels),
+        // crouch_smoothed trails it, and the difference holds the camera. An episode starts on a half-height
+        // change; crouch_drop stops updating 0.6 s in (the game has settled) so a later pitch change cannot leak.
+        double half_last = NAN;
+        double crouch_base = NAN; // camera Z above the feet at the change; NAN: no episode
+        double crouch_drop = 0.0;
+        double crouch_smoothed = 0.0;
+        double crouch_elapsed = 0.0;
         dwsc::Vec3 pivot_last{};
         dwsc::Quat rotation_smoothed{};
         double nominal_distance = 0.0;
@@ -222,6 +234,54 @@ namespace
     }
 
     // Runs with enabled false too, while the crossfade back to the game's own view is under way.
+    // A per-frame trace of the vertical follow, kept in a ring and written to the log 90 frames after the capsule
+    // half height changes (a crouch or a stand), so the transition sits in the middle of it. log_trace = 1. Hook
+    // state, game thread only.
+    struct TraceFrame
+    {
+        double dt, root_z, half_height, feet_z, smoothed_z, camera_z, result_z, shown_v, hold;
+        bool cut;
+    };
+    struct Trace
+    {
+        static constexpr int SIZE = 240;
+        TraceFrame frames[SIZE]{};
+        int next = 0, count = 0;
+        double last_half_height = NAN;
+        int countdown = -1; // frames until the dump; -1 idle
+        uint64_t dumps = 0;
+
+        auto push(const TraceFrame& f) -> void
+        {
+            frames[next] = f;
+            next = (next + 1) % SIZE;
+            if (count < SIZE) ++count;
+            if (countdown < 0 && std::isfinite(last_half_height) && std::isfinite(f.half_height) && f.half_height != last_half_height)
+            {
+                countdown = 90;
+            }
+            last_half_height = f.half_height;
+            if (countdown < 0) return;
+            if (--countdown >= 0) return;
+            dump();
+        }
+
+        auto dump() -> void
+        {
+            ++dumps;
+            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] trace {}: {} frames; dt_ms root_z half feet_z smoothed_z camera_z result_z shown_v hold\n"),
+                                           dumps, count);
+            for (int i = 0; i < count; ++i)
+            {
+                const auto& f = frames[(next - count + i + SIZE) % SIZE];
+                Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] trace {} {:3}: {:6.2f} {:9.2f} {:5.1f} {:9.2f} {:9.2f} {:9.2f} {:9.2f} {:6.2f} {:6.2f}{}\n"),
+                                               dumps, i, f.dt * 1000.0, f.root_z, f.half_height, f.feet_z, f.smoothed_z, f.camera_z,
+                                               f.result_z, f.shown_v, f.hold, f.cut ? STR(" cut") : STR(""));
+            }
+        }
+    };
+    Trace g_trace;
+
     auto update_view(void* desired_view, float delta_time, bool enabled) -> void
     {
         AcquireSRWLockShared(&g_tuning_lock);
@@ -252,6 +312,17 @@ namespace
         }
         dwsc::Quat rotation = dwsc::from_rotator(view.rotation[0], view.rotation[1], view.rotation[2]);
 
+        // A crouch drops the capsule centre by the half-height change in one frame (54 cm here) while the game
+        // eases its own camera height down over several. Lagging the centre made the arm jump by that delta
+        // and the camera pop up. The bottom of the capsule does not move in a crouch, so the vertical follow
+        // tracks it: the game's eased height passes through and only real vertical travel is lagged. A missing
+        // or implausible half height falls back to the centre.
+        float half_height = NAN;
+        auto half_offset = g_half_height_offset.load(std::memory_order_relaxed);
+        if (half_offset >= 0 && !guarded_read(static_cast<uint8_t*>(root) + half_offset, &half_height, sizeof(half_height))) half_height = NAN;
+        if (!std::isfinite(half_height) || half_height < 0.0f || half_height > 1000.0f) half_height = NAN;
+        double feet_z = std::isfinite(half_height) ? pivot.z - half_height : pivot.z;
+
         // Settings, the toggle and mode writes crossfade; a hard cut (player or world change, a gap, a teleport) snaps.
         auto toggle = g_toggle_generation.load(std::memory_order_relaxed);
         auto position = g_position_generation.load(std::memory_order_relaxed);
@@ -272,6 +343,7 @@ namespace
 
         dwsc::Vec3 result = camera;
         dwsc::Quat result_rotation = rotation;
+        double trace_shown_v = 0.0, trace_hold = 0.0;
         if (!enabled)
         {
             g_follow.valid = false; // switched back on, the follow restarts from the capsule
@@ -280,8 +352,11 @@ namespace
         {
             g_follow.valid = true;
             g_follow.aim = g_aiming.load(std::memory_order_relaxed) ? 1.0 : 0.0;
-            g_follow.pivot_smoothed = pivot;
+            g_follow.pivot_smoothed = dwsc::Vec3{pivot.x, pivot.y, feet_z};
             g_follow.rotation_smoothed = rotation;
+            g_follow.half_last = static_cast<double>(half_height);
+            g_follow.crouch_base = NAN;
+            g_follow.crouch_drop = g_follow.crouch_smoothed = 0.0;
             g_follow.nominal_distance = dwsc::length(camera - pivot);
         }
         else
@@ -308,14 +383,14 @@ namespace
                 lag_h = inner_h;
             }
 
-            double lag_v = pivot.z - ps.z;
+            double lag_v = feet_z - ps.z;
             double a_v = dwsc::follow_alpha(t.follow_rate_v, t.curve_v, std::abs(lag_v), t.catchup_distance, t.min_rate_scale, dt);
             ps.z += lag_v * a_v;
-            lag_v = pivot.z - ps.z;
+            lag_v = feet_z - ps.z;
             if (std::abs(lag_v) > inner_v)
             {
                 lag_v = std::copysign(inner_v, lag_v);
-                ps.z = pivot.z - lag_v;
+                ps.z = feet_z - lag_v;
             }
 
             // A trail behind the crosshair reads as input lag. Only what is shown is scaled, and eased: the smoothed
@@ -327,7 +402,34 @@ namespace
             double shown_h = leash(lag_h, t.max_lag_h, t.soft_leash) * keep;
             double scale_h = lag_h > 0.0 ? shown_h / lag_h : 0.0;
             double shown_v = std::copysign(leash(std::abs(lag_v), t.max_lag_v, t.soft_leash), lag_v) * keep;
-            dwsc::Vec3 shown_pivot{pivot.x - lag_hx * scale_h, pivot.y - lag_hy * scale_h, pivot.z - shown_v};
+
+            // The crouch hold (see Follow). Folding the running hold into a new episode keeps the output continuous
+            // when a stand follows a crouch before it has settled.
+            double rel = camera.z - feet_z;
+            if (std::isfinite(half_height) && std::isfinite(g_follow.half_last) && static_cast<double>(half_height) != g_follow.half_last)
+            {
+                double running = g_follow.crouch_drop - g_follow.crouch_smoothed;
+                g_follow.crouch_base = rel;
+                g_follow.crouch_drop = 0.0;
+                g_follow.crouch_smoothed = -running;
+                g_follow.crouch_elapsed = 0.0;
+            }
+            if (std::isfinite(half_height)) g_follow.half_last = static_cast<double>(half_height);
+            double hold = 0.0;
+            if (std::isfinite(g_follow.crouch_base))
+            {
+                g_follow.crouch_elapsed += dt;
+                if (g_follow.crouch_elapsed <= 0.6) g_follow.crouch_drop = g_follow.crouch_base - rel;
+                double gap = g_follow.crouch_drop - g_follow.crouch_smoothed;
+                double a_c = dwsc::follow_alpha(t.follow_rate_v, t.curve_v, std::abs(gap), t.catchup_distance, t.min_rate_scale, dt);
+                g_follow.crouch_smoothed += gap * a_c;
+                hold = g_follow.crouch_drop - g_follow.crouch_smoothed;
+                if (g_follow.crouch_elapsed > 0.6 && std::abs(hold) < 0.1) g_follow.crouch_base = NAN;
+            }
+            double shown_hold = std::copysign(leash(std::abs(hold), t.max_lag_v, t.soft_leash), hold) * keep;
+            trace_hold = shown_hold;
+            dwsc::Vec3 shown_pivot{pivot.x - lag_hx * scale_h, pivot.y - lag_hy * scale_h, pivot.z - shown_v + shown_hold};
+            trace_shown_v = shown_v;
 
             // The arm swings with the smoothed rotation so the camera still orbits the pivot.
             dwsc::Vec3 arm = camera - pivot;
@@ -429,6 +531,10 @@ namespace
                 lose_view();
                 return;
             }
+        }
+        if (g_log_trace.load(std::memory_order_relaxed))
+        {
+            g_trace.push({dt, pivot.z, static_cast<double>(half_height), feet_z, g_follow.pivot_smoothed.z, camera.z, result.z, trace_shown_v, trace_hold, cut});
         }
         g_follow.out_rotation = dwsc::multiply(result_rotation, dwsc::conjugate(rotation));
         g_follow.out_offset = pivot + dwsc::rotate(g_follow.out_rotation, camera - pivot) - result;
@@ -641,8 +747,10 @@ class DWSmoothwalker : public CppUserModBase
             std::lock_guard guard(m_file_mutex);
             if (last_write(SETTINGS_PATH) != m_settings_stamp) reload_settings_locked(false);
         }
-        // After the poll, so a file change is applied before the live values are written over it.
-        if (m_flush_pending.load() && now >= m_next_flush && camera_live())
+        // After the poll, so a file change is applied before the live values are written over it. Written while the
+        // camera is live, or paused with the Mod Menu closed: a page reopened from the pause menu then shows the
+        // loaded values, and no page is open to refuse its next Apply over the write.
+        if (m_flush_pending.load() && now >= m_next_flush && (camera_live() || !mod_menu_open()))
         {
             std::lock_guard guard(m_file_mutex);
             flush_locked(now);
@@ -688,6 +796,10 @@ class DWSmoothwalker : public CppUserModBase
     uint64_t m_settings_stamp = 0;                // write time of smoothwalker.ini as last read or written
     std::map<std::string, double> m_baseline;     // each numeric key as last known to be in smoothwalker.ini
     int m_loaded_id = 0;                          // last preset loaded or cycled; shown while it still matches
+    UClass* m_activatable_class = nullptr;        // CommonActivatableWidget, the Mod Menu's host class
+    UObject* m_menu_host = nullptr;               // the Mod Menu host last seen open; checked before any rescan
+    bool m_menu_logged = false;
+    bool m_custom_pinned = false;                 // Custom was picked: shown until a preset is loaded or a slot adopted
     std::vector<dwsc::Preset> m_presets;          // built-ins, slots, drop-ins, in cycle order; scanned once per session
     std::string m_pending_file;                   // content last written to smoothwalker.pending; empty when none
     std::atomic<bool> m_flush_pending{false};     // live settings differ from m_baseline
@@ -888,6 +1000,7 @@ class DWSmoothwalker : public CppUserModBase
         }
         ReleaseSRWLockExclusive(&g_tuning_lock);
         g_log_stats.store(m_settings.log_stats);
+        g_log_trace.store(m_settings.log_trace);
         m_show_banner.store(m_settings.show_banner);
 
         // enabled off is the game as shipped, camera modes and its own lag included (position_of).
@@ -975,10 +1088,16 @@ class DWSmoothwalker : public CppUserModBase
             m_shoulder_key = m_settings.shoulder_key;
             m_baseline = std::move(file);
             apply_pending_file_locked();
-            // Not a load request: only which of several matching presets to show. A pending save is dropped.
+            // Not a load request: only which of several matching presets to show.
             m_loaded_id = m_settings.preset;
-            m_settings.preset_save = 0;
+            bool custom = m_settings.preset == 0;
             update_active_locked();
+            // Custom in the file over values a preset matches: Custom was picked, so it stays (and saves into no slot).
+            if (custom && m_settings.preset != 0)
+            {
+                m_custom_pinned = true;
+                m_settings.preset = 0;
+            }
             publish_locked();
             g_enabled.store(m_settings.enabled);
             mark_pending_locked();
@@ -1000,46 +1119,75 @@ class DWSmoothwalker : public CppUserModBase
         auto edited = [&](const char* key) {
             return std::any_of(edits.begin(), edits.end(), [&](auto& edit) { return edit.first == key; });
         };
+        auto is_slot = [](int id) { return id >= 1 && id <= dwsc::MAX_SLOTS; };
+        int active_before = m_settings.preset; // the slot an Apply that leaves the picker alone saves into
 
         // (a) Ordinary edits onto the live settings. The toggle's state changes only if the file's enabled did.
         dwsc::apply_values(m_settings, edits);
         if (edited("enabled")) set_enabled_locked(m_settings.enabled); // fades like the toggle key
 
-        bool derived = false; // a save or a load: the live numbers now differ from what the Apply wrote
-        // (b) Save runs before a load in the same Apply. The slot file is written now: the menu does not watch it.
-        if (edited("preset_save") && m_settings.preset_save >= 1 && m_settings.preset_save <= dwsc::MAX_SLOTS)
+        dwsc::Values own; // the preset keys this Apply moved
+        for (auto& edit : edits)
         {
-            bool ok = save_slot_locked(m_settings.preset_save, dwsc::preset_of(m_settings));
-            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] saved slot {}{}\n"), m_settings.preset_save, ok ? STR("") : STR(": write failed"));
-            if (ok)
+            if (dwsc::is_preset_key(edit.first)) own.push_back(edit);
+        }
+        auto slot_name = [&](int id) {
+            auto* slot = find_preset(id);
+            return dwsc::to_wide(slot ? slot->name : "Slot " + std::to_string(id));
+        };
+        // The slot file is written now: the menu does not watch it.
+        auto save_slot = [&](int id) {
+            bool ok = save_slot_locked(id, dwsc::preset_of(m_settings));
+            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] saved slot {}{}\n"), id, ok ? STR("") : STR(": write failed"));
+            return ok;
+        };
+
+        int picked = m_settings.preset;
+        if (edited("preset") && is_slot(picked) && !find_preset(picked))
+        {
+            // (b) An empty slot adopts the live values, this Apply's slider edits included. Not derived: the
+            // menu already wrote preset = N, so there is nothing to flush at once.
+            if (save_slot(picked))
             {
-                derived = true;
-                m_loaded_id = m_settings.preset_save; // the slot holds the live values; a load in this Apply still wins
-                auto* slot = find_preset(m_settings.preset_save);
-                request_banner(STR("Smoothwalker: saved to ") + dwsc::to_wide(slot ? slot->name : "Slot " + std::to_string(m_settings.preset_save)));
+                m_loaded_id = picked;
+                m_custom_pinned = false;
+                request_banner(STR("Smoothwalker: saved to ") + slot_name(picked));
             }
         }
-        m_settings.preset_save = 0;
-
-        // (c) A changed picker loads that preset. Preset keys edited in the same Apply win over it.
-        if (edited("preset") && m_settings.preset != 0 && load_preset_locked(m_settings.preset))
+        else if (edited("preset") && picked != 0)
         {
-            derived = true;
-            dwsc::Values own;
-            for (auto& edit : edits)
+            // (c) A changed picker loads that preset. Preset keys edited in the same Apply win over it, and on a
+            // slot they go straight back into it. The live numbers now differ from what the Apply wrote; on_update
+            // writes them once the menu closes (the open page would refuse its next Apply over the write), so a page
+            // reopened from the pause menu shows the loaded values. Until then the open page's sliders are stale;
+            // an Apply there still works and moves only the keys it changed.
+            if (load_preset_locked(picked))
             {
-                if (dwsc::is_preset_key(edit.first)) own.push_back(edit);
+                dwsc::apply_values(m_settings, own);
+                if (is_slot(picked) && !own.empty()) save_slot(picked);
             }
-            dwsc::apply_values(m_settings, own);
+        }
+        else if (edited("preset"))
+        {
+            // Custom: detached from whatever was active, nothing saved. Pinned, or the values would match the slot
+            // again and the next edit would be saved into it.
+            m_loaded_id = 0;
+            m_custom_pinned = true;
+        }
+        else if (is_slot(active_before) && !own.empty())
+        {
+            // (d) An edit with a slot active is saved into it. Built-ins and drop-ins stay read-only: an edit
+            // there just falls through to update_active_locked, which gives Custom.
+            if (save_slot(active_before))
+            {
+                m_loaded_id = active_before;
+                request_banner(STR("Smoothwalker: ") + slot_name(active_before) + STR(" updated"));
+            }
         }
 
         update_active_locked();
         publish_locked();
         mark_pending_locked();
-        // Written at once, without the camera_live() gate: a page reopened before the world runs again must show the
-        // loaded sliders. The page still open refuses its next Apply ("reopen this mod"); its sliders were stale
-        // anyway. A plain slider Apply stays deferred, so tuning with the page open keeps working.
-        if (derived && m_flush_pending.load()) flush_locked(std::chrono::steady_clock::now());
         Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] settings applied\n"));
     }
 
@@ -1102,11 +1250,10 @@ class DWSmoothwalker : public CppUserModBase
         // load. Empty slots stay listed: the page fails to open if the ini's preset id is not among the values, and
         // a slot saved this session becomes the active id.
         std::string values = "0|101|102|103", labels = "Custom|Tight|Balanced|Cinematic";
-        std::string empty_values, empty_labels, save_values = "0", save_labels = "None";
+        std::string empty_values, empty_labels;
         for (int n = 1; n <= dwsc::MAX_SLOTS; ++n)
         {
             auto id = std::to_string(n);
-            auto plain = "Slot " + id;
             auto* saved = find_preset(n); // m_presets holds the built-ins and the slots here
             if (saved)
             {
@@ -1116,10 +1263,8 @@ class DWSmoothwalker : public CppUserModBase
             else
             {
                 empty_values += "|" + id;
-                empty_labels += "|" + plain + " (empty)";
+                empty_labels += "|Slot " + id + " (empty)";
             }
-            save_values += "|" + id;
-            save_labels += "|" + (!saved ? plain + " (empty)" : saved->name == plain ? plain : plain + ": " + saved->name);
         }
         for (auto& p : dropins)
         {
@@ -1133,9 +1278,6 @@ class DWSmoothwalker : public CppUserModBase
         {
             if (auto updated = dwsc::with_preset_choices(*manifest, "[Setting.preset]", values, labels))
             {
-                // The save picker shows the slot names too; without its section the page still works.
-                if (auto both = dwsc::with_preset_choices(*updated, "[Setting.preset_save]", save_values, save_labels)) updated = both;
-                else Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] mod_settings.ini: [Setting.preset_save] PresetValues or PresetLabels missing\n"));
                 listed = *updated == *manifest || dwsc::write_file(MANIFEST_PATH, *updated);
                 if (!listed) Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] could not write mod_settings.ini\n"));
             }
@@ -1162,6 +1304,38 @@ class DWSmoothwalker : public CppUserModBase
         m_presets.insert(m_presets.end(), std::make_move_iterator(dropins.begin()), std::make_move_iterator(dropins.end()));
         Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] presets: {} saved slots, {} from the presets folder\n"), slots,
                                        m_presets.size() - slots - dwsc::builtin_presets().size());
+    }
+
+    // The Dawnwalker Mod Menu (Nexus 271) creates its host as a plain CommonActivatableWidget (main.lua, library:Create
+    // with the native class, which the game's own screens all subclass), enabled and shown while the menu is open and
+    // Collapsed once closed, when it lingers until GC. Any such widget not Collapsed means a settings page may be open.
+    // Only reached with a write pending and the camera not live. A menu that changes its host is not recognised, and
+    // the write then lands under the open page as it did before 0.9: the page refuses its next Apply until reopened.
+    auto mod_menu_open() -> bool
+    {
+        constexpr uint8_t COLLAPSED = 1; // ESlateVisibility
+        auto shown = [&](UObject* object) -> bool {
+            auto* visibility = object->GetValuePtrByPropertyNameInChain<uint8_t>(STR("Visibility"));
+            return visibility && *visibility != COLLAPSED;
+        };
+        if (!m_activatable_class)
+        {
+            m_activatable_class = UObjectGlobals::StaticFindObject<UClass*>(nullptr, nullptr, STR("/Script/CommonUI.CommonActivatableWidget"));
+            if (!m_activatable_class) return false;
+        }
+        if (m_menu_host && !m_menu_host->IsUnreachable() && m_menu_host->GetClassPrivate() == m_activatable_class && shown(m_menu_host)) return true;
+        m_menu_host = nullptr; // closed or gone; every open creates a new host
+        UObjectGlobals::ForEachUObject([&](UObject* object, int32_t, int32_t) {
+            if (!object || object->GetClassPrivate() != m_activatable_class || object->IsUnreachable() || !shown(object)) return LoopAction::Continue;
+            m_menu_host = object;
+            return LoopAction::Break;
+        });
+        if (m_menu_host && !m_menu_logged)
+        {
+            m_menu_logged = true;
+            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] Mod Menu open: {}\n"), m_menu_host->GetFullName());
+        }
+        return m_menu_host != nullptr;
     }
 
     auto save_slot_locked(int slot, dwsc::Values values) -> bool
@@ -1199,6 +1373,7 @@ class DWSmoothwalker : public CppUserModBase
         }
         dwsc::apply_values(m_settings, preset->values);
         m_loaded_id = id;
+        m_custom_pinned = false;
         auto name = dwsc::to_wide(preset->name);
         Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] loaded preset {}\n"), name);
         request_banner(STR("Smoothwalker: ") + name);
@@ -1213,6 +1388,11 @@ class DWSmoothwalker : public CppUserModBase
                 return std::abs(dwsc::number_of(m_settings, entry.first) - entry.second) <= 1e-4;
             });
         };
+        if (m_custom_pinned)
+        {
+            m_settings.preset = 0;
+            return;
+        }
         int active = 0;
         if (auto* loaded = m_loaded_id != 0 ? find_preset(m_loaded_id) : nullptr; loaded && matches(*loaded)) active = m_loaded_id;
         for (auto& p : m_presets)
@@ -1234,8 +1414,8 @@ class DWSmoothwalker : public CppUserModBase
         mark_pending_locked();
     }
 
-    // The live numbers that differ from the file; preset and preset_save are written as m_settings holds them (the
-    // active preset, and 0). Compared as written (%.6g), so a value the file cannot hold exactly is not rewritten forever.
+    // The live numbers that differ from the file; preset is written as m_settings holds it (the active preset).
+    // Compared as written (%.6g), so a value the file cannot hold exactly is not rewritten forever.
     auto pending_writes_locked() -> dwsc::Values
     {
         dwsc::Values writes;
@@ -1565,6 +1745,17 @@ class DWSmoothwalker : public CppUserModBase
             return;
         }
 
+        // The root is the capsule: its half height gives the feet point the vertical follow tracks.
+        if (auto* half = root.object->GetValuePtrByPropertyNameInChain<float>(STR("CapsuleHalfHeight")))
+        {
+            g_half_height_offset.store(static_cast<int32_t>(reinterpret_cast<uint8_t*>(half) - reinterpret_cast<uint8_t*>(root.object)));
+        }
+        else
+        {
+            g_half_height_offset.store(-1);
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] CapsuleHalfHeight not found: the vertical follow tracks the capsule centre\n"));
+        }
+
         m_camera = camera;
         m_root = root;
         g_player_root.store(root.object);
@@ -1572,7 +1763,7 @@ class DWSmoothwalker : public CppUserModBase
         m_position_applied_generation = 0; // a new pawn: its modes get the current position
         m_tuner.camera_changed();
         m_offset_wait = std::chrono::seconds(2);
-        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] following {}\n"), pawn->GetName());
+        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] following {} (CapsuleHalfHeight at 0x{:X})\n"), pawn->GetName(), g_half_height_offset.load());
     }
 
     // ComponentToWorld is not reflected. A root's world translation equals its RelativeLocation, so the offset

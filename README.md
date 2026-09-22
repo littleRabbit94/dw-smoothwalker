@@ -62,9 +62,15 @@ change the `name` line and the values, and restart the game. Every key is commen
 default. The preset format and rules (32 keys, clamping, the 54 drop-in limit) are in `docs/design.md`,
 "Presets". Switches and `aiming_follow` are not preset keys; a preset that sets them is ignored on those lines.
 
+To start from a camera you tuned in game, set the Preset picker on the Mod Menu page to a slot marked
+`(empty)` and press Apply: the mod writes your live settings to `config/presets/Slot N.ini`. Keep tuning with
+that slot picked and every Apply saves into it. Copy the file under any other name to turn it into a drop-in;
+`Slot 1.ini` to `Slot 6.ini` belong to the player's slots and are overwritten.
+
 ## Checking a change in game
 
-With `log_stats = 1` the mod logs the per-frame hook cost every 5 s. Every camera position apply logs its own
+With `log_stats = 1` the mod logs the per-frame hook cost every 5 s. With `log_trace = 1` it writes the last 240
+frames of the vertical follow to the log 90 frames after every crouch or stand, the transition in the middle. Every camera position apply logs its own
 duration (`camera position applied: ... ms`): after the first apply of a session it should read about 0 ms,
 and a number in the tens means something walks the object array on a key press again.
 

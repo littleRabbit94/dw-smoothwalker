@@ -68,10 +68,52 @@ later and requires exactly one match. Measured: translation at **0x200**, `Relat
 A failed scan (a pawn at the origin matches twice) is retried for the same pawn after 2 s, doubling to 60 s;
 it used to leave smoothing off for that pawn's whole life.
 
+**Feet, not centre, vertically** (0.9.0, 2026-09-21). A crouch shrinks the capsule from half height 96 to 42
+and drops the root by the 54 cm difference in one frame; the mesh offset goes -97 to -43, so the feet stay
+put. The game's own camera does not follow at once: its pivot (`GetPivotLocation`, root + `PivotZOffset` 45
+at rest) was read 48 cm below its rest position with the capsule already standing, so the game eases its
+pivot height over time whatever the lag flags say. Lagging the root made `game camera - pivot` grow by 54 in
+the crouch frame: the camera popped up by the shown lag (about 39 cm under the soft leash), then sank as the
+follow and the game's easing settled, and the mirror on standing up. The vertical follow now tracks the
+capsule bottom, root Z minus `CapsuleHalfHeight` (a reflected float on the root; the offset is resolved with
+the pawn, and a missing or implausible value falls back to the centre). The feet do not move in a crouch, so
+the follow adds no vertical lag to one and the game's eased height passes through; standing, the feet sit a
+constant 96 below the centre, so nothing else changes. Horizontal follow, the arm, the wall clamp and the
+cut test still use the centre. Measured live 2026-09-21 at rest: root 16231.9 standing / 16177.9 crouched,
+the camera component 80 above the root in both, the game pivot root + 45 in both.
+
+`log_trace = 1` keeps the last 240 frames of the vertical follow (dt, root Z, half height, feet Z, smoothed
+Z, game camera Z, output Z, shown lag, cut) in a ring and writes them to the log 90 frames after every half
+height change, so a crouch or stand sits in the middle of the dump. It exists because sampling the
+transition over the Lua bridge at 50 ms crashed the game (see the toolkit's bridge notes).
+
+Verified 2026-09-21 with the trace, 18 dumps over repeated crouches and stands at rest: on the change frame
+the root moves 54, the feet and the smoothed Z do not move, and the output Z equals the game camera Z to
+0.0 cm on that frame and every frame after. The game itself eases the 54 cm over about 25 frames (0.35 s,
+an S-curve peaking at 5-9 cm per frame, with a 2 cm bump the other way on the first frame), which is what
+the player now sees; the mod adds nothing to it.
+
+**Crouch hold** (same day). Played, that was too early: while moving, the camera went down before the character,
+whose crouch animation is still blending in. In the shipped game the modes' own vertical lag delays the
+descent; the mod turns that lag off while it is on, and the feet pivot left nothing in its place. So the
+height change is lagged through the vertical follow, measured so it cannot pop: an episode starts on a half
+height change with `crouch_base` = camera Z above the feet (root motion cancels out); `crouch_drop` = base
+minus the current value is the game's eased change so far, 0 on the change frame and 54 once the game has
+settled; `crouch_smoothed` trails it at `follow_rate_v` with the curve, and the difference, leashed and
+scaled by the aiming factor, lifts the shown pivot (holds the camera up in a crouch, down in a stand).
+`crouch_drop` stops updating 0.6 s in, after the game's easing, so a later pitch change cannot leak into it;
+the hold then decays to nothing and the episode ends. A stand before the crouch has settled folds the running
+hold into the new episode, so the output stays continuous. A cut clears it. The trace has a `hold` column.
+Traced the same day: the game's camera starts down about 130 ms after the capsule change and is 90 % down
+by 290 ms, moving or not; with the hold the output reaches those marks at about 180 and 450 ms, hold peak
+21 cm. What remains is the game's: a crouch pressed while the character is still coming to a stop shrinks
+the capsule (and drops both cameras) at once, and the crouch pose blends in half a second to a second later,
+after the stop animation. Checked with the mod off (`enabled = 0` live): the shipped camera dips the same.
+
 ### Follow
 
-A smoothed pivot trails the capsule: horizontal and vertical rates, each with a response curve over lag
-distance and a leash. The camera becomes `smoothed pivot + (game camera - pivot)`, so orbiting stays
+A smoothed pivot trails the capsule (its centre horizontally, its bottom vertically, see "Pivot"): horizontal and
+vertical rates, each with a response curve over lag distance and a leash. The camera becomes `smoothed pivot + (game camera - pivot)`, so orbiting stays
 instant and only following lags. Optional rotation smoothing slerps the view and swings the arm to match.
 
 - **Aiming** (`aiming_follow`, percent, default 30; not a preset key). A trail and smoothed turning behind
@@ -291,23 +333,44 @@ the centre (0.7.4).
 - **Diff-based reload** (0.8.0). The DLL keeps a baseline: every numeric key as last known in the file (after
   it parsed or wrote it). Startup parses everything. A later change (same 250 ms mtime poll, stamp before
   read, a missing file keeps the live settings) applies only keys whose number differs from the baseline,
-  onto the live settings, then clamps. Order within one reload: (a) ordinary edits; (b) `preset_save` 1-6
-  saves the slot from the live settings (`presets/Slot N.ini` is written at once: the menu does not watch it);
-  (c) a changed non-zero `preset` loads that preset, then the preset keys edited in the same Apply are
-  applied again on top. An empty slot logs and loads nothing. `enabled` changes the live switch only when
+  onto the live settings, then clamps. Order within one reload: (a) ordinary edits, with
+  `active_before` = the `preset` id captured before them; then exactly one of (b) `preset` edited to an
+  empty slot 1-6, which saves the live values into it (adopt); (c) `preset` edited to another non-zero id,
+  which loads that preset, applies the preset keys edited in the same Apply again on top, and on a slot
+  saves the result back into it; (d) `preset` edited to 0, which detaches (`m_loaded_id = 0`) and pins Custom (`m_custom_pinned`):
+  `update_active_locked` would otherwise match the unchanged values to the slot again and the next edit
+  would be saved into it. The pin holds until a preset is loaded or a slot adopted, and startup restores
+  it when the file says 0 over values a preset matches;
+  (e) `preset` untouched with `active_before` a slot 1-6 and at least one preset key edited, which saves
+  the live values into that slot (autosave). `presets/Slot N.ini` is written at once: the menu does not
+  watch it. Built-ins and drop-ins are read-only: an edit with one active just falls through to
+  `update_active_locked`, which gives Custom. `enabled` changes the live switch only when
   the file's value changes, so O and an Apply of other settings do not fight. `enabled` and O
   switch the whole mod: off also publishes the position tuning as inactive (the modes go back to the game's
   values, as `camera_tuning = 0` does), skips the per-tick aiming `GetState` calls, and V and N are ignored,
   so off is a clean A/B against the game's own camera. O sets `m_settings.enabled` too, so the write-back
   puts it in the file and the page shows it.
-- **Deferred write-back.** Nothing writes `smoothwalker.ini` from O, V, N or a plain reload. The exception:
-  a reload that loaded a preset or saved a slot flushes at once. Deferred, a page reopened before
-  the world ran again showed the new `preset` with the old sliders. The cost: the page still open refuses
-  its next Apply ("reopen this mod"); its sliders were stale anyway. The desired file is every
-  numeric live value, with `preset` = the active preset and `preset_save` = 0. `on_update` writes the
-  differing numbers (in place, temp file plus rename) only when the camera is live, which means no menu page
-  is open (the page is reachable only from the main or pause menu, where the player camera does not update),
-  and only when the file's mtime still equals the stamp last processed (otherwise the poll goes first).
+- **Deferred write-back.** Nothing writes `smoothwalker.ini` from O, V, N or any reload, a preset load
+  included (0.8.0 flushed a load at once, which made the still-open page refuse its next Apply; 0.9 waits
+  for the menu to close instead, see below). An adopt or an autosave leaves the live numbers equal to what
+  the Apply wrote, so nothing is pending. The desired file is every numeric live value, with `preset` = the
+  active preset. `on_update` writes the differing numbers (in place, temp file plus rename) only when the
+  camera is live or the Mod Menu is closed (`mod_menu_open`), so never behind an open page, and only when
+  the file's mtime still equals the stamp last processed (otherwise the poll goes first). A load from the
+  pause menu is therefore in the file within 250 ms of leaving the menu, and a page reopened from the pause
+  menu shows the loaded values; the page still open after the load keeps its stale sliders, and an Apply
+  there still works and moves only the keys it changed.
+- **Menu-open detection** (2026-09-21). The menu has no close signal and its `dmm_api` fires only on Apply,
+  so the DLL reads the menu's widget tree. Its host is created with the native class
+  `CommonActivatableWidget` (`main.lua`, `library:Create` with `/Script/CommonUI.CommonActivatableWidget`),
+  which the game's own screens all subclass, so an instance of exactly that class is the menu. Sampled live
+  with the bridge: open, `Visibility` 4 (SelfHitTestInvisible), activated, in viewport; closed, the object
+  lingers until GC with `Visibility` 1 (Collapsed), disabled, out of the viewport. `mod_menu_open` keeps the
+  host last seen open and rescans (`ForEachUObject`, exact class, not unreachable, `Visibility` not
+  Collapsed) only when that one is collapsed or gone; it runs only with a write pending and the camera not
+  live, so never during play. If a menu update changes the host the check returns false and the write lands
+  under the open page as in 0.8.0: a locked page, never a lost value. The finer check (the page switcher and
+  the title text, for a list round-trip without leaving the menu) was left out as two more fragile parts.
   Numbers are compared as written (`%.6g`), so a value the file cannot hold exactly does not rewrite
   forever. A failed write warns once per failure streak and retries every 250 ms, and removes its temp
   file; a changed or missing file waits for the poll on the same 250 ms throttle.
@@ -330,7 +393,7 @@ the centre (0.7.4).
   `position_transition` left: a preset is a camera look, and the first three are off the menu page, so a
   preset would have changed settings the player cannot see): follow, turning, the look limits and every group's distance, height, shoulder and
   FOV. Not `enabled`, `camera_tuning`, `shoulder_swap`, `show_banner`, `log_stats`, the key names,
-  `preset` or `preset_save`. A preset file holding fewer keys loads and matches on the keys it has.
+  or `preset`. A preset file holding fewer keys loads and matches on the keys it has.
 - **Built-ins** (cycle order): Tight, Balanced, Cinematic. Follow values, horizontal retuned 2026-09-19 for the game's lag being off (it had
   added up to 30 cm of trail; before: 25 cm 18/s, 70 cm 8/s; Cinematic was tried at 145 cm 3/s, too much, and kept as it was): Tight (lag 40/20 cm,
   12/20 per s, constant), Balanced (the shipped default: 85/50 cm, 6.5/10 per s; 95 cm 5.5/s was tried and read too loose, smoothstep h), Cinematic
@@ -357,7 +420,7 @@ the centre (0.7.4).
   125 to 115 because 125 % and +5 FOV both shrink the character; sprint sells speed with FOV (+8) rather
   than distance (110). Balanced still leaves the camera where the game puts it.
 - **Six slots** (0.7 had 6, 0.8 drafts 10; back to 6 on 2026-09-19 with names). A slot's display name is the
-  `name` line of its `Slot N.ini`, read at startup, shown in both pickers and the banner, and kept when the
+  `name` line of its `Slot N.ini`, read at startup, shown in the picker and the banner, and kept when the
   slot is saved again (picker order, rename after restart and name kept on re-save confirmed in game 2026-09-19). One constant, `dwsc::MAX_SLOTS = 6` in `config.hpp`, bounds the slot file
   names, the save range and the slot ids. The menu caps a picker at 64 values (`choices.lua`), and the
   Preset picker also carries Custom and the three built-ins, so 60 slots is the ceiling.
@@ -387,9 +450,8 @@ the centre (0.7.4).
   `PresetValues` and `PresetLabels` lines of `[Setting.preset]` to `0|101|102|103|1..10|201..` and
   `Custom|Tight|Balanced|Cinematic|<saved slots by name>|<drop-in names>|<empty slots>` (empty slots last, so
   the picker has nothing dead between the presets that load; they stay listed because the page fails to open
-  if the ini's `preset` id is not among the values, and a slot saved this session becomes that id), and the
-  `[Setting.preset_save]` labels likewise, keeping every other byte and the line endings,
-  and writes (temp plus rename) only if the content changed. The shipped manifest lists no drop-ins. If the
+  if the ini's `preset` id is not among the values, and a slot saved this session becomes that id), keeping
+  every other byte and the line endings, and writes (temp plus rename) only if the content changed. The shipped manifest lists no drop-ins. If the
   section or lines are missing or the write fails, it logs and turns drop-ins off for the session, so the
   indicator never reports an id the page lacks. Checked with the menu's parser: 64 values with 48-byte
   UTF-8 labels open.
@@ -402,9 +464,19 @@ the centre (0.7.4).
   else the first match among the built-ins, slots 1-6, then drop-ins, else Custom. It is recomputed after
   every reload, save, load, cycle and shoulder swap, from the session cache. At startup the
   file's `preset` is not a load request, only the preferred match. The menu has no read-only type, so the
-  indicator is the same picker the user changes to load a preset; the page shows the new value on reopen.
-- **A slot save makes that slot the active preset** (it holds the live values, so it matches); a load in the same
-  Apply still wins.
+  indicator is the same picker the user changes to load a preset or claim an empty slot; the page shows the
+  new value on reopen.
+- **A slot save makes that slot the active preset** (it holds the live values, so it matches). An adopt sets
+  `m_loaded_id` to the slot; an autosave keeps it there.
+- **Slots are profiles** (2026-09-21; the `preset_save` picker until then). One picker does all three jobs,
+  told apart by the ` (empty)` suffix: picking an empty slot copies the live settings into it, picking a
+  saved slot loads it, and any later Apply that moves a preset key while that slot is active writes the new
+  values back into it. Built-ins and drop-ins are unchanged by an edit; the indicator just goes Custom.
+  Why the save picker went: it was an action faked as state. The DLL had to reset `preset_save` to 0 after
+  the save, which forced a `smoothwalker.ini` write while the page that triggered it was still open, and the
+  menu (`choices.lua`, `M.replace`) refuses an Apply when the file's bytes differ from the snapshot it took
+  when the page opened. So saving a slot cost the player the page. Adopt and autosave write only the slot
+  file, leaving `smoothwalker.ini` exactly as the Apply wrote it, so the page keeps working.
 - **V** cycles built-ins, non-empty slots, then drop-ins, starting after the active preset (the first entry from
   Custom or an id not in the order), through the same load path as the menu. The active id updates in
   memory on each press, so quick presses advance one step each.
@@ -568,8 +640,9 @@ cancelled itself; the four captures above then ran clean. The fix is in UEBench 
   needs a rebuild against it.
 - **The page indicator lags.** After an Apply of a slider, the page stays open with the old `preset` value
   shown until it is reopened, because the corrected indicator is written only once the camera is live again.
-  After a preset load or slot save the file is written at once, so that page refuses another Apply
-  until it is reopened.
+  After a preset load the file is written once the menu closes, so the open page keeps the old sliders
+  until it is reopened; going back to the mod list and straight into the page again, without leaving the
+  menu, also shows the old sliders (the write waits for the menu host to collapse).
 - **Drop-ins are read at startup.** Files added to or removed from `config/presets/` while the game runs are
   ignored until the next start or mod reload. At most 54 drop-ins.
 - **Finisher and shadowstep attack cameras** (~40 classes) are left as shipped.

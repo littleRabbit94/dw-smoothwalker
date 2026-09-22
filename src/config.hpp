@@ -65,14 +65,14 @@ namespace dwsc
         double position_transition = 0.5; // s; 0 snaps
 
         int preset = 102;                 // the preset the live settings match: 0 Custom, 101-103 built-in, 1-MAX_SLOTS slot, FIRST_DROPIN_ID on drop-in
-        int preset_save = 0;              // menu action, reset to 0: 1-MAX_SLOTS slot
 
         bool log_stats = false;
+        bool log_trace = false; // per-frame vertical-follow trace, written to the log around every crouch and stand
     };
 
     // A preset is a camera look: follow, turning, the look limits and camera position. Not the switches (enabled,
-    // camera_tuning, shoulder_swap, show_banner, log_stats), aiming_follow, the safety values (wall_clamp,
-    // reset_distance, reset_gap), position_transition, the key names, or preset/preset_save.
+    // camera_tuning, shoulder_swap, show_banner, log_stats, log_trace), aiming_follow, the safety values (wall_clamp,
+    // reset_distance, reset_gap), position_transition, the key names, or preset.
     inline const std::array<const char*, 32> PRESET_KEYS{
             "follow_rate_h", "follow_rate_v", "curve_h", "curve_v", "catchup_distance", "min_rate_scale", "max_lag_h", "max_lag_v",
             "soft_leash", "rotation_smoothing", "rotation_rate",
@@ -88,7 +88,7 @@ namespace dwsc
             "camera_tuning", "exploration_distance", "exploration_height", "exploration_shoulder", "exploration_fov", "sprint_distance",
             "sprint_height", "sprint_shoulder", "sprint_fov", "combat_distance", "combat_height", "combat_shoulder", "combat_fov",
             "aiming_distance", "aiming_height", "aiming_shoulder", "aiming_fov", "traversal_distance", "traversal_height", "traversal_fov",
-            "shoulder_swap", "pitch_min", "pitch_max", "position_transition", "preset", "preset_save", "log_stats"};
+            "shoulder_swap", "pitch_min", "pitch_max", "position_transition", "preset", "log_stats", "log_trace"};
 
     inline auto is_preset_key(const std::string& key) -> bool
     {
@@ -183,8 +183,8 @@ namespace dwsc
         else if (key == "pitch_min") number(s.pitch_min);
         else if (key == "pitch_max") number(s.pitch_max);
         else if (key == "preset") integer(s.preset);
-        else if (key == "preset_save") integer(s.preset_save);
         else if (key == "log_stats") flag(s.log_stats);
+        else if (key == "log_trace") flag(s.log_trace);
     }
 
     // The Mod Menu's ranges (mod_settings.ini). Live values are written back into the file, and a value outside
@@ -315,8 +315,8 @@ namespace dwsc
         if (key == "pitch_max") return s.pitch_max;
         if (key == "position_transition") return s.position_transition;
         if (key == "preset") return s.preset;
-        if (key == "preset_save") return s.preset_save;
         if (key == "log_stats") return flag(s.log_stats);
+        if (key == "log_trace") return flag(s.log_trace);
         return 0.0;
     }
 
@@ -637,7 +637,7 @@ namespace dwsc
         return out;
     }
 
-    // section: "[Setting.preset]" or "[Setting.preset_save]". nullopt if the section or either line is missing.
+    // section: "[Setting.preset]". nullopt if the section or either line is missing.
     inline auto with_preset_choices(const std::string& manifest, const std::string& section, const std::string& values,
                                     const std::string& labels) -> std::optional<std::string>
     {
