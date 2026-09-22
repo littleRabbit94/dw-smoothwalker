@@ -826,12 +826,15 @@ by hand; record with a 500 ms `LoopAsync` reading `view()` (thread-agnostic, no 
 
 Camera authority, `api_version` 3. One owner at a time, first come, no priorities, keyed by the consumer's main
 `lua_State*` like the layers. The owner's identity (that state and its mod name) lives on the game-thread side
-under `g_mutex`; the hook only ever sees two atomics, `g_owner_slot` (the owner's index in a one-wide owner
-table, -1 for nobody) and `g_owner_keep_layers`.
+under `g_mutex`; the hook only ever sees numbers: `g_owner_slot` (the owner's index in a one-wide owner table, -1
+for nobody), `g_owner_keep_layers`, `g_owner_expires` and `g_release_generation`, plus `g_blending`, which it
+writes. Ownership is one sample taken at the top of `update_view` and used for that whole update: a release lands
+from the game thread while the hook runs on a worker, so reading the slot and the release generation at different
+points in one update could write a full follow offset for a frame, which would turn a glide into a cut.
 
 | Call | Returns |
 |---|---|
-| `Smoothwalker.claim{ keep_layers = bool }` | `true`, or `nil` with `bad_thread`, `no_game_thread`, `unknown_state`, `already_yours` (this consumer already owns it), `taken` (another does), `must_keep` (Smoothwalker's own crossfade is mid-flight). The argument table is optional; `keep_layers` defaults to false. |
+| `Smoothwalker.claim{ keep_layers = bool, ttl = s }` | `true`, or `nil` with `bad_thread`, `no_game_thread`, `unknown_state`, `already_yours` (this consumer already owns it), `taken` (another does), `must_keep` (Smoothwalker's own crossfade is mid-flight), `not_finite`. The argument table is optional; `keep_layers` defaults to false and `ttl` to no lease. |
 | `Smoothwalker.release(mode)` | `mode` is `"cut"` (the default when absent) or `"glide"`. `true`, or `nil` with `bad_thread`, `no_game_thread`, `unknown_state`, `not_owner`, `bad_mode`. |
 | `Smoothwalker.owner()` | the owning mod's name, or `nil`. Reads under `g_mutex` only, so any thread may call it. |
 
@@ -856,7 +859,17 @@ screen, easing to the follow result over `position_transition`. With `position_t
 skipped and the glide degrades to a cut; that is the user's own setting and is left as is. `must_keep` reads
 `g_blending`, published by the hook at the end of every update from `g_follow.blending`, and is only trusted
 while the snapshot is live (under 250 ms old), so a pause or a cutscene mid-fade cannot pin a claim out forever.
-A consumer that stops while owning releases with a cut (`uninstall`, which `uninstall_all` runs on unload).
+`g_blending` is published at the end of the update that starts a crossfade, so a claim arriving during that one
+update passes rather than answering `must_keep`; the stranded fade is then discarded by the `cut || owned` arm on
+the next update and the owner has the screen, which is the point of the claim.
+
+`ttl` is a lease, like the one on a layer: past it the hook stops treating the claim as ownership and the game
+thread drops the identity the next time `claim`, `release` or `owner` looks, which is a `release("cut")`. An
+expired owner's `release` answers `not_owner`. A claim without a `ttl` is the consumer's own responsibility and
+holds the camera until it releases or stops, so anything that can crash or hang should take a lease and refresh
+it. Three things end a claim besides `release`: the lease, the consumer stopping (`uninstall`, which
+`uninstall_all` runs on unload), and the consumer's Lua state being re-keyed by `install` without a matching
+`on_lua_stop` (a hot reload or a script error at load), all of them a cut.
 
 ### Rules that carry over
 

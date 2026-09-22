@@ -298,6 +298,16 @@ namespace
 
     auto update_view(void* desired_view, float delta_time, bool enabled) -> void
     {
+        // Ownership is sampled once, first, and that one sample is used for the whole update. A release runs on the
+        // game thread while this runs on a worker: sampling g_owner_slot after g_release_generation and g_reset
+        // could see the release already published and the camera still owned, or the other way round, and write a
+        // full follow offset for one frame, which turns a glide into a cut and a cut into a double snap. A lease
+        // that has run out is not a claim; the game thread drops the identity the next time it looks (lua_api.hpp).
+        const int64_t owner_expires = dwapi::g_owner_expires.load(std::memory_order_relaxed);
+        const bool owned = dwapi::g_owner_slot.load(std::memory_order_acquire) >= 0 &&
+                           (owner_expires == 0 || dwapi::qpc_now() < owner_expires);
+        const bool owner_keeps_layers = owned && dwapi::g_owner_keep_layers.load(std::memory_order_relaxed);
+
         AcquireSRWLockShared(&g_tuning_lock);
         const Tuning t = g_tuning;
         ReleaseSRWLockShared(&g_tuning_lock);
@@ -499,11 +509,11 @@ namespace
             }
         }
 
-        // Another mod owns the camera (lua_api.hpp, "authority"). The follow above ran and its state stays warm,
-        // but nothing of it is shown: the view goes back to exactly what the game built, so out_* below record a
-        // zero offset, an identity rotation and the game's FOV and a later release("glide") starts from there.
-        // No crossfade runs while owned either; the release decides how the camera comes back.
-        const bool owned = dwapi::g_owner_slot.load(std::memory_order_acquire) >= 0;
+        // Another mod owns the camera (lua_api.hpp, "authority"; `owned` was sampled at the top of this update).
+        // The follow above ran and its state stays warm, but nothing of it is shown: the view goes back to exactly
+        // what the game built, so out_* below record a zero offset, an identity rotation and the game's FOV and a
+        // later release("glide") starts from there. No crossfade runs while owned either; the release decides how
+        // the camera comes back.
         if (owned)
         {
             view = game_view;
@@ -569,8 +579,7 @@ namespace
         }
         // Other mods' layers (lua_api.hpp), on top of whatever this mod did, the O switch included. While another
         // mod owns the camera they are off too, unless that owner asked to keep them.
-        bool layered = (!owned || dwapi::g_owner_keep_layers.load(std::memory_order_relaxed)) &&
-                       dwapi::apply_layers(view.location, view.rotation, view.fov, dt);
+        bool layered = (!owned || owner_keeps_layers) && dwapi::apply_layers(view.location, view.rotation, view.fov, dt);
         bool wrote = apply_result || layered;
         if (wrote)
         {

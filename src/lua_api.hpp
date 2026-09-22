@@ -6,8 +6,9 @@
 // Slice 2: layer_set(), layer_clear(), layers(). One override layer per consumer, applied in the hook after the
 // follow and the wall clamp. These write state the hook reads and are game thread only ("bad_thread").
 // Slice 3: claim(), release(mode), owner(). One camera owner at a time. While a claim is held the follow math
-// keeps running on the game's view and the hook writes nothing, so a release can cut or glide back. claim() and
-// release() are game thread only; owner() reads under g_mutex and is thread-agnostic.
+// keeps running on the game's view and the hook writes nothing, so a release can cut or glide back. A claim may
+// take a ttl lease, so a consumer that crashes mid-claim cannot hold the camera forever. claim() and release()
+// are game thread only; owner() reads under g_mutex and is thread-agnostic.
 //
 // Included from dllmain.cpp after the UE4SS headers: needs the Windows types they bring in.
 #pragma once
@@ -58,12 +59,14 @@ namespace dwapi
     // ---------------------------------------------------------------------------------------------- authority
     //
     // One owner at a time. The owner's identity (its main lua_State*, its mod name) lives on the game-thread side
-    // under g_mutex; the hook only ever sees the two atomics below, so it never touches a string or a map.
+    // under g_mutex; the hook only ever sees the numbers below (g_owner_slot, g_owner_keep_layers and
+    // g_owner_expires, g_release_generation, and g_blending which it writes), never a string or a map.
 
     // The owner's index in the owner table, -1 when nobody owns. The table is one entry wide (one owner at a time,
     // no priorities), so the published value is 0 or -1.
     inline std::atomic<int> g_owner_slot{-1};
     inline std::atomic<bool> g_owner_keep_layers{false}; // the owner asked for layers to keep being applied
+    inline std::atomic<int64_t> g_owner_expires{0};      // QPC the claim's lease runs out at; 0: no lease
     inline std::atomic<uint64_t> g_release_generation{0}; // bumped by release("glide"); folded into the hook's `changed`
     inline std::atomic<bool> g_blending{false};           // published by the hook: its crossfade is mid-flight
 
@@ -279,17 +282,29 @@ namespace dwapi
     }
 
     // Smoothwalker.register() -> mod name. Idempotent; logs the consumer once.
+    // Every Lua-facing function does its bookkeeping under g_mutex into locals and releases the lock before any
+    // lua_* call: a Lua error longjmps out of a C function, and one thrown under the lock would leave it held
+    // and deadlock every later API call.
     inline auto l_register(lua_State* L) -> int
     {
-        std::lock_guard guard(g_mutex);
-        auto* c = consumer_of(L);
-        if (!c) return fail(L, "unknown_state");
-        if (!c->registered)
+        std::string mod;
+        const char* reason = nullptr;
         {
-            c->registered = true;
-            RC::Output::send<RC::LogLevel::Normal>(STR("[DWSmoothwalker] API consumer '{}' registered\n"), RC::to_wstring(c->mod));
+            std::lock_guard guard(g_mutex);
+            auto* c = consumer_of(L);
+            if (!c) reason = "unknown_state";
+            else
+            {
+                if (!c->registered)
+                {
+                    c->registered = true;
+                    RC::Output::send<RC::LogLevel::Normal>(STR("[DWSmoothwalker] API consumer '{}' registered\n"), RC::to_wstring(c->mod));
+                }
+                mod = c->mod;
+            }
         }
-        lua_pushstring(L, c->mod.c_str());
+        if (reason) return fail(L, reason);
+        lua_pushstring(L, mod.c_str());
         return 1;
     }
 
@@ -439,14 +454,18 @@ namespace dwapi
         AcquireSRWLockShared(&g_layers_lock);
         std::memcpy(layers, g_layers, sizeof(layers));
         ReleaseSRWLockShared(&g_layers_lock);
-        std::lock_guard guard(g_mutex);
+        std::string owners[MAX_LAYERS];
+        {
+            std::lock_guard guard(g_mutex);
+            for (int i = 0; i < MAX_LAYERS; ++i) owners[i] = g_slot_owner[i];
+        }
         lua_newtable(L);
         int n = 0;
         for (int i = 0; i < MAX_LAYERS; ++i)
         {
-            if (g_slot_owner[i].empty()) continue;
+            if (owners[i].empty()) continue;
             lua_createtable(L, 0, 5);
-            lua_pushstring(L, g_slot_owner[i].c_str()); lua_setfield(L, -2, "mod");
+            lua_pushstring(L, owners[i].c_str()); lua_setfield(L, -2, "mod");
             lua_pushboolean(L, layers[i].active ? 1 : 0); lua_setfield(L, -2, "active");
             lua_pushnumber(L, layers[i].fov_delta); lua_setfield(L, -2, "fov");
             if (std::isfinite(layers[i].fov_abs)) { lua_pushnumber(L, layers[i].fov_abs); lua_setfield(L, -2, "fov_abs"); }
@@ -467,39 +486,64 @@ namespace dwapi
         g_owner_mod.clear();
         g_owner_slot.store(-1, std::memory_order_release);
         g_owner_keep_layers.store(false, std::memory_order_relaxed);
+        g_owner_expires.store(0, std::memory_order_relaxed);
         if (glide) g_release_generation.fetch_add(1, std::memory_order_relaxed);
         else if (g_reset) g_reset->store(true, std::memory_order_relaxed);
     }
 
-    // Smoothwalker.claim{ keep_layers = bool } -> true | nil, reason
-    // The argument table is optional; keep_layers defaults to false. First come, no priorities.
+    // Under g_mutex. A lease that ran out is nobody's claim: the identity is dropped here the first time the game
+    // thread notices, which is a release("cut"), the same thing the hook already stopped doing on its own clock.
+    inline auto drop_expired_locked() -> void
+    {
+        if (!g_owner_state) return;
+        auto expires = g_owner_expires.load(std::memory_order_relaxed);
+        if (expires != 0 && qpc_now() >= expires) release_locked(false);
+    }
+
+    // Smoothwalker.claim{ keep_layers = bool, ttl = s } -> true | nil, reason
+    // The argument table is optional; keep_layers defaults to false and ttl to no lease. First come, no priorities.
     inline auto l_claim(lua_State* L) -> int
     {
         if (auto why = wrong_thread()) return fail(L, why);
-        bool keep = false;
+        bool keep = false, bad = false;
+        double ttl = 0.0;
         if (lua_istable(L, 1))
         {
             lua_getfield(L, 1, "keep_layers");
             keep = lua_toboolean(L, -1) != 0;
             lua_pop(L, 1);
+            ttl = num_field(L, 1, "ttl", 0.0, &bad);
         }
-        std::lock_guard guard(g_mutex);
-        auto* c = consumer_of(L);
-        if (!c) return fail(L, "unknown_state");
+        if (bad) return fail(L, "not_finite");
         lua_State* me = main_state(L);
-        if (g_owner_state == me) return fail(L, "already_yours");
-        if (g_owner_state) return fail(L, "taken");
+        const int64_t expires = ttl > 0 ? qpc_now() + static_cast<int64_t>(ttl * qpc_frequency()) : 0;
         // Smoothwalker's own crossfade is mid-flight: taking the camera now would strand it. The flag is only
         // trusted while the camera is actually updating, so a pause or a cutscene mid-fade cannot pin it true.
+        bool fade_live = false;
         if (g_blending.load(std::memory_order_relaxed))
         {
             Snapshot s{};
-            if (read(s) && age_seconds(s) < LIVE_WINDOW) return fail(L, "must_keep");
+            fade_live = read(s) && age_seconds(s) < LIVE_WINDOW;
         }
-        g_owner_mod = c->mod;
-        g_owner_state = me;
-        g_owner_keep_layers.store(keep, std::memory_order_relaxed);
-        g_owner_slot.store(0, std::memory_order_release);
+        const char* reason = nullptr;
+        {
+            std::lock_guard guard(g_mutex);
+            drop_expired_locked();
+            auto it = g_states.find(me);
+            if (it == g_states.end()) reason = "unknown_state";
+            else if (g_owner_state == me) reason = "already_yours";
+            else if (g_owner_state) reason = "taken";
+            else if (fade_live) reason = "must_keep";
+            else
+            {
+                g_owner_mod = it->second.mod;
+                g_owner_state = me;
+                g_owner_keep_layers.store(keep, std::memory_order_relaxed);
+                g_owner_expires.store(expires, std::memory_order_relaxed);
+                g_owner_slot.store(0, std::memory_order_release);
+            }
+        }
+        if (reason) return fail(L, reason);
         lua_pushboolean(L, 1);
         return 1;
     }
@@ -516,11 +560,16 @@ namespace dwapi
             if (std::strcmp(mode, "glide") == 0) glide = true;
             else if (std::strcmp(mode, "cut") != 0) return fail(L, "bad_mode");
         }
-        std::lock_guard guard(g_mutex);
-        auto* c = consumer_of(L);
-        if (!c) return fail(L, "unknown_state");
-        if (g_owner_state != main_state(L)) return fail(L, "not_owner");
-        release_locked(glide);
+        lua_State* me = main_state(L);
+        const char* reason = nullptr;
+        {
+            std::lock_guard guard(g_mutex);
+            drop_expired_locked(); // an expired owner answers not_owner, like anyone else who does not hold it
+            if (g_states.find(me) == g_states.end()) reason = "unknown_state";
+            else if (g_owner_state != me) reason = "not_owner";
+            else release_locked(glide);
+        }
+        if (reason) return fail(L, reason);
         lua_pushboolean(L, 1);
         return 1;
     }
@@ -528,9 +577,14 @@ namespace dwapi
     // Smoothwalker.owner() -> the owning mod's name, or nil. Reads under g_mutex only, so any thread may call it.
     inline auto l_owner(lua_State* L) -> int
     {
-        std::lock_guard guard(g_mutex);
-        if (g_owner_mod.empty()) lua_pushnil(L);
-        else lua_pushstring(L, g_owner_mod.c_str());
+        std::string mod;
+        {
+            std::lock_guard guard(g_mutex);
+            drop_expired_locked();
+            mod = g_owner_mod;
+        }
+        if (mod.empty()) lua_pushnil(L);
+        else lua_pushstring(L, mod.c_str());
         return 1;
     }
 
@@ -539,12 +593,20 @@ namespace dwapi
 
     inline auto install(lua_State* L, std::string mod, std::string mod_version) -> void
     {
-        std::lock_guard guard(g_mutex);
-        g_mod_version = std::move(mod_version);
-        g_states[main_state(L)] = Consumer{std::move(mod), false, -1};
+        lua_State* main = main_state(L);
+        std::string version;
+        {
+            std::lock_guard guard(g_mutex);
+            // A Lua mod restarted without an on_lua_stop (a hot reload, a script error at load) comes back on the
+            // same state: whatever it claimed before is not its claim any more, so the camera goes back to nobody.
+            if (g_owner_state == main) release_locked(false);
+            g_mod_version = std::move(mod_version);
+            g_states[main] = Consumer{std::move(mod), false, -1};
+            version = g_mod_version;
+        }
         lua_createtable(L, 0, 13);
         lua_pushinteger(L, API_VERSION); lua_setfield(L, -2, "api_version");
-        lua_pushstring(L, g_mod_version.c_str()); lua_setfield(L, -2, "mod_version");
+        lua_pushstring(L, version.c_str()); lua_setfield(L, -2, "mod_version");
         lua_pushcfunction(L, l_register); lua_setfield(L, -2, "register");
         lua_pushcfunction(L, l_view); lua_setfield(L, -2, "view");
         lua_pushcfunction(L, l_live); lua_setfield(L, -2, "live");
@@ -563,16 +625,19 @@ namespace dwapi
     // The consumer's layer fades out and its slot is freed; a consumer that still owns the camera releases with a cut.
     inline auto uninstall(lua_State* L) -> void
     {
-        std::lock_guard guard(g_mutex);
-        if (g_owner_state == main_state(L)) release_locked(false);
-        if (auto it = g_states.find(main_state(L)); it != g_states.end())
+        lua_State* main = main_state(L);
         {
-            if (it->second.slot >= 0)
+            std::lock_guard guard(g_mutex);
+            if (g_owner_state == main) release_locked(false);
+            if (auto it = g_states.find(main); it != g_states.end())
             {
-                clear_slot(it->second.slot);
-                g_slot_owner[it->second.slot].clear();
+                if (it->second.slot >= 0)
+                {
+                    clear_slot(it->second.slot);
+                    g_slot_owner[it->second.slot].clear();
+                }
+                g_states.erase(it);
             }
-            g_states.erase(it);
         }
         lua_getglobal(L, "Smoothwalker");
         if (!lua_istable(L, -1))
