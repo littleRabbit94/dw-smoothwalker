@@ -784,8 +784,35 @@ busy-wait inside an eval; it holds the game thread, the camera stops updating, a
 same eval is stale.
 
 
-- Every API call runs on the game thread (Lua and console both do) and writes numbers into a locked
-  struct; the hook reads it. Nothing in the hook calls a UObject or UE4SS. Same discipline as `Tuning`.
+### Slice 2 as built (branch `camera-api`, 2026-09-22)
+
+The override layer, `api_version` 2. One layer per consumer, eight slots, keyed by the consumer's Lua state.
+The probe keys are gone; a layer is what they were standing in for.
+
+| Call | Does |
+|---|---|
+| `Smoothwalker.layer_set{ offset = {x, y, z}, rotation = {pitch, yaw, roll}, fov = delta, fov_abs = deg, weight = 0..1, blend = s, ttl = s }` | Replaces the caller's layer. `offset` is in the camera's own frame (x forward, y right, z up, cm); `rotation` and `fov` are added; `fov_abs` pulls toward an absolute FOV by `weight`; `weight` scales everything; `blend` eases the change in (0 snaps); `ttl` is a lease, past it the layer fades out as if cleared, refreshed by calling again. Returns `true`, or `nil` with `bad_thread`, `no_game_thread`, `table_expected`, `not_finite`, `no_slot`, `unknown_state`. |
+| `Smoothwalker.layer_clear()` | Fades the caller's layer out over its last `blend`. |
+| `Smoothwalker.layers()` | `{ {mod, active, fov, fov_abs, weight}, ... }` for every slot with an owner, for bug reports. |
+
+Game thread only for the two writers: the bridge's evals, key binds, hooks and `ExecuteInGameThread` qualify; a
+mod's top level and `LoopAsync` do not. `view()`, `live()`, `enabled()`, `register()` stay thread-agnostic.
+
+In the hook (`apply_layers`): the eight layers are copied under a shared SRW lock each update (numbers only,
+like `Tuning`); per slot the seven applied numbers ease from their previous values to the target with a
+smoothstep over `blend`, on the world delta, restarted on every `generation` change and on an active flip. The
+sum is added **after** the follow, the crossfade and the wall clamp, right before the write, and independently
+of the O switch: a layer is another mod's feature, so `enabled = 0` stays the clean A/B for this mod's own
+work while the other mod keeps its effect. The off-and-settled early return in the hook is skipped while any
+layer is live or fading (`g_layers_any`, set by a `layer_set` or clear, cleared by the hook once every slot is
+idle). FOV is clamped to 5..170 after the sum. Non-finite results are dropped to 0.
+A stopping consumer (`on_lua_stop`) has its layer faded out and its slot freed.
+
+### Rules that carry over
+
+- Every call that hands numbers to the hook runs on the game thread (checked, `bad_thread` otherwise) and
+  writes them into a locked struct; the hook reads it. Reads of published state are thread-agnostic. Nothing
+  in the hook calls a UObject or UE4SS. Same discipline as `Tuning`.
 - Refuse layers whose numbers are not finite; clamp weights to [0, 1] and FOV to [5, 170].
 - Layers and claims are keyed by the calling mod's name from `on_lua_start`, never by a string the caller
   supplies, so one mod cannot release another's.
