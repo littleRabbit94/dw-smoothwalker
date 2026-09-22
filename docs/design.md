@@ -911,6 +911,17 @@ harmless on 4: its every-250 ms `claim` now renews the lease on its own, and the
 second as before (its `swSince` only moves on a `true`), doing exactly what it did on 3. It can be dropped
 once DWFreeCam requires `api_version` 4.
 
+**Tested live 2026-09-22** from UEBridge's state, sampled every 500 ms from `LoopAsync`, renewals queued through
+`ExecuteInGameThread`:
+
+| Call | Result |
+|---|---|
+| `api_version`; `claim{ttl = 2}` twice | 4; `true`, then `already_yours` |
+| `claim{ttl = 2}` repeated at 1, 2 and 3 s | each `already_yours`; `owner()` = `UEBridge` through 4.5 s, `nil` at 5.0 s (lease ends 2 s after the last renewal) |
+| `claim{ttl = 2}`, bare `claim()` at 0 and 1 s | both `already_yours`; `owner()` `nil` at 2.0 s (lease kept, not stripped) |
+| `claim{ttl = 5, keep_layers = true}` with a roll 10 layer, renewed at +1 s with `claim{ttl = 5}` | shown roll 10, then 0 the next sample, `already_yours`; `release("cut")` `true` |
+| DWFreeCam toggled mid-run | its claim answered `taken` while UEBridge held it; while DWFreeCam held it, UEBridge's claim answered `taken`; its glide release freed it within about 1 s |
+
 ### Consumer docs and example
 
 The API surface above is written up for other mod authors in `docs/api.md` (threads, the full call
