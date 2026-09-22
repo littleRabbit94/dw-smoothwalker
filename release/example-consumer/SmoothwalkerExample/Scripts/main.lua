@@ -21,8 +21,8 @@ if Smoothwalker == nil then
     log("Smoothwalker not installed, nothing to do")
     return
 end
-if Smoothwalker.api_version < 2 then
-    log("Smoothwalker api_version %d too old, need at least 2", Smoothwalker.api_version)
+if Smoothwalker.api_version < 3 then
+    log("Smoothwalker api_version %d too old, need at least 3", Smoothwalker.api_version)
     return
 end
 
