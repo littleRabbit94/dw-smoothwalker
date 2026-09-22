@@ -768,7 +768,9 @@ source at `97b7e501`, and the public source of Combat Camera - Configurable 3.1.
   follow) in the Cinematic preset with the LongRange mode at FOV 95: `PlayerCameraManager:GetFOVAngle()`
   read **115** and `GetCameraRotation().Roll` read **10**, and the picture was visibly wider and tilted.
   `LockedFOV` was unset. So the hook's FOV and roll are what the game renders; nothing downstream
-  rewrites them. A per-frame FOV or roll layer is buildable.
+  rewrites them. A per-frame FOV or roll layer is buildable. The probe keys are read at startup only (not in
+  `NUMERIC_KEYS`, so the 250 ms reload skips them); setting them to 0 needs a restart, or O turns the mod and the
+  probe off together.
 - **Loader proxies.** The UE4SS proxy here is `dwmapi.dll`. Free Combat Camera's standalone
   `version.dll` or `winmm.dll` would load beside it as a second proxy, not collide with it: the note
   above is about two injectors, not a filename clash.

@@ -70,7 +70,8 @@ namespace dwsc
         bool log_stats = false;
         bool log_trace = false; // per-frame vertical-follow trace, written to the log around every crouch and stand
         // Probe (2026-09-22, docs/design.md "Checks run"): degrees added to the view's FOV and roll in the hook, after the
-        // follow, to show whether a hook-side write reaches the render. 0 off. Read from the file, never written back.
+        // follow, to show whether a hook-side write reaches the render. 0 off. Read at startup only: not in NUMERIC_KEYS,
+        // so the live reload skips them and the write-back never touches them. Press O to stop the probe mid-session.
         double probe_fov = 0, probe_roll = 0;
     };
 
