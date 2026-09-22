@@ -84,7 +84,6 @@ namespace
         double rotation_rate, reset_distance, reset_gap;
         double transition;   // position_transition: the crossfade after a change
         double aiming_keep;  // aiming_follow as a share: the trail and turning smoothing kept while aiming
-        double probe_fov, probe_roll; // degrees added to FOV and roll after the follow, 0 off (probe)
         uint64_t generation; // bumped by a publish that changed a value
     };
 
@@ -92,7 +91,7 @@ namespace
     {
         return {s.follow_rate_h, s.follow_rate_v, s.curve_h, s.curve_v, s.catchup_distance, s.min_rate_scale, s.max_lag_h, s.max_lag_v,
                 s.soft_leash, s.rotation_smoothing, s.wall_clamp, s.rotation_rate, s.reset_distance, s.reset_gap, s.position_transition,
-                s.aiming_follow / 100.0, s.probe_fov, s.probe_roll, 0};
+                s.aiming_follow / 100.0, 0};
     }
 
     // Every field but generation.
@@ -102,8 +101,7 @@ namespace
                a.catchup_distance == b.catchup_distance && a.min_rate_scale == b.min_rate_scale && a.max_lag_h == b.max_lag_h &&
                a.max_lag_v == b.max_lag_v && a.soft_leash == b.soft_leash && a.rotation_smoothing == b.rotation_smoothing &&
                a.wall_clamp == b.wall_clamp && a.rotation_rate == b.rotation_rate && a.reset_distance == b.reset_distance &&
-               a.reset_gap == b.reset_gap && a.transition == b.transition && a.aiming_keep == b.aiming_keep &&
-               a.probe_fov == b.probe_fov && a.probe_roll == b.probe_roll;
+               a.reset_gap == b.reset_gap && a.transition == b.transition && a.aiming_keep == b.aiming_keep;
     }
 
     using GetCameraViewFn = void(__fastcall*)(void* self, float delta_time, void* desired_view);
@@ -549,12 +547,11 @@ namespace
             view.location[0] = result.x;
             view.location[1] = result.y;
             view.location[2] = result.z;
-            // Probe: a hook-side FOV and roll write, checked from the game thread with GetFOVAngle / GetCameraRotation.
-            if (enabled && (t.probe_fov != 0.0 || t.probe_roll != 0.0))
-            {
-                if (fov_ok) view.fov = std::clamp(view.fov + static_cast<float>(t.probe_fov), 5.0f, 170.0f);
-                view.rotation[2] += t.probe_roll;
-            }
+        }
+        // Other mods' layers (lua_api.hpp), on top of whatever this mod did, the O switch included.
+        bool layered = dwapi::apply_layers(view.location, view.rotation, view.fov, dt);
+        if (enabled || blended || layered)
+        {
             if (!guarded_write(desired_view, &view, VIEW_BYTES))
             {
                 lose_view();
@@ -569,7 +566,7 @@ namespace
         g_follow.out_offset = pivot + dwsc::rotate(g_follow.out_rotation, camera - pivot) - result;
         g_follow.out_fov = fov_ok ? view.fov : NAN;
         g_follow.out_valid = true;
-        publish_api_view(game_view, (enabled || blended) ? view : game_view, &pivot);
+        publish_api_view(game_view, (enabled || blended || layered) ? view : game_view, &pivot);
     }
 
     struct InHook
@@ -594,7 +591,8 @@ namespace
         g_last_view_qpc.store(stamp.QuadPart, std::memory_order_relaxed);
         bool enabled = g_enabled.load(std::memory_order_relaxed);
         // Off and settled: the game's view untouched. The next toggle starts from a fresh output.
-        if (!enabled && !g_follow.blending && g_toggle_generation.load(std::memory_order_relaxed) == g_follow.seen_toggle)
+        if (!enabled && !g_follow.blending && g_toggle_generation.load(std::memory_order_relaxed) == g_follow.seen_toggle &&
+            !dwapi::g_layers_any.load(std::memory_order_relaxed))
         {
             g_follow.valid = false;
             g_follow.out_valid = false;

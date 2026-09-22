@@ -69,10 +69,6 @@ namespace dwsc
 
         bool log_stats = false;
         bool log_trace = false; // per-frame vertical-follow trace, written to the log around every crouch and stand
-        // Probe (2026-09-22, docs/design.md "Checks run"): degrees added to the view's FOV and roll in the hook, after the
-        // follow, to show whether a hook-side write reaches the render. 0 off. Read at startup only: not in NUMERIC_KEYS,
-        // so the live reload skips them and the write-back never touches them. Press O to stop the probe mid-session.
-        double probe_fov = 0, probe_roll = 0;
     };
 
     // A preset is a camera look: follow, turning, the look limits and camera position. Not the switches (enabled,
@@ -194,8 +190,6 @@ namespace dwsc
         else if (key == "preset") integer(s.preset);
         else if (key == "log_stats") flag(s.log_stats);
         else if (key == "log_trace") flag(s.log_trace);
-        else if (key == "probe_fov") number(s.probe_fov);
-        else if (key == "probe_roll") number(s.probe_roll);
     }
 
     // The Mod Menu's ranges (mod_settings.ini). Live values are written back into the file, and a value outside
