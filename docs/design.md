@@ -714,12 +714,43 @@ bumped on any incompatible change.
    follow and before the wall clamp, through the same `guarded_write` of `VIEW_BYTES`. This is where a
    scripted camera or a per-frame FOV mod lives. A layer dies with its owner's `on_lua_stop`, or when its
    owner stops refreshing it (a lease, so a crashed script cannot pin the view).
-3. **Authority.** `claim(name, priority)` and `release()`. The highest claim decides whether Smoothwalker
-   smooths, passes the game's view through, or lets a layer override. It replaces the `camera_live()`
-   inference with an explicit signal and gives a photo mode or an AXIS-style gate a real handshake.
+3. **Authority.** `claim()` and `release(mode)`: one owner at a time, first come, refused with a reason
+   (`taken`, `already_yours`, `must_keep`, `not_owner`, `bad_thread`). While owned, Smoothwalker keeps the
+   follow math running on the game's view but does not write, so `release("glide")` eases back from where
+   the owner left the camera and `release("cut")` snaps. Layers are off while owned unless the owner opts
+   in. It replaces the `camera_live()` inference with an explicit signal and gives a photo mode or an
+   AXIS-style gate a real handshake.
 4. **Mode-value service.** `set_mode_value(group, field, value)`: the baseline capture and the type flip
    done once, by one owner, so the mods in the table above stop fighting. Pays off only if their authors
    adopt it; ship it last and document it as the fix for the conflict table.
+
+### What SmoothCam's API teaches (read 2026-09-22)
+
+SmoothCam (Skyrim, `mwilsnd/SkyrimSE-SmoothCam`, `SmoothCamAPI.h` and `modapi.cpp`) exposes a
+resource-ownership interface, not camera math: three resources (camera, crosshair, stealth meter), each with
+one owner at a time. Not copied; these mechanics transfer:
+
+- **Exclusive ownership with result codes.** `RequestCameraControl` returns OK, AlreadyGiven, AlreadyTaken,
+  MustKeep or NotOwner. No priorities: two mods cannot out-rank each other forever, and a refusal names why.
+  Adopted above; the priority claim of the first draft is gone.
+- **Warm state while owned.** `RequestInterpolatorUpdates` keeps SmoothCam's smoothing running while another
+  mod drives, so the handback is seamless. For the hook that is free: run the follow on the game's view, skip
+  the write. A photo-mode exit stops being a `reset_gap` snap.
+- **The handback is the owner's choice.** `SendToGoalPosition(shouldMoveToGoal, moveNow)` before release:
+  snap to the goal, or interpolate from where the owner left the camera. Hence `release("cut" | "glide")`.
+- **Goal and shown are both readable.** `GetLastCameraPosition` (rendered) and `GetGoalPosition` (where the
+  smoother wants to be, world and player-local). `view()` returns the game's view, the shown view and the pivot.
+- **Thread contract as a result code.** `GetSmoothCamThreadId` and `BadThread`. UE4SS Lua has an async thread
+  (`LoopAsync`, `ExecuteAsync`): every API call checks the game thread and returns `bad_thread` otherwise.
+- **Additive versions, named consumers.** V1, V2, V3 only add; `RegisterConsumer(name)` logs who attached.
+  Hence an integer `api_version` that only grows, and `register(name)` returning a handle and logging the name.
+
+Not needed: the SKSE messaging handshake (`on_lua_start` injection replaces it) and the HUD resources.
+Not there at all: SmoothCam is all or nothing. Owning the camera means moving it yourself with the engine's own
+calls; there are no offsets, FOV, roll or stacking. On this game most camera mods are small offset, FOV and
+distance tweaks and Lua has no per-frame view access, so the override layers are the part of this design with
+no precedent to check against. One rule borrowed for them: layers are off while a mod owns the camera unless
+the owner opts in, as SmoothCam pauses its interpolators unless asked.
 
 ### Rules that carry over
 
