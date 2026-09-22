@@ -774,6 +774,15 @@ settled, the hook still publishes game = shown, without a pivot. All slice-1 cal
 are safe from any thread, including a mod's top level and `LoopAsync`; the game-thread id is captured on the
 engine tick for the slices that will need it.
 
+**Tested live 2026-09-22** from UEBridge's Lua state (the bridge's `eval_lua` runs on the game thread):
+standing, `view().shown` equalled `view().game` and both matched `PlayerCameraManager:GetCameraLocation()` to
+the last digit, pivot about 3 m from the camera, age under 10 ms, `register()` returned `UEBridge` twice and
+logged once. Walking in a circle, three single samples: lag 98-101 cm between game and shown, a yaw trail of
+-3.8 to +2.9 degrees flipping with the turn (rotation smoothing on, Cinematic), pivot moving metres between
+samples, live. Under the pause menu: `live()` false, age 14 s, `enabled()` still true. One testing rule: never
+busy-wait inside an eval; it holds the game thread, the camera stops updating, and every later sample in the
+same eval is stale.
+
 
 - Every API call runs on the game thread (Lua and console both do) and writes numbers into a locked
   struct; the hook reads it. Nothing in the hook calls a UObject or UE4SS. Same discipline as `Tuning`.
