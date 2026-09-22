@@ -637,6 +637,106 @@ crash). The poll now runs as `LoopInGameThreadAfterFrames(1, ...)` and the run d
 too. Before deploying it, a live test loop of the same kind ran exactly 180 calls over 180 frames and
 cancelled itself; the four captures above then ran clean. The fix is in UEBench itself.
 
+## Other camera mods and a camera API
+
+Surveyed 2026-09-22 from the Nexus page text of every camera mod listed for the game (mod ids below),
+plus the source of FreeCam (350) and PhotoMode with OSD (361). Nothing here was run against the game
+yet; the two open checks are at the end.
+
+### Two surfaces, two compatibility stories
+
+Smoothwalker touches the camera in two places. The **view hook** (slot 214) edits the final view after
+the game has built it. The **mode writes** (`mode_tuning.hpp`) put distance, height, shoulder and FOV into
+the game's camera-mode CDOs and live instances, with the type flip. The hook composes with nearly
+everything; the mode writes share their fields with at least eight other mods.
+
+**The view hook composes with:**
+
+- **Control-rotation writers**: Dynamic Follow Camera (351), Combat Camera - Configurable (480, its
+  smooth tracking), Centered Lock-On Camera (218, its target follow). They steer the game's camera
+  through control rotation each tick; the hook sees the result and trails it. Correct by construction.
+  The player gets two layers of softness, and the 90 degree trail cap (0.9.0) is what keeps a fast
+  auto-yaw from reversing the follow.
+- **Photo-mode mods**: FreeCam (350), PhotoMode with OSD (361), Photo Mode Unlocked (595), PhotoModeBoD
+  (369). The photo camera is its own actor with its own component, so the hook returns on the pointer
+  compare; `camera_live()` goes false while it holds the view, V and N are ignored, and the return is a
+  `reset_gap` snap. No work needed.
+- **Targeting hooks**: Free Combat Camera (340 and 568), AXIS (588). They hook lock-on and target
+  selection, not the view. The standalone build of 340 ships its own `version.dll` or `winmm.dll`
+  proxy, which can collide with the UE4SS loader: an install note for the page, not a Smoothwalker issue.
+
+**One untested hazard on the hook.** If a DLL mod also swaps slot 214, hook order decides chaining. The
+guard only checks that the slot differs from `CameraComponent`'s, so a foreign hook passes it, and the
+destructor writes back whatever it captured, which unhooks the other mod if it loaded after
+Smoothwalker. Bites on hot reload only. Cheap fix: on unload, restore only if the slot still holds
+`get_camera_view_hook`, otherwise log and leave it.
+
+**The mode writes conflict with:**
+
+| Mod | Writes | Interaction |
+|---|---|---|
+| Farther and Centered Camera (236) | `CameraOffsets` distance per mode, one shot, "no polling" | Smoothwalker's next Apply overwrites it silently |
+| Camera Presets and First Person View (393) | Distance, pivot, offset, FOV per mode; rebuilds the camera on switch; 2 s file poll | Two writers polling the same fields, last one wins every few seconds |
+| Centered Exploration Camera (245), Zelda-Inspired Camera (343), Camera Tweaks (162, 201), Centered Lock-On Camera (218) | Offsets on exploration or combat modes | Same fields as the position groups |
+| Wider Lock-On Camera FOV (105) | `DefaultFieldOfView` on the lock-on modes | The FOV group collides |
+
+The specific risk is the baseline. `mode_tuning.hpp` computes every write from "the CDO values captured
+the first time a class is seen". If a Lua mod has written the CDO before Smoothwalker first sees that
+class, the captured baseline is the other mod's value and every percentage applies on top of it. The
+smoothing itself and the lag switch are contested by nobody.
+
+### What Smoothwalker has that nobody else does
+
+The final `FMinimalViewInfo` once per frame, the smoothed pivot, the aiming flag, and a proven
+game-thread-to-worker handoff (`Tuning` under an SRW lock, the atomics). It is the one mod at the point
+where the view is produced. A per-frame FOV or roll ramp is not reachable from Lua at all
+(dawnwalker-toolkit `docs/mods.md`, "Driving the camera from a mod", 2026-09-22: `DefaultFieldOfView`
+needs a two-callback type flip and `CapturedCameraComponent.FieldOfView` is dead), so anything
+continuous other mods want has to come through this hook.
+
+### Transport
+
+`CppUserModBase::on_lua_start(mod_name, lua, main_lua, async_lua, hook_lua)` fires for every Lua mod as
+it starts, with that mod's Lua state (`LuaMod::fire_on_lua_start_for_cpp_mods`, `97b7e501`). Smoothwalker
+injects a `Smoothwalker` global table of C functions into each state and removes it in `on_lua_stop`.
+No files, no console tricks. UE4SS shared variables are not an option from C++: `LuaMod` is not
+exported, so `m_shared_lua_variables` is not reachable across the DLL boundary. A `smoothwalker` console
+command mirrors the same calls for C++ mods and scripts. `Smoothwalker.api_version` is an integer,
+bumped on any incompatible change.
+
+### Surface, in order of value
+
+1. **Read.** `view()` returns location, rotation, FOV and the smoothed pivot from the last hook call;
+   `live()` returns whether the player camera updated in the last 250 ms and, when not, why (paused,
+   photo camera, cutscene, load). All already computed; publishing is a few more atomics.
+2. **Override layers.** A mod registers a layer of numbers: position offset in pivot space, rotation
+   offset, FOV delta or absolute FOV, weight, blend time. The hook applies the layer stack after the
+   follow and before the wall clamp, through the same `guarded_write` of `VIEW_BYTES`. This is where a
+   scripted camera or a per-frame FOV mod lives. A layer dies with its owner's `on_lua_stop`, or when its
+   owner stops refreshing it (a lease, so a crashed script cannot pin the view).
+3. **Authority.** `claim(name, priority)` and `release()`. The highest claim decides whether Smoothwalker
+   smooths, passes the game's view through, or lets a layer override. It replaces the `camera_live()`
+   inference with an explicit signal and gives a photo mode or an AXIS-style gate a real handshake.
+4. **Mode-value service.** `set_mode_value(group, field, value)`: the baseline capture and the type flip
+   done once, by one owner, so the mods in the table above stop fighting. Pays off only if their authors
+   adopt it; ship it last and document it as the fix for the conflict table.
+
+### Rules that carry over
+
+- Every API call runs on the game thread (Lua and console both do) and writes numbers into a locked
+  struct; the hook reads it. Nothing in the hook calls a UObject or UE4SS. Same discipline as `Tuning`.
+- Refuse layers whose numbers are not finite; clamp weights to [0, 1] and FOV to [5, 170].
+- Layers and claims are keyed by the calling mod's name from `on_lua_start`, never by a string the caller
+  supplies, so one mod cannot release another's.
+- Unload: clear the injected tables in `on_lua_stop`, drop every layer, restore the slot as above.
+
+### Open checks
+
+- **Start order.** Whether Lua mods start before C++ mods on rc6, which decides whether the baseline
+  capture can see another mod's CDO write. One launch with 236 or 393 installed and `log_trace` on.
+- **Slot 214 elsewhere.** Whether any current DLL mod (340 standalone, 480, 588) touches slot 214: read
+  the slot at init and log its module.
+
 ## Known limits
 
 - **One game build.** The hook needs `GetCameraView` at vtable slot 214 as on build 25232147; when slot 214
