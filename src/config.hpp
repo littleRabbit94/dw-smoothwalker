@@ -210,7 +210,7 @@ namespace dwsc
         s.reset_gap = std::clamp(s.reset_gap, 0.05, 2.0);
         for (double* d : {&s.exploration_distance, &s.sprint_distance, &s.combat_distance, &s.focus_distance, &s.aiming_distance, &s.traversal_distance})
         {
-            *d = std::clamp(*d, 50.0, 250.0);
+            *d = std::clamp(*d, 25.0, 250.0); // below about 50 the camera is inside the game's 100 cm clipping radius on most modes
         }
         for (double* h : {&s.exploration_height, &s.sprint_height, &s.combat_height, &s.focus_height, &s.aiming_height, &s.traversal_height})
         {

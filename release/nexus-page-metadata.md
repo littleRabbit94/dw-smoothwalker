@@ -31,7 +31,7 @@ AI-Generated Content (read 2026-09-16).
 | File name | `Smoothwalker` |
 | Version | `0.9.0` |
 | Category | Main Files |
-| File | `dist/Smoothwalker-0.9.0.zip`, 193,839 bytes, built 2026-09-21 |
+| File | `dist/Smoothwalker-0.9.0.zip`, 193,840 bytes, built 2026-09-21 |
 | Description | `Close the game, then extract into the folder that holds the ue4ss folder (Dawnwalker/Binaries/Win64, the one with Dawnwalker.exe). The archive carries the folder path, so the mod lands in ue4ss/Mods/DWSmoothwalker by itself. Needs UE4SS (mod 18 or mod 283) and Steam build 25232147. No mods.txt edit.` |
 
 Optional file:
@@ -41,7 +41,7 @@ Optional file:
 | File name | `Smoothwalker Example Preset` |
 | Version | `0.9.0` |
 | Category | Optional Files |
-| File | `dist/Smoothwalker-Example-Preset-0.9.0.zip`, 1,229 bytes, built 2026-09-21 |
+| File | `dist/Smoothwalker-Example-Preset-0.9.0.zip`, 1,230 bytes, built 2026-09-21 |
 | Description | `One preset, Over the Shoulder: a closer camera further out over the shoulder, with a quicker follow to match. I commented every key with its range and default, so it doubles as a template for your own. Extract into Dawnwalker/Binaries/Win64 like the main file; it lands in ue4ss/Mods/DWSmoothwalker/config/presets. Restart the game, then pick it from the Mod Menu or with preset in the ini. Needs the main file.` |
 
 Source: `example-preset/`. The build checks it holds a name and all 32 preset keys, each once, inside
@@ -84,6 +84,7 @@ differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 - Crouching no longer pops the camera up. The follow tracks the bottom of the capsule, which does not move in a crouch, and the height change is eased at your vertical follow rate, so the dip runs with the game's own timing. The dip still leads the crouch animation when you crouch while stopping; the shipped camera does the same.
 - Turning follow speed 1 no longer reverses the camera halfway through a spin: the smoothed turn now trails by at most a quarter turn and always catches up the way you turned.
 - Focus mode has its own camera position group (Camera: Focus on the menu page, focus_ keys in the ini and in presets) instead of sharing combat's. Settings files and presets from before take their combat values until you change them.
+- Camera distance goes down to 25 % (was 50). Below about 50 the character fades as the camera enters the game's clipping radius, so that is a choice, not a limit.
 - Save slots are profiles. Pick a slot marked (empty) to save your settings into it; while that slot is shown, every Apply saves into it. Pick Custom to stop. The separate Save picker is gone. Built-in presets and installed ones never change.
 - New ini switch log_trace for per-frame crouch traces in UE4SS.log (off by default, not on the menu page).
 - Updating: close the game and extract over the old folder. The archive replaces config\smoothwalker.ini, so save your look to a slot first and copy the file if you want your keys and switches back; slots survive.
