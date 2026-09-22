@@ -808,6 +808,20 @@ layer is live or fading (`g_layers_any`, set by a `layer_set` or clear, cleared 
 idle). FOV is clamped to 5..170 after the sum. Non-finite results are dropped to 0.
 A stopping consumer (`on_lua_stop`) has its layer faded out and its slot freed.
 
+**Tested live 2026-09-22** from UEBridge's state, LongRange mode at FOV 95 (Cinematic):
+
+| Call | Camera manager read | `view()` |
+|---|---|---|
+| `layer_set{ fov = 20, rotation = {roll = 10}, blend = 0.5 }` | FOV 115, roll 10 | shown 115 / 10, game 95 / 0 |
+| `layer_set{ offset = {y = 60}, blend = 0.3 }` (replaces) | FOV 95, roll 0, camera moved | shown minus game: 60.0 cm along the camera's right vector, z 0 |
+| `layer_set{ fov_abs = 60, weight = 0.5, ttl = 3, blend = 0.5 }`, sampled every 0.5 s from `LoopAsync` via `view()` | | 77.5 from 0.5 s to 3.0 s, 95.0 from 3.5 s on |
+| `layer_set{ fov = 5 }` from a `LoopAsync` callback | | `nil, "bad_thread"`; `live()` answered there |
+| roll layer set, then O off | `enabled()` false, roll still 10, follow shift 0 | shown roll 10, game roll 0, live |
+| `layer_clear()` | roll back to 0 | `layers()` keeps the slot: `{mod = "UEBridge", active = false}` |
+
+Testing rule from the lease run: the bridge's round trip is several seconds, so a short `ttl` cannot be read
+by hand; record with a 500 ms `LoopAsync` reading `view()` (thread-agnostic, no object scan) instead.
+
 ### Rules that carry over
 
 - Every call that hands numbers to the hook runs on the game thread (checked, `bad_thread` otherwise) and
