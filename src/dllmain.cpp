@@ -639,7 +639,7 @@ class DWSmoothwalker : public CppUserModBase
     DWSmoothwalker() : CppUserModBase()
     {
         ModName = STR("DWSmoothwalker");
-        ModVersion = STR("0.8.0");
+        ModVersion = STR("0.9.0");
         ModDescription = STR("Frame-interpolated third-person camera");
         ModAuthors = STR("littleRabbit6");
 
