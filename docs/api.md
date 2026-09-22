@@ -45,8 +45,9 @@ clamped to 5..170 after any layer sum is applied. `weight` is 0..1. A `blend` of
 
 ### `Smoothwalker.api_version`
 
-Integer field, not a call. Starts at 3 for this release and only ever grows; a future Smoothwalker adds
-functions, it never removes or renames one that shipped. 0 means unloaded, see above.
+Integer field, not a call. 4 in this release and only ever grows; a future Smoothwalker adds
+functions, it never removes or renames one that shipped. 0 means unloaded, see above. 3 had the same calls,
+but a repeat `claim` did not renew the lease (see "Ownership"); require 4 if your mod refreshes a claim.
 
 ### `Smoothwalker.mod_version`
 
@@ -62,7 +63,7 @@ parsed for feature gating, use `api_version` for that.
 | `layer_set{ offset, rotation, fov, fov_abs, weight, blend, ttl }` | game | `true`, or `nil, reason` with `bad_thread`, `no_game_thread`, `table_expected` (arg 1 must be a table), `not_finite` (a numeric field was NaN/inf/non-number), `no_slot` (all 8 layer slots taken by other mods), `unknown_state`. See "Layers" below. |
 | `layer_clear()` | game | `true`, or `nil, reason` with `bad_thread`, `no_game_thread`, `unknown_state`. Fades your layer out over its own last `blend`; does not free your slot, `layer_set` reuses it. |
 | `layers()` | any | `{ {mod, active, fov, fov_abs, weight}, ... }`, one entry per slot that has ever been claimed, for diagnosing who holds what. `fov_abs` is present only when that layer set one. |
-| `claim{ keep_layers, ttl }` | game | `true`, or `nil, reason` with `bad_thread`, `no_game_thread`, `unknown_state`, `already_yours` (you already hold it), `taken` (someone else holds it), `must_keep` (Smoothwalker's own crossfade is mid-flight; try again shortly), `not_finite`. See "Ownership" below. |
+| `claim{ keep_layers, ttl }` | game | `true`, or `nil, reason` with `bad_thread`, `no_game_thread`, `unknown_state`, `already_yours` (you already hold it; if this call carried a `ttl`, your lease restarted from now and `keep_layers` took this call's value), `taken` (someone else holds it), `must_keep` (Smoothwalker's own crossfade is mid-flight; try again shortly), `not_finite`. See "Ownership" below. |
 | `release(mode)` | game | `mode` is `"cut"` (default when omitted or nil) or `"glide"`. `true`, or `nil, reason` with `bad_thread`, `no_game_thread`, `unknown_state`, `not_owner`, `bad_mode` (mode was neither string). |
 | `owner()` | any | the owning mod's name (string), or `nil` if nobody holds it or the holder's lease expired. Never releases anything itself, pure read. |
 
@@ -105,9 +106,17 @@ written unless you asked for `keep_layers = true`.
 `claim{ keep_layers = bool, ttl = seconds }`: `keep_layers` (default `false`) keeps other mods' layers
 applying on top of your ownership; leave it off if you are driving the camera yourself and do not want
 another mod's offset fighting you. `ttl` (default `0`, no lease) is how long the claim survives without a
-refresh; a claim that can crash or hang your mod should take a lease and refresh it (call `claim` again
-before it expires; same rules, it just extends your own hold since you already own it). A claim can fail with
+refresh; a claim that can crash or hang your mod should take a lease and refresh it. A claim can fail with
 `must_keep` if Smoothwalker's own crossfade is mid-flight; that is transient, retry a frame or two later.
+
+Refreshing (`api_version` 4): call `claim{ ttl = seconds }` again before the lease expires. While you hold the
+camera, a repeat claim answers `nil, "already_yours"`; when it carries a `ttl` it also restarts the lease from
+now with that `ttl` and sets `keep_layers` to this call's value (default `false`, so pass it again if you
+claimed with it). A switch of `keep_layers` lands on the next update, not eased. A repeat claim without a
+`ttl` changes nothing, so a bare `claim()` never strips your lease. Treat `already_yours` as success. A
+refresh that arrives after the lease ran out is a new claim: the old one has already ended with a cut, and
+the call answers `true` (or `taken`/`must_keep`, like any first claim). On `api_version` 3 a repeat claim
+answered `already_yours` without renewing anything.
 
 `release(mode)`: `"cut"` (default) snaps the camera back to the game's own follow on the next update.
 `"glide"` eases from wherever you left the camera into the warm follow over the mod's configured transition
@@ -183,7 +192,8 @@ end
 
 ## Versioning and support
 
-`api_version` only ever grows; check it once, not every call, if your mod needs a feature newer than 1.
+`api_version` only ever grows; check it once, not every call, if your mod needs a feature newer than 1
+(2: layers, 3: `claim`/`release`/`owner`, 4: a repeat `claim` with a `ttl` renews the lease).
 `mod_version` is Smoothwalker's own release string, useful context in a bug report but not a feature gate.
 Call `register()` at your mod's top level (thread-agnostic, safe there): it costs nothing and the
 `[DWSmoothwalker] API consumer '<name>' registered` log line it produces the first time is often the fastest

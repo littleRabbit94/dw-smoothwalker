@@ -834,7 +834,7 @@ points in one update could write a full follow offset for a frame, which would t
 
 | Call | Returns |
 |---|---|
-| `Smoothwalker.claim{ keep_layers = bool, ttl = s }` | `true`, or `nil` with `bad_thread`, `no_game_thread`, `unknown_state`, `already_yours` (this consumer already owns it), `taken` (another does), `must_keep` (Smoothwalker's own crossfade is mid-flight), `not_finite`. The argument table is optional; `keep_layers` defaults to false and `ttl` to no lease. |
+| `Smoothwalker.claim{ keep_layers = bool, ttl = s }` | `true`, or `nil` with `bad_thread`, `no_game_thread`, `unknown_state`, `already_yours` (this consumer already owns it; with a `ttl`, the call also restarted the lease from now and replaced `keep_layers`, `api_version` 4), `taken` (another does), `must_keep` (Smoothwalker's own crossfade is mid-flight), `not_finite`. The argument table is optional; `keep_layers` defaults to false and `ttl` to no lease. |
 | `Smoothwalker.release(mode)` | `mode` is `"cut"` (the default when absent) or `"glide"`. `true`, or `nil` with `bad_thread`, `no_game_thread`, `unknown_state`, `not_owner`, `bad_mode`. |
 | `Smoothwalker.owner()` | the owning mod's name, or `nil`. Reads under `g_mutex` only, so any thread may call it. |
 
@@ -872,7 +872,14 @@ owned. That covers the lease, an `uninstall` and an `install` re-key. A `release
 alone: it bumped that generation, so the warm follow its crossfade eases back into is kept. An
 expired owner's `release` answers `not_owner`. A claim without a `ttl` is the consumer's own responsibility and
 holds the camera until it releases or stops, so anything that can crash or hang should take a lease and refresh
-it. Three things end a claim besides `release`: the lease, the consumer stopping (`uninstall`, which
+it by calling `claim{ ttl = s }` again before it runs out. In the owner's branch of `l_claim`, a repeat claim that
+carries a `ttl` stores the new `g_owner_expires` (now plus that `ttl`) and `g_owner_keep_layers` (this call's value,
+false when absent), then answers `already_yours`; one without a `ttl` stores nothing, so a bare `claim()` probe
+cannot turn a leased claim into an unleased one. The renewal writes only those two relaxed atomics under
+`g_mutex`, with the slot already held, so the hook picks the new expiry up on its next sample; a `keep_layers`
+switch lands on that update without easing. `drop_expired_locked` runs first, so a refresh after the lease ran
+out is a first claim again (`true`, `taken` or `must_keep`), after the cut the lapse already made.
+Three things end a claim besides `release`: the lease, the consumer stopping (`uninstall`, which
 `uninstall_all` runs on unload), and the consumer's Lua state being re-keyed by `install` without a matching
 `on_lua_stop` (a hot reload or a script error at load), all of them a cut.
 
@@ -894,6 +901,15 @@ The two release modes read the same at 250 ms sampling while walking, because af
 its lag from the capsule at its own rate. The difference is what the first updates do: a glide eases from the
 game's view into the warm follow, a cut restarts the follow at the capsule; neither writes an accumulated
 offset in one frame.
+
+**Lease renewal, `api_version` 4.** As first built, the owner's branch answered `already_yours` before
+writing `g_owner_expires`, so a repeat `claim{ ttl = N }` never extended the lease, while this doc and
+`api.md` said it did. Fixed as described above and `api_version` bumped to 4, so a consumer can tell a
+renewing Smoothwalker from one that is not. DWFreeCam 1.5.0 (`swRefresh`) works around 3 by re-arming once
+half the lease is spent: `release("glide")` and a fresh `claim` in the same game-thread call. That stays
+harmless on 4: its every-250 ms `claim` now renews the lease on its own, and the re-arm still runs once a
+second as before (its `swSince` only moves on a `true`), doing exactly what it did on 3. It can be dropped
+once DWFreeCam requires `api_version` 4.
 
 ### Consumer docs and example
 

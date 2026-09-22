@@ -31,7 +31,7 @@
 
 namespace dwapi
 {
-    constexpr int API_VERSION = 3;
+    constexpr int API_VERSION = 4; // 4: a repeat claim with a ttl renews the lease
 
     // Pitch, yaw, roll in degrees; FOV in degrees; location in cm, world space.
     struct View
@@ -521,6 +521,7 @@ namespace dwapi
 
     // Smoothwalker.claim{ keep_layers = bool, ttl = s } -> true | nil, reason
     // The argument table is optional; keep_layers defaults to false and ttl to no lease. First come, no priorities.
+    // The owner calling again gets nil, "already_yours"; with a ttl that call also renews its lease (see below).
     inline auto l_claim(lua_State* L) -> int
     {
         if (auto why = wrong_thread()) return fail(L, why);
@@ -550,7 +551,18 @@ namespace dwapi
             drop_expired_locked();
             auto it = g_states.find(me);
             if (it == g_states.end()) reason = "unknown_state";
-            else if (g_owner_state == me) reason = "already_yours";
+            else if (g_owner_state == me)
+            {
+                // A repeat claim that carries a ttl renews the claim, the way a layer_set refreshes a layer: the
+                // lease restarts from now and keep_layers takes this call's value. Without a ttl nothing changes, so
+                // a bare claim() used as a probe cannot strip a lease. Either way the answer is already_yours.
+                if (expires != 0)
+                {
+                    g_owner_keep_layers.store(keep, std::memory_order_relaxed);
+                    g_owner_expires.store(expires, std::memory_order_relaxed);
+                }
+                reason = "already_yours";
+            }
             else if (g_owner_state) reason = "taken";
             else if (fade_live) reason = "must_keep";
             else
