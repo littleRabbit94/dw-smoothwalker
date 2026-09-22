@@ -226,7 +226,7 @@ Measured live on the running game.
 
 ### Position tuning (`mode_tuning.hpp`)
 
-Per group (exploring, sprinting, combat, aiming, claw ride and anti-grav): distance %, height, shoulder
+Per group (exploring, sprinting, combat, focus, aiming, claw ride and anti-grav): distance %, height, shoulder
 and FOV. For every mode: a shoulder swap (`N`), the
 look up/down limits and a transition time. 41 settings on the menu page (the three safety keys and `game_lag_scale` left it on 2026-09-19; the safety keys stay in the ini), validated with the menu's
 parser. The groups cover 23 `BP_CameraMode_*` classes; the finisher and shadowstep attack cameras are
@@ -394,7 +394,7 @@ the centre (0.7.4).
 
 ### Presets
 
-- **Presets carry 32 keys** (0.8.0; 36 until 2026-09-19, when `wall_clamp`, `reset_distance`, `reset_gap` and
+- **Presets carry 36 keys** (32 in 0.8.0; four `focus_` keys since 0.9.0, when focus left the combat group; a file or preset without them takes its combat values, in `parse_settings` and `fill_focus`; 36 until 2026-09-19, when `wall_clamp`, `reset_distance`, `reset_gap` and
   `position_transition` left: a preset is a camera look, and the first three are off the menu page, so a
   preset would have changed settings the player cannot see): follow, turning, the look limits and every group's distance, height, shoulder and
   FOV. Not `enabled`, `camera_tuning`, `shoulder_swap`, `show_banner`, `log_stats`, the key names,
@@ -403,7 +403,7 @@ the centre (0.7.4).
   added up to 30 cm of trail; before: 25 cm 18/s, 70 cm 8/s; Cinematic was tried at 145 cm 3/s, too much, and kept as it was): Tight (lag 40/20 cm,
   12/20 per s, constant), Balanced (the shipped default: 85/50 cm, 6.5/10 per s; 95 cm 5.5/s was tried and read too loose, smoothstep h), Cinematic
   (120/80 cm, 4/6 per s, ease in-out, floor 0.35, turning smoothed at 25). Balanced equals the shipped
-  `smoothwalker.ini` on all 32 keys.
+  `smoothwalker.ini` on all 36 keys.
 
   | Key | Tight | Balanced | Cinematic |
   |---|---|---|---|

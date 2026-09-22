@@ -58,6 +58,7 @@ namespace dwsc
         double exploration_distance = 100, exploration_height = 0, exploration_shoulder = 0, exploration_fov = 0;
         double sprint_distance = 100, sprint_height = 0, sprint_shoulder = 0, sprint_fov = 0;
         double combat_distance = 100, combat_height = 0, combat_shoulder = 0, combat_fov = 0;
+        double focus_distance = 100, focus_height = 0, focus_shoulder = 0, focus_fov = 0; // 0.9.0; a file without them takes combat's
         double aiming_distance = 100, aiming_height = 0, aiming_shoulder = 0, aiming_fov = 0;
         double traversal_distance = 100, traversal_height = 0, traversal_fov = 0;
         bool shoulder_swap = false;
@@ -73,20 +74,20 @@ namespace dwsc
     // A preset is a camera look: follow, turning, the look limits and camera position. Not the switches (enabled,
     // camera_tuning, shoulder_swap, show_banner, log_stats, log_trace), aiming_follow, the safety values (wall_clamp,
     // reset_distance, reset_gap), position_transition, the key names, or preset.
-    inline const std::array<const char*, 32> PRESET_KEYS{
+    inline const std::array<const char*, 36> PRESET_KEYS{
             "follow_rate_h", "follow_rate_v", "curve_h", "curve_v", "catchup_distance", "min_rate_scale", "max_lag_h", "max_lag_v",
             "soft_leash", "rotation_smoothing", "rotation_rate",
             "pitch_min", "pitch_max", "exploration_distance", "exploration_height", "exploration_shoulder",
             "exploration_fov", "sprint_distance", "sprint_height", "sprint_shoulder", "sprint_fov", "combat_distance", "combat_height",
-            "combat_shoulder", "combat_fov", "aiming_distance", "aiming_height", "aiming_shoulder", "aiming_fov", "traversal_distance",
+            "combat_shoulder", "combat_fov", "focus_distance", "focus_height", "focus_shoulder", "focus_fov", "aiming_distance", "aiming_height", "aiming_shoulder", "aiming_fov", "traversal_distance",
             "traversal_height", "traversal_fov"};
 
     // Every numeric setting: the ones the Mod Menu can move and the mod writes back.
-    inline const std::array<const char*, 44> NUMERIC_KEYS{
+    inline const std::array<const char*, 48> NUMERIC_KEYS{
             "enabled", "follow_rate_h", "follow_rate_v", "curve_h", "curve_v", "catchup_distance", "min_rate_scale", "max_lag_h",
             "max_lag_v", "soft_leash", "aiming_follow", "rotation_smoothing", "rotation_rate", "wall_clamp", "reset_distance", "reset_gap", "show_banner",
             "camera_tuning", "exploration_distance", "exploration_height", "exploration_shoulder", "exploration_fov", "sprint_distance",
-            "sprint_height", "sprint_shoulder", "sprint_fov", "combat_distance", "combat_height", "combat_shoulder", "combat_fov",
+            "sprint_height", "sprint_shoulder", "sprint_fov", "combat_distance", "combat_height", "combat_shoulder", "combat_fov", "focus_distance", "focus_height", "focus_shoulder", "focus_fov",
             "aiming_distance", "aiming_height", "aiming_shoulder", "aiming_fov", "traversal_distance", "traversal_height", "traversal_fov",
             "shoulder_swap", "pitch_min", "pitch_max", "position_transition", "preset", "log_stats", "log_trace"};
 
@@ -173,6 +174,10 @@ namespace dwsc
         else if (key == "combat_height") number(s.combat_height);
         else if (key == "combat_shoulder") number(s.combat_shoulder);
         else if (key == "combat_fov") number(s.combat_fov);
+        else if (key == "focus_distance") number(s.focus_distance);
+        else if (key == "focus_height") number(s.focus_height);
+        else if (key == "focus_shoulder") number(s.focus_shoulder);
+        else if (key == "focus_fov") number(s.focus_fov);
         else if (key == "aiming_distance") number(s.aiming_distance);
         else if (key == "aiming_height") number(s.aiming_height);
         else if (key == "aiming_shoulder") number(s.aiming_shoulder);
@@ -203,19 +208,19 @@ namespace dwsc
         s.rotation_rate = std::clamp(s.rotation_rate, 1.0, 60.0);
         s.reset_distance = std::clamp(s.reset_distance, 100.0, 3000.0);
         s.reset_gap = std::clamp(s.reset_gap, 0.05, 2.0);
-        for (double* d : {&s.exploration_distance, &s.sprint_distance, &s.combat_distance, &s.aiming_distance, &s.traversal_distance})
+        for (double* d : {&s.exploration_distance, &s.sprint_distance, &s.combat_distance, &s.focus_distance, &s.aiming_distance, &s.traversal_distance})
         {
             *d = std::clamp(*d, 50.0, 250.0);
         }
-        for (double* h : {&s.exploration_height, &s.sprint_height, &s.combat_height, &s.aiming_height, &s.traversal_height})
+        for (double* h : {&s.exploration_height, &s.sprint_height, &s.combat_height, &s.focus_height, &s.aiming_height, &s.traversal_height})
         {
             *h = std::clamp(*h, -50.0, 100.0);
         }
-        for (double* o : {&s.exploration_shoulder, &s.sprint_shoulder, &s.combat_shoulder, &s.aiming_shoulder})
+        for (double* o : {&s.exploration_shoulder, &s.sprint_shoulder, &s.combat_shoulder, &s.focus_shoulder, &s.aiming_shoulder})
         {
             *o = std::clamp(*o, -60.0, 100.0);
         }
-        for (double* f : {&s.exploration_fov, &s.sprint_fov, &s.combat_fov, &s.aiming_fov, &s.traversal_fov})
+        for (double* f : {&s.exploration_fov, &s.sprint_fov, &s.combat_fov, &s.focus_fov, &s.aiming_fov, &s.traversal_fov})
         {
             *f = std::clamp(*f, -30.0, 30.0);
         }
@@ -227,6 +232,7 @@ namespace dwsc
     inline auto parse_settings(const std::string& content) -> Settings
     {
         Settings s;
+        bool focus_seen = false;
         std::istringstream in(content);
         std::string line;
         while (std::getline(in, line))
@@ -239,6 +245,15 @@ namespace dwsc
             // A blank key name is kept, so it unbinds the key instead of falling back to the default.
             bool key_name = key == "toggle_key" || key == "preset_key" || key == "shoulder_key";
             if (!key.empty() && (!value.empty() || key_name)) set_value(s, key, value);
+            if (key.rfind("focus_", 0) == 0 && !value.empty()) focus_seen = true;
+        }
+        // The focus group is 0.9.0; a file from before it gets its combat values, which is what focus used.
+        if (!focus_seen)
+        {
+            s.focus_distance = s.combat_distance;
+            s.focus_height = s.combat_height;
+            s.focus_shoulder = s.combat_shoulder;
+            s.focus_fov = s.combat_fov;
         }
         sanitize(s);
         return s;
@@ -303,6 +318,10 @@ namespace dwsc
         if (key == "combat_height") return s.combat_height;
         if (key == "combat_shoulder") return s.combat_shoulder;
         if (key == "combat_fov") return s.combat_fov;
+        if (key == "focus_distance") return s.focus_distance;
+        if (key == "focus_height") return s.focus_height;
+        if (key == "focus_shoulder") return s.focus_shoulder;
+        if (key == "focus_fov") return s.focus_fov;
         if (key == "aiming_distance") return s.aiming_distance;
         if (key == "aiming_height") return s.aiming_height;
         if (key == "aiming_shoulder") return s.aiming_shoulder;
@@ -431,6 +450,7 @@ namespace dwsc
                                 {"exploration_distance", 90}, {"exploration_height", 0}, {"exploration_shoulder", 0}, {"exploration_fov", 0},
                                 {"sprint_distance", 90}, {"sprint_height", 0}, {"sprint_shoulder", 0}, {"sprint_fov", 0},
                                 {"combat_distance", 95}, {"combat_height", 0}, {"combat_shoulder", 0}, {"combat_fov", 0},
+                                {"focus_distance", 95}, {"focus_height", 0}, {"focus_shoulder", 0}, {"focus_fov", 0},
                                 {"aiming_distance", 100}, {"aiming_height", 0}, {"aiming_shoulder", 0}, {"aiming_fov", 0},
                                 {"traversal_distance", 95}, {"traversal_height", 0}, {"traversal_fov", 0}}},
                 {102, "Balanced", {{"follow_rate_h", 6.5}, {"follow_rate_v", 10}, {"curve_h", 2}, {"curve_v", 0}, {"catchup_distance", 150},
@@ -440,6 +460,7 @@ namespace dwsc
                                    {"exploration_distance", 100}, {"exploration_height", 0}, {"exploration_shoulder", 0}, {"exploration_fov", 0},
                                    {"sprint_distance", 100}, {"sprint_height", 0}, {"sprint_shoulder", 0}, {"sprint_fov", 0},
                                    {"combat_distance", 100}, {"combat_height", 0}, {"combat_shoulder", 0}, {"combat_fov", 0},
+                                   {"focus_distance", 100}, {"focus_height", 0}, {"focus_shoulder", 0}, {"focus_fov", 0},
                                    {"aiming_distance", 100}, {"aiming_height", 0}, {"aiming_shoulder", 0}, {"aiming_fov", 0},
                                    {"traversal_distance", 100}, {"traversal_height", 0}, {"traversal_fov", 0}}},
                 {103, "Cinematic", {{"follow_rate_h", 4}, {"follow_rate_v", 6}, {"curve_h", 3}, {"curve_v", 2}, {"catchup_distance", 200},
@@ -449,6 +470,7 @@ namespace dwsc
                                     {"exploration_distance", 115}, {"exploration_height", 10}, {"exploration_shoulder", 10}, {"exploration_fov", 5},
                                     {"sprint_distance", 110}, {"sprint_height", 10}, {"sprint_shoulder", 10}, {"sprint_fov", 8},
                                     {"combat_distance", 110}, {"combat_height", 0}, {"combat_shoulder", 0}, {"combat_fov", 0},
+                                    {"focus_distance", 110}, {"focus_height", 0}, {"focus_shoulder", 0}, {"focus_fov", 0},
                                     {"aiming_distance", 100}, {"aiming_height", 0}, {"aiming_shoulder", 0}, {"aiming_fov", 0},
                                     {"traversal_distance", 115}, {"traversal_height", 0}, {"traversal_fov", 5}}},
         };
@@ -531,6 +553,18 @@ namespace dwsc
     }
 
     // Values come back raw; normalize_preset clamps them.
+    // A preset written before 0.9.0 has no focus keys: it gets its combat values, so it loads and matches as it did.
+    inline auto fill_focus(Values& values) -> void
+    {
+        for (const char* part : {"distance", "height", "shoulder", "fov"})
+        {
+            std::string focus = std::string("focus_") + part, combat = std::string("combat_") + part;
+            auto has = [&](const std::string& k) { return std::find_if(values.begin(), values.end(), [&](auto& e) { return e.first == k; }); };
+            if (has(focus) != values.end()) continue;
+            if (auto c = has(combat); c != values.end()) values.emplace_back(focus, c->second);
+        }
+    }
+
     inline auto parse_preset_file(std::string content) -> std::pair<std::string, Values>
     {
         if (content.starts_with("\xEF\xBB\xBF")) content.erase(0, 3);
@@ -563,6 +597,7 @@ namespace dwsc
             {
             }
         }
+        fill_focus(values);
         return {name, values};
     }
 

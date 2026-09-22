@@ -65,6 +65,7 @@ namespace dwsc
         Exploration,
         Sprint,
         Combat,
+        Focus,
         Aiming,
         Traversal,
         GroupCount
@@ -85,7 +86,7 @@ namespace dwsc
                 {Exploration, L"Base_CloseRange_Mantle2m"}, {Exploration, L"GapSqueeze"},
                 {Sprint, L"Sprint"}, {Sprint, L"Sprint_VampiricFastTraversal"},
                 {Combat, L"CombatNear"}, {Combat, L"CombatFromArm"}, {Combat, L"CombatFromArm_LongRange"},
-                {Combat, L"CombatFromArm_VeryLongRange"}, {Combat, L"CombatFistFightMode"}, {Combat, L"FocusMode"},
+                {Combat, L"CombatFromArm_VeryLongRange"}, {Combat, L"CombatFistFightMode"}, {Focus, L"FocusMode"},
                 {Combat, L"CombatSprinting"},
                 {Aiming, L"Aiming"}, {Aiming, L"AimingOnLadder"}, {Aiming, L"AimingClawRide"}, {Aiming, L"AimingClawRideLedge"},
                 {Aiming, L"AntiGravAiming"},
@@ -137,6 +138,7 @@ namespace dwsc
         p.groups[Exploration] = {s.exploration_distance, s.exploration_height, s.exploration_shoulder, s.exploration_fov};
         p.groups[Sprint] = {s.sprint_distance, s.sprint_height, s.sprint_shoulder, s.sprint_fov};
         p.groups[Combat] = {s.combat_distance, s.combat_height, s.combat_shoulder, s.combat_fov};
+        p.groups[Focus] = {s.focus_distance, s.focus_height, s.focus_shoulder, s.focus_fov};
         p.groups[Aiming] = {s.aiming_distance, s.aiming_height, s.aiming_shoulder, s.aiming_fov};
         p.groups[Traversal] = {s.traversal_distance, s.traversal_height, 0.0, s.traversal_fov};
         p.shoulder_swap = s.shoulder_swap;

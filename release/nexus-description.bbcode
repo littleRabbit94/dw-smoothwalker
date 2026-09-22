@@ -82,7 +82,7 @@ The camera math runs once per frame inside the game's own camera update. Measure
 [b]Camera position[/b] (100 / 0 / 0 / 0 is the game as shipped; in presets except camera_tuning, shoulder_swap and position_transition)
 [list]
 [*][font=Courier New]camera_tuning = 1[/font]: 0 puts every camera mode back as the game ships it.
-[*]Per group, with the prefix [font=Courier New]exploration_[/font], [font=Courier New]sprint_[/font], [font=Courier New]combat_[/font], [font=Courier New]aiming_[/font] or [font=Courier New]traversal_[/font]: [font=Courier New]distance[/font] (% of the game's, 50 to 250), [font=Courier New]height[/font] (cm), [font=Courier New]shoulder[/font] (cm further out; centered cameras stay centered; not for traversal), [font=Courier New]fov[/font] (degrees added).
+[*]Per group, with the prefix [font=Courier New]exploration_[/font], [font=Courier New]sprint_[/font], [font=Courier New]combat_[/font], [font=Courier New]focus_[/font], [font=Courier New]aiming_[/font] or [font=Courier New]traversal_[/font]: [font=Courier New]distance[/font] (% of the game's, 50 to 250), [font=Courier New]height[/font] (cm), [font=Courier New]shoulder[/font] (cm further out; centered cameras stay centered; not for traversal), [font=Courier New]fov[/font] (degrees added).
 [*]The game's own camera lag is switched off while Smoothwalker is on, so the follow settings above are the only lag. Off puts it back.
 [*][font=Courier New]shoulder_swap = 0[/font]: 1 is the other shoulder. [font=Courier New]V[/font] switches it.
 [*][font=Courier New]position_transition = 0.5[/font]: seconds a position change or shoulder swap glides over. 0 snaps.
@@ -126,7 +126,7 @@ exploration_fov = 5[/code]
 [*]Follow: [font=Courier New]follow_rate_h[/font] and [font=Courier New]follow_rate_v[/font] (0.5 to 30, 6.5 and 10), [font=Courier New]curve_h[/font] and [font=Courier New]curve_v[/font] (0 constant, 1 linear, 2 smoothstep, 3 ease in-out; 2 and 0), [font=Courier New]catchup_distance[/font] (10 to 500 cm, 150), [font=Courier New]min_rate_scale[/font] (0.05 to 1, 0.35), [font=Courier New]max_lag_h[/font] (0 to 300 cm, 85), [font=Courier New]max_lag_v[/font] (0 to 200 cm, 50), [font=Courier New]soft_leash[/font] (0 or 1, 1)
 [*]Turning: [font=Courier New]rotation_smoothing[/font] (0 or 1, 0), [font=Courier New]rotation_rate[/font] (1 to 60, 20)
 [*]Camera, all modes: [font=Courier New]pitch_min[/font] (-89 to -30, -60), [font=Courier New]pitch_max[/font] (20 to 89, 40)
-[*]Per situation, with the prefix [font=Courier New]exploration_[/font], [font=Courier New]sprint_[/font], [font=Courier New]combat_[/font], [font=Courier New]aiming_[/font] or [font=Courier New]traversal_[/font]: [font=Courier New]distance[/font] (50 to 250 %, 100), [font=Courier New]height[/font] (-50 to 100 cm, 0), [font=Courier New]shoulder[/font] (-60 to 100 cm, 0; not for traversal), [font=Courier New]fov[/font] (-30 to 30 degrees, 0)
+[*]Per situation, with the prefix [font=Courier New]exploration_[/font], [font=Courier New]sprint_[/font], [font=Courier New]combat_[/font], [font=Courier New]focus_[/font], [font=Courier New]aiming_[/font] or [font=Courier New]traversal_[/font]: [font=Courier New]distance[/font] (50 to 250 %, 100), [font=Courier New]height[/font] (-50 to 100 cm, 0), [font=Courier New]shoulder[/font] (-60 to 100 cm, 0; not for traversal), [font=Courier New]fov[/font] (-30 to 30 degrees, 0)
 [/list]
 
 [b]Sharing a preset on Nexus[/b]
