@@ -663,7 +663,7 @@ everything; the mode writes share their fields with at least eight other mods.
   `reset_gap` snap. No work needed.
 - **Targeting hooks**: Free Combat Camera (340 and 568), AXIS (588). They hook lock-on and target
   selection, not the view. The standalone build of 340 ships its own `version.dll` or `winmm.dll`
-  proxy, which can collide with the UE4SS loader: an install note for the page, not a Smoothwalker issue.
+  proxy, a second injector beside the UE4SS one: an install note for the page, not a Smoothwalker issue.
 
 **One untested hazard on the hook.** If a DLL mod also swaps slot 214, hook order decides chaining. The
 guard only checks that the slot differs from `CameraComponent`'s, so a foreign hook passes it, and the
@@ -730,12 +730,44 @@ bumped on any incompatible change.
   supplies, so one mod cannot release another's.
 - Unload: clear the injected tables in `on_lua_stop`, drop every layer, restore the slot as above.
 
-### Open checks
+### Checks run 2026-09-22
 
-- **Start order.** Whether Lua mods start before C++ mods on rc6, which decides whether the baseline
-  capture can see another mod's CDO write. One launch with 236 or 393 installed and `log_trace` on.
-- **Slot 214 elsewhere.** Whether any current DLL mod (340 standalone, 480, 588) touches slot 214: read
-  the slot at init and log its module.
+Against the UE4SS.log of that day's session (rc6, build 25232147), the UE 5.5.4 engine source, the UE4SS
+source at `97b7e501`, and the public source of Combat Camera - Configurable 3.1.0
+(`my-mods/Dawnwalker-Combat-Camera-Configurable`). No build was made.
+
+- **Start order.** C++ mods start before Unreal init (`DWSmoothwalker v0.9.0 loaded` at 13:46:55), Lua
+  mods 13 s later (13:47:08), and Smoothwalker's first camera-mode class capture lands only after the
+  save loads (`camera position applied` at 13:49:19). So `on_lua_start` fires for every Lua mod, the
+  C++ side is always already up, and the baseline risk above is real: a Lua mod's CDO write at its
+  start sits two minutes ahead of the capture and would be captured as the game's value.
+- **`on_lua_start` in the wild.** Combat Camera - Configurable is a C++ mod on the same host layout
+  (`static_assert(sizeof(CppUserModBase) == 192)`) that does exactly this: in `on_lua_start` it
+  filters on its own Lua mod's name and `lua.register_function("_CCSet", ...)` into that state; its
+  Lua half calls the native side through those functions. Injecting into other mods' states is the
+  same call without the name filter. `LuaMadeSimple` at `97b7e501` has `register_function`,
+  `prepare_new_table`, `add_pair`, `set_number`, `set_bool`, `get_integer`, `get_number`, `get_string`:
+  enough for a table API.
+- **Slot 214 elsewhere.** Combat Camera - Configurable does not touch it. It MinHooks game targeting
+  functions and one engine function, `APlayerCameraManager::ProcessViewRotation` (RVA `0x17d22f0`,
+  which it validates as entry `0x880` of the `RebelPlayerCameraManager` vtable at `0x76a6c58`; its
+  `viewOtherThread` counter shows the same off-game-thread camera update this doc measured). Its
+  vtable pointers are validated, never written. So it is a control-rotation writer, native side, and
+  composes with the hook. Free Combat Camera (340) standalone and AXIS (588) have no public source:
+  unknown. No other DLL camera mod is installed here, so a runtime read of slot 214 proves nothing
+  yet; the unload guard above costs nothing and goes in regardless.
+- **FOV and roll after the hook.** UE 5.5.4 `PlayerCameraManager.cpp`: `UpdateViewTarget` ->
+  `UpdateViewTargetInternal` -> `Target->CalcCamera` -> the component's `GetCameraView`, then
+  `ApplyCameraModifiers` (camera shakes; the only modifier classes reflected in this game are
+  `CinematicCameraShake` and a Perlin shake pattern) and `SetActorLocationAndRotation`. `DoUpdateCamera`
+  lerps FOV between view targets during a blend. Nothing else rewrites `POV.FOV` or `POV.Rotation.Roll`;
+  `LockedFOV` (the `fov` console command) only changes what `GetFOVAngle()` returns. So a hook-side FOV
+  or roll write reaches the render unless `RebelPlayerCameraManager` overrides these natively, which
+  reflection cannot show (it has no reflected functions). That is the one thing left for a probe build:
+  a dev flag that adds a fixed FOV delta and a roll in the hook and logs `GetFOVAngle()`.
+- **Loader proxies.** The UE4SS proxy here is `dwmapi.dll`. Free Combat Camera's standalone
+  `version.dll` or `winmm.dll` would load beside it as a second proxy, not collide with it: the note
+  above is about two injectors, not a filename clash.
 
 ## Known limits
 
