@@ -24,6 +24,7 @@
 
 #include <DynamicOutput/DynamicOutput.hpp>
 #include <Input/KeyDef.hpp>
+#include <LuaMadeSimple/LuaMadeSimple.hpp>
 #include <Mod/CppUserModBase.hpp>
 #include <Unreal/AActor.hpp>
 #include <Unreal/CoreUObject/UObject/Class.hpp>
@@ -38,6 +39,8 @@
 #include <Unreal/UObjectArray.hpp>
 #include <Unreal/UObjectGlobals.hpp>
 #include <Unreal/UnrealInitializer.hpp>
+
+#include "lua_api.hpp"
 
 using namespace RC;
 using namespace RC::Unreal;
@@ -60,6 +63,16 @@ namespace
         float fov;
     };
     constexpr size_t VIEW_BYTES = offsetof(ViewHead, fov) + sizeof(float); // stops at FOV: not the padding, not DesiredFOV
+
+    // The API snapshot (lua_api.hpp): the game's view, what was handed back, and the pivot. Hook thread, numbers only.
+    auto publish_api_view(const ViewHead& game, const ViewHead& shown, const dwsc::Vec3* pivot) -> void
+    {
+        dwapi::View g{{game.location[0], game.location[1], game.location[2]}, {game.rotation[0], game.rotation[1], game.rotation[2]}, game.fov};
+        dwapi::View s{{shown.location[0], shown.location[1], shown.location[2]}, {shown.rotation[0], shown.rotation[1], shown.rotation[2]}, shown.fov};
+        double p[3]{};
+        if (pivot) { p[0] = pivot->x; p[1] = pivot->y; p[2] = pivot->z; }
+        dwapi::publish(g, s, pivot ? p : nullptr);
+    }
 
     // Numbers only, so the hook's copy allocates nothing on a worker thread.
     struct Tuning
@@ -304,6 +317,7 @@ namespace
             return;
         }
 
+        const ViewHead game_view = view; // for the API snapshot
         dwsc::Vec3 pivot{pivot_raw[0], pivot_raw[1], pivot_raw[2]};
         dwsc::Vec3 camera{view.location[0], view.location[1], view.location[2]};
         if (!finite(pivot) || !finite(camera) || !std::isfinite(view.rotation[0]) || !std::isfinite(view.rotation[1]) ||
@@ -555,6 +569,7 @@ namespace
         g_follow.out_offset = pivot + dwsc::rotate(g_follow.out_rotation, camera - pivot) - result;
         g_follow.out_fov = fov_ok ? view.fov : NAN;
         g_follow.out_valid = true;
+        publish_api_view(game_view, (enabled || blended) ? view : game_view, &pivot);
     }
 
     struct InHook
@@ -583,6 +598,8 @@ namespace
         {
             g_follow.valid = false;
             g_follow.out_valid = false;
+            ViewHead view{};
+            if (guarded_read(desired_view, &view, VIEW_BYTES)) publish_api_view(view, view, nullptr);
             return;
         }
         if (!g_log_stats.load(std::memory_order_relaxed))
@@ -648,6 +665,7 @@ class DWSmoothwalker : public CppUserModBase
     {
         ModName = STR("DWSmoothwalker");
         ModVersion = STR("0.9.0");
+        dwapi::g_enabled = &g_enabled;
         ModDescription = STR("Frame-interpolated third-person camera");
         ModAuthors = STR("littleRabbit6");
 
@@ -665,6 +683,7 @@ class DWSmoothwalker : public CppUserModBase
     // game thread is out of m_tuner before restore(); a call already in the hook must return before unload.
     ~DWSmoothwalker() override
     {
+        dwapi::uninstall_all();
         for (auto id : m_callbacks) Hook::UnregisterCallback(id);
         if (g_vtable_entry && g_original)
         {
@@ -688,6 +707,18 @@ class DWSmoothwalker : public CppUserModBase
             if (g_in_hook.load() != 0) Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] unload: a camera update is still in the hook\n"));
         }
         m_tuner.restore();
+    }
+
+    // The Smoothwalker table into every Lua mod's state as it starts (lua_api.hpp). Fires for each Lua mod because
+    // C++ mods are started first (docs/design.md, "Checks run 2026-09-22").
+    auto on_lua_start(StringViewType mod_name, LuaMadeSimple::Lua& lua, LuaMadeSimple::Lua&, LuaMadeSimple::Lua&, LuaMadeSimple::Lua*) -> void override
+    {
+        dwapi::install(lua.get_lua_state(), to_string(mod_name), "0.9.0");
+    }
+
+    auto on_lua_stop(StringViewType, LuaMadeSimple::Lua& lua, LuaMadeSimple::Lua&, LuaMadeSimple::Lua&, LuaMadeSimple::Lua*) -> void override
+    {
+        dwapi::uninstall(lua.get_lua_state());
     }
 
     auto on_unreal_init() -> void override
@@ -1711,6 +1742,7 @@ class DWSmoothwalker : public CppUserModBase
     // Pointer reads and object array lookups only, before anything reads through a possibly-freed held pointer.
     auto on_engine_tick(UEngine* engine) -> void
     {
+        if (dwapi::g_game_thread.load(std::memory_order_relaxed) == 0) dwapi::g_game_thread.store(GetCurrentThreadId());
         check_world(engine);
         if (m_controller.object && !m_controller.alive())
         {

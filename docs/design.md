@@ -752,7 +752,28 @@ distance tweaks and Lua has no per-frame view access, so the override layers are
 no precedent to check against. One rule borrowed for them: layers are off while a mod owns the camera unless
 the owner opts in, as SmoothCam pauses its interpolators unless asked.
 
-### Rules that carry over
+### Slice 1 as built (branch `camera-api`, 2026-09-22)
+
+`src/lua_api.hpp`. `on_lua_start` puts a global `Smoothwalker` table into each Lua mod's state; `on_lua_stop` and
+the destructor replace every function in it with a pure-Lua stub answering `nil, "unloaded"` and set
+`api_version` to 0, so a `local SW = Smoothwalker` held by a consumer never points into an unloaded DLL.
+Consumers are keyed by their main `lua_State*` (from `LUA_RIDX_MAINTHREAD`), never by a string they pass.
+
+| Call | Returns |
+|---|---|
+| `Smoothwalker.api_version` | 1 (integer, only ever grows) |
+| `Smoothwalker.mod_version` | `"0.9.0"` |
+| `Smoothwalker.register()` | the calling mod's folder name; logs `API consumer '<mod>' registered` once |
+| `Smoothwalker.view()` | `{ game = {x, y, z, pitch, yaw, roll, fov}, shown = {...}, pivot = {x, y, z} or nil, age = s }`, or `nil, "no_view"` before the first player-camera update |
+| `Smoothwalker.live()` | `bool, age` (age in seconds; `math.huge` before the first update); live means age < 0.25 s |
+| `Smoothwalker.enabled()` | the mod's live switch |
+
+The hook publishes the snapshot once per player-camera update through a seqlock (`g_seq` odd while writing,
+one writer): the game's view as read, what was handed back (equal when off), the pivot, a QPC stamp. Off and
+settled, the hook still publishes game = shown, without a pivot. All slice-1 calls read atomics only, so they
+are safe from any thread, including a mod's top level and `LoopAsync`; the game-thread id is captured on the
+engine tick for the slices that will need it.
+
 
 - Every API call runs on the game thread (Lua and console both do) and writes numbers into a locked
   struct; the hook reads it. Nothing in the hook calls a UObject or UE4SS. Same discipline as `Tuning`.
