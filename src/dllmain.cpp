@@ -309,12 +309,17 @@ namespace
         const int64_t owner_expires = dwapi::g_owner_expires.load(std::memory_order_relaxed);
         const bool owned = owner_held && (owner_expires == 0 || dwapi::qpc_now() < owner_expires);
         const bool owner_keeps_layers = owned && dwapi::g_owner_keep_layers.load(std::memory_order_relaxed);
-        // The camera stops being owned. A release has already said how to come back (g_reset for a cut, the release
-        // generation for a glide), but a lease running out says nothing, and writing the follow offset that piled up
-        // while owned would pop the camera in that one frame and pop it again when the game thread later notices the
-        // expiry and sets g_reset. Every falling edge restarts the follow from the capsule here, which is what a cut
-        // does; a release("glide") keeps its crossfade, which runs off out_* and `changed`, not off the follow state.
-        if (g_follow.was_owned && !owned) g_follow.valid = false;
+        // The release generation, sampled here because the falling edge below needs it; `changed` uses this sample.
+        const auto release = dwapi::g_release_generation.load(std::memory_order_relaxed);
+        const bool release_changed = release != g_follow.seen_release;
+        // The camera stops being owned. A release("cut") has already set g_reset, and a release("glide") has bumped
+        // the generation just read, which starts the crossfade from out_*, the game's view as the owner left it. A
+        // lease running out, an uninstall or an install re-key say nothing, and writing the follow offset that piled
+        // up while owned would pop the camera in that one frame and pop it again when the game thread later notices
+        // and sets g_reset: those edges restart the follow from the capsule here, which is what a cut does. A glide
+        // is left alone, because resetting would throw away the warm follow it is meant to ease back into and the
+        // crossfade would run from nothing to nothing.
+        if (g_follow.was_owned && !owned && !release_changed) g_follow.valid = false;
         g_follow.was_owned = owned;
 
         AcquireSRWLockShared(&g_tuning_lock);
@@ -360,11 +365,10 @@ namespace
         // Settings, the toggle and mode writes crossfade; a hard cut (player or world change, a gap, a teleport) snaps.
         auto toggle = g_toggle_generation.load(std::memory_order_relaxed);
         auto position = g_position_generation.load(std::memory_order_relaxed);
-        // A release("glide") lands here too: the fade then starts from the game's view, because out_* tracked it
-        // while the camera was owned (lua_api.hpp, "authority").
-        auto release = dwapi::g_release_generation.load(std::memory_order_relaxed);
+        // A release("glide") lands here too, through the `release_changed` sampled at the top of this update: the
+        // fade then starts from the game's view, because out_* tracked it while the camera was owned (lua_api.hpp).
         bool changed = t.generation != g_follow.seen_tuning || toggle != g_follow.seen_toggle ||
-                       position != g_follow.seen_position || release != g_follow.seen_release;
+                       position != g_follow.seen_position || release_changed;
         // A shorter distance gliding in is not a wall. No wall clamp until it has landed.
         if (position != g_follow.seen_position) g_follow.nominal_hold = t.transition + 0.3;
         g_follow.seen_tuning = t.generation;
