@@ -108,6 +108,13 @@ namespace dwsc
         return {a.x * wa + b.x * wb, a.y * wa + b.y * wb, a.z * wa + b.z * wb, a.w * wa + b.w * wb};
     }
 
+    // The angle between two rotations, 0 to pi, whichever sign the quaternions carry.
+    inline double angle_between(const Quat& a, const Quat& b)
+    {
+        double dot = std::abs(a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w);
+        return 2.0 * std::acos(std::clamp(dot, 0.0, 1.0));
+    }
+
     // Catch-up strength as the lag grows: 0 constant, 1 linear, 2 smoothstep, 3 cubic ease in-out. x in [0, 1].
     inline double curve(int kind, double x)
     {

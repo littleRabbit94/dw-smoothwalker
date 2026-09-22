@@ -115,6 +115,11 @@ after the stop animation. Checked with the mod off (`enabled = 0` live): the shi
 A smoothed pivot trails the capsule (its centre horizontally, its bottom vertically, see "Pivot"): horizontal and
 vertical rates, each with a response curve over lag distance and a leash. The camera becomes `smoothed pivot + (game camera - pivot)`, so orbiting stays
 instant and only following lags. Optional rotation smoothing slerps the view and swings the arm to match.
+The rotational trail is capped at 90 degrees, pulled in along its own arc: a slerp always catches up the
+short way round, so a trail past 180 degrees ran backwards (Nexus bug report 2026-09-21: turning follow
+speed 1, a 360 spin, the camera reversed halfway). At speed 1 a fast spin now rides the cap, 90 degrees
+behind, and catches up over about a second when the turn stops. A turn past 180 degrees inside one frame is
+still ambiguous, as it is for any smoothing.
 
 - **Aiming** (`aiming_follow`, percent, default 30; not a preset key). A trail and smoothed turning behind
   the crosshair read as input lag. The camera component has no "active mode" call, but every mode has

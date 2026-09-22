@@ -437,6 +437,13 @@ namespace
             {
                 double a_r = 1.0 - std::exp(-std::max(t.rotation_rate, 0.0) * dt);
                 g_follow.rotation_smoothed = dwsc::slerp(g_follow.rotation_smoothed, rotation, a_r);
+                // A trail past 180 degrees would catch up the short way round, which is backwards: at a turning
+                // follow speed of 1 a 360 spin reversed the camera halfway (Nexus bug report, 2026-09-21). The
+                // trail is capped at 90 degrees, pulled in along the same arc, so the catch-up always runs the
+                // way the view turned. A single-frame turn past 180 degrees stays ambiguous, as for any smoothing.
+                constexpr double MAX_TRAIL = 0.5 * 3.14159265358979323846;
+                double trail = dwsc::angle_between(g_follow.rotation_smoothed, rotation);
+                if (trail > MAX_TRAIL) g_follow.rotation_smoothed = dwsc::slerp(rotation, g_follow.rotation_smoothed, MAX_TRAIL / trail);
                 dwsc::Quat shown = keep < 1.0 ? dwsc::slerp(g_follow.rotation_smoothed, rotation, 1.0 - keep) : g_follow.rotation_smoothed;
                 dwsc::Quat delta = dwsc::multiply(shown, dwsc::conjugate(rotation));
                 arm = dwsc::rotate(delta, arm);
