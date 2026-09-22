@@ -14,6 +14,8 @@ the mod on/off and cycling presets can be set in the ini for convenience.
 - Optional: Mod Setting Menu (Nexus mod 271) for the in-game settings page. Without it, edit
   `config/smoothwalker.ini`.
 
+For other mods: the camera API, docs/api.md.
+
 ## Install (players)
 
 Download from the Nexus page: https://www.nexusmods.com/thebloodofdawnwalker/mods/613

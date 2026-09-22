@@ -895,6 +895,13 @@ its lag from the capsule at its own rate. The difference is what the first updat
 game's view into the warm follow, a cut restarts the follow at the capsule; neither writes an accumulated
 offset in one frame.
 
+### Consumer docs and example
+
+The API surface above is written up for other mod authors in `docs/api.md` (threads, the full call
+reference, recipes for layers and ownership). A runnable drop-in demo lives in
+`release/example-consumer/SmoothwalkerExample/` (F9 zoom layer, F10 dutch-angle layer, F11 claim/release
+with a glide, `swexample` console command).
+
 ### Rules that carry over
 
 - Every call that hands numbers to the hook runs on the game thread (checked, `bad_thread` otherwise) and
