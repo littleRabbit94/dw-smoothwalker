@@ -16,7 +16,7 @@ the mod on/off and cycling presets can be set in the ini for convenience.
 
 ## Install (players)
 
-Download from the Nexus page: https://www.nexusmods.com/thebloodofdawnwalker/mods/TBD
+Download from the Nexus page: https://www.nexusmods.com/thebloodofdawnwalker/mods/613
 
 ## Build
 
@@ -59,7 +59,7 @@ writes `release/dist/Smoothwalker-<version>.zip` and `release/dist/Smoothwalker-
 
 Copy `release/example-preset/Template.ini` into `ue4ss/Mods/DWSmoothwalker/config/presets/` under a new name,
 change the `name` line and the values, and restart the game. Every key is commented with its range and
-default. The preset format and rules (32 keys, clamping, the 54 drop-in limit) are in `docs/design.md`,
+default. The preset format and rules (36 keys, clamping, the 54 drop-in limit) are in `docs/design.md`,
 "Presets". Switches and `aiming_follow` are not preset keys; a preset that sets them is ignored on those lines.
 
 To start from a camera you tuned in game, set the Preset picker on the Mod Menu page to a slot marked

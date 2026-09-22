@@ -4,7 +4,7 @@ Game page: https://www.nexusmods.com/thebloodofdawnwalker (game id 9719, domain
 `thebloodofdawnwalker`). Source: `src/` (DLL) and `mod/` (mod folder).
 Archive: `Build-Package.py` (version from `ModVersion` in `dllmain.cpp`).
 
-Not posted yet. Nexus strips backslashes in the Files-tab description; use forward slashes there.
+Posted: https://www.nexusmods.com/thebloodofdawnwalker/mods/613 (mod 613). Nexus strips backslashes in the Files-tab description; use forward slashes there.
 
 Reference page: FreeCam - UE4SS (mod 350),
 category Utilities, tags Utilities for Modders, Utilities for Players, Camera, Quality of Life,
@@ -44,7 +44,7 @@ Optional file:
 | File | `dist/Smoothwalker-Example-Preset-0.9.0.zip`, 1,230 bytes, built 2026-09-21 |
 | Description | `One preset, Over the Shoulder: a closer camera further out over the shoulder, with a quicker follow to match. I commented every key with its range and default, so it doubles as a template for your own. Extract into Dawnwalker/Binaries/Win64 like the main file; it lands in ue4ss/Mods/DWSmoothwalker/config/presets. Restart the game, then pick it from the Mod Menu or with preset in the ini. Needs the main file.` |
 
-Source: `example-preset/`. The build checks it holds a name and all 32 preset keys, each once, inside
+Source: `example-preset/`. The build checks it holds a name and all 36 preset keys, each once, inside
 the Mod Menu range and on its step.
 
 Contents: `dlls/main.dll` (no PDB), `mod_settings.ini`, `config/smoothwalker.ini`, empty
