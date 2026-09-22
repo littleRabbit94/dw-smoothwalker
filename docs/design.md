@@ -876,6 +876,25 @@ it. Three things end a claim besides `release`: the lease, the consumer stopping
 `uninstall_all` runs on unload), and the consumer's Lua state being re-keyed by `install` without a matching
 `on_lua_stop` (a hot reload or a script error at load), all of them a cut.
 
+**Tested live 2026-09-22** from UEBridge's state, walking in a circle, Cinematic preset (follow lag about 95 cm):
+
+| Call | Result |
+|---|---|
+| `claim()` walking | lag 0 the next update, `owner()` = `UEBridge`, second `claim()` -> `already_yours` |
+| `layer_set{rotation = {roll = 10}}` while owned | accepted, camera roll stays 0 (layers off while owned) |
+| `release("cut")`, `claim{keep_layers = true}` | roll 10 lands |
+| `release("cut")` twice | `true`, then `not_owner`; `owner()` nil |
+| `claim()`, `release("glide")`, lag sampled every 250 ms | 0 -> 48.9 -> 86.7 -> 101.6 over 0.75 s, then the follow's own 70-130 |
+| `claim()`, `release("cut")`, same sampling | 70.2 at 0.25 s, 86.1, 97.2: the follow restarts from the capsule and rebuilds its lag; no pop either way |
+| `claim{ttl = 2}`, sampled every 500 ms | lag 0 and `owner()` = `UEBridge` through 1.5 s; at 2.0 s `owner()` nil, lag 0; 95.6 at 2.5 s |
+| `claim()` and `release("cut")` from `LoopAsync` | both `bad_thread`; `owner()` answered there |
+| `release("sideways")`, `release(42)` | `bad_mode` both |
+
+The two release modes read the same at 250 ms sampling while walking, because after a cut the follow rebuilds
+its lag from the capsule at its own rate. The difference is what the first updates do: a glide eases from the
+game's view into the warm follow, a cut restarts the follow at the capsule; neither writes an accumulated
+offset in one frame.
+
 ### Rules that carry over
 
 - Every call that hands numbers to the hook runs on the game thread (checked, `bad_thread` otherwise) and
