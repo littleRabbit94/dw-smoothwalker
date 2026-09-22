@@ -501,11 +501,13 @@ namespace dwapi
     {
         g_owner_state = nullptr;
         g_owner_mod.clear();
-        g_owner_slot.store(-1, std::memory_order_release);
-        g_owner_keep_layers.store(false, std::memory_order_relaxed);
-        g_owner_expires.store(0, std::memory_order_relaxed);
+        // How to come back goes out first: the hook's acquire-load of the slot then implies this is visible, so an
+        // update that sees the claim dropped always sees the glide too and never takes the falling edge's cut.
         if (glide) g_release_generation.fetch_add(1, std::memory_order_relaxed);
         else if (g_reset) g_reset->store(true, std::memory_order_relaxed);
+        g_owner_keep_layers.store(false, std::memory_order_relaxed);
+        g_owner_expires.store(0, std::memory_order_relaxed);
+        g_owner_slot.store(-1, std::memory_order_release);
     }
 
     // Under g_mutex. A lease that ran out is nobody's claim: the identity is dropped here the first time the game
