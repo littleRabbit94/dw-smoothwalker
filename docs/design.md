@@ -822,6 +822,42 @@ A stopping consumer (`on_lua_stop`) has its layer faded out and its slot freed.
 Testing rule from the lease run: the bridge's round trip is several seconds, so a short `ttl` cannot be read
 by hand; record with a 500 ms `LoopAsync` reading `view()` (thread-agnostic, no object scan) instead.
 
+### Slice 3 as built (branch `camera-api`, 2026-09-22)
+
+Camera authority, `api_version` 3. One owner at a time, first come, no priorities, keyed by the consumer's main
+`lua_State*` like the layers. The owner's identity (that state and its mod name) lives on the game-thread side
+under `g_mutex`; the hook only ever sees two atomics, `g_owner_slot` (the owner's index in a one-wide owner
+table, -1 for nobody) and `g_owner_keep_layers`.
+
+| Call | Returns |
+|---|---|
+| `Smoothwalker.claim{ keep_layers = bool }` | `true`, or `nil` with `bad_thread`, `no_game_thread`, `unknown_state`, `already_yours` (this consumer already owns it), `taken` (another does), `must_keep` (Smoothwalker's own crossfade is mid-flight). The argument table is optional; `keep_layers` defaults to false. |
+| `Smoothwalker.release(mode)` | `mode` is `"cut"` (the default when absent) or `"glide"`. `true`, or `nil` with `bad_thread`, `no_game_thread`, `unknown_state`, `not_owner`, `bad_mode`. |
+| `Smoothwalker.owner()` | the owning mod's name, or `nil`. Reads under `g_mutex` only, so any thread may call it. |
+
+`claim` and `release` write state the hook reads, so they are game thread only, like the layer writers; `owner()`
+is thread-agnostic.
+
+In the hook, while the camera is owned: the follow math runs exactly as it always does, so the pivot smoothing,
+the rotation smoothing, the crouch hold and the nominal distance stay warm, and then the view is put back to
+byte-exactly what the game built and nothing is written. `g_follow.out_offset`, `out_rotation` and `out_fov`
+therefore record a zero offset, an identity rotation and the game's FOV every update, which is what a later
+glide starts from. No crossfade of Smoothwalker's own runs while owned (the `cut || owned` arm), so a settings
+or mode write landing mid-claim is consumed silently rather than fighting the owner. Layers
+(`apply_layers`) are skipped while owned unless the owner claimed with `keep_layers = true`; with them kept, the
+layered view is written and `view().shown` is that layered view, otherwise `shown` equals `game`.
+
+`release("cut")` sets `g_reset`, the same flag a teleport or a player swap sets, so the next update snaps the
+follow to the capsule. `release("glide")` bumps `g_release_generation`, a new atomic folded into the hook's
+`changed` alongside `t.generation`, `g_toggle_generation` and `g_position_generation` (with a `seen_release`
+field on `g_follow`): the next update sees `changed && g_follow.out_valid` and starts the existing crossfade
+from `from_offset`/`from_rotation`/`from_fov` copied from `out_*`, which is the game's view the owner left on
+screen, easing to the follow result over `position_transition`. With `position_transition` at 0 that arm is
+skipped and the glide degrades to a cut; that is the user's own setting and is left as is. `must_keep` reads
+`g_blending`, published by the hook at the end of every update from `g_follow.blending`, and is only trusted
+while the snapshot is live (under 250 ms old), so a pause or a cutscene mid-fade cannot pin a claim out forever.
+A consumer that stops while owning releases with a cut (`uninstall`, which `uninstall_all` runs on unload).
+
 ### Rules that carry over
 
 - Every call that hands numbers to the hook runs on the game thread (checked, `bad_thread` otherwise) and

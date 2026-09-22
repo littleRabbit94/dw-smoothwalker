@@ -196,7 +196,7 @@ namespace
         dwsc::Vec3 from_offset{};
         dwsc::Quat from_rotation{};
         float from_fov = NAN;
-        uint64_t seen_tuning = 0, seen_toggle = 0, seen_position = 0;
+        uint64_t seen_tuning = 0, seen_toggle = 0, seen_position = 0, seen_release = 0;
     };
     Follow g_follow;
     LARGE_INTEGER g_qpc_frequency{};
@@ -244,6 +244,7 @@ namespace
         g_follow.valid = false;
         g_follow.out_valid = false;
         g_follow.blending = false;
+        dwapi::g_blending.store(false, std::memory_order_relaxed);
     }
 
     // Runs with enabled false too, while the crossfade back to the game's own view is under way.
@@ -340,12 +341,17 @@ namespace
         // Settings, the toggle and mode writes crossfade; a hard cut (player or world change, a gap, a teleport) snaps.
         auto toggle = g_toggle_generation.load(std::memory_order_relaxed);
         auto position = g_position_generation.load(std::memory_order_relaxed);
-        bool changed = t.generation != g_follow.seen_tuning || toggle != g_follow.seen_toggle || position != g_follow.seen_position;
+        // A release("glide") lands here too: the fade then starts from the game's view, because out_* tracked it
+        // while the camera was owned (lua_api.hpp, "authority").
+        auto release = dwapi::g_release_generation.load(std::memory_order_relaxed);
+        bool changed = t.generation != g_follow.seen_tuning || toggle != g_follow.seen_toggle ||
+                       position != g_follow.seen_position || release != g_follow.seen_release;
         // A shorter distance gliding in is not a wall. No wall clamp until it has landed.
         if (position != g_follow.seen_position) g_follow.nominal_hold = t.transition + 0.3;
         g_follow.seen_tuning = t.generation;
         g_follow.seen_toggle = toggle;
         g_follow.seen_position = position;
+        g_follow.seen_release = release;
         bool cut = g_reset.exchange(false, std::memory_order_relaxed) || seconds_between(g_follow.last_call, now) > t.reset_gap ||
                    !(dwsc::length(pivot - g_follow.pivot_last) <= t.reset_distance);
         g_follow.last_call = now;
@@ -493,9 +499,21 @@ namespace
             }
         }
 
+        // Another mod owns the camera (lua_api.hpp, "authority"). The follow above ran and its state stays warm,
+        // but nothing of it is shown: the view goes back to exactly what the game built, so out_* below record a
+        // zero offset, an identity rotation and the game's FOV and a later release("glide") starts from there.
+        // No crossfade runs while owned either; the release decides how the camera comes back.
+        const bool owned = dwapi::g_owner_slot.load(std::memory_order_acquire) >= 0;
+        if (owned)
+        {
+            view = game_view;
+            result = camera;
+            result_rotation = rotation;
+        }
+
         // A new lag limit, rotation smoothing or FOV would otherwise jump when it lands mid-motion.
         bool fov_ok = std::isfinite(view.fov) && view.fov > 1.0f && view.fov < 179.0f;
-        if (cut)
+        if (cut || owned)
         {
             g_follow.blending = false;
         }
@@ -537,7 +555,8 @@ namespace
             }
         }
 
-        if (enabled || blended)
+        bool apply_result = (enabled && !owned) || blended;
+        if (apply_result)
         {
             if (!finite(result) || !std::isfinite(view.rotation[0]) || !std::isfinite(view.rotation[1]) || !std::isfinite(view.rotation[2]))
             {
@@ -548,9 +567,12 @@ namespace
             view.location[1] = result.y;
             view.location[2] = result.z;
         }
-        // Other mods' layers (lua_api.hpp), on top of whatever this mod did, the O switch included.
-        bool layered = dwapi::apply_layers(view.location, view.rotation, view.fov, dt);
-        if (enabled || blended || layered)
+        // Other mods' layers (lua_api.hpp), on top of whatever this mod did, the O switch included. While another
+        // mod owns the camera they are off too, unless that owner asked to keep them.
+        bool layered = (!owned || dwapi::g_owner_keep_layers.load(std::memory_order_relaxed)) &&
+                       dwapi::apply_layers(view.location, view.rotation, view.fov, dt);
+        bool wrote = apply_result || layered;
+        if (wrote)
         {
             if (!guarded_write(desired_view, &view, VIEW_BYTES))
             {
@@ -564,9 +586,11 @@ namespace
         }
         g_follow.out_rotation = dwsc::multiply(result_rotation, dwsc::conjugate(rotation));
         g_follow.out_offset = pivot + dwsc::rotate(g_follow.out_rotation, camera - pivot) - result;
-        g_follow.out_fov = fov_ok ? view.fov : NAN;
+        // Owned: the game's FOV, not a layer's, so the glide back starts from the view the owner left on screen.
+        g_follow.out_fov = fov_ok ? (owned ? game_view.fov : view.fov) : NAN;
         g_follow.out_valid = true;
-        publish_api_view(game_view, (enabled || blended || layered) ? view : game_view, &pivot);
+        dwapi::g_blending.store(g_follow.blending, std::memory_order_relaxed);
+        publish_api_view(game_view, wrote ? view : game_view, &pivot);
     }
 
     struct InHook
@@ -596,6 +620,7 @@ namespace
         {
             g_follow.valid = false;
             g_follow.out_valid = false;
+            dwapi::g_blending.store(false, std::memory_order_relaxed);
             ViewHead view{};
             if (guarded_read(desired_view, &view, VIEW_BYTES)) publish_api_view(view, view, nullptr);
             return;
@@ -664,6 +689,7 @@ class DWSmoothwalker : public CppUserModBase
         ModName = STR("DWSmoothwalker");
         ModVersion = STR("0.9.0");
         dwapi::g_enabled = &g_enabled;
+        dwapi::g_reset = &g_reset; // release("cut") snaps through the same flag a teleport sets
         ModDescription = STR("Frame-interpolated third-person camera");
         ModAuthors = STR("littleRabbit6");
 
