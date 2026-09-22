@@ -71,6 +71,7 @@ namespace
         double rotation_rate, reset_distance, reset_gap;
         double transition;   // position_transition: the crossfade after a change
         double aiming_keep;  // aiming_follow as a share: the trail and turning smoothing kept while aiming
+        double probe_fov, probe_roll; // degrees added to FOV and roll after the follow, 0 off (probe)
         uint64_t generation; // bumped by a publish that changed a value
     };
 
@@ -78,7 +79,7 @@ namespace
     {
         return {s.follow_rate_h, s.follow_rate_v, s.curve_h, s.curve_v, s.catchup_distance, s.min_rate_scale, s.max_lag_h, s.max_lag_v,
                 s.soft_leash, s.rotation_smoothing, s.wall_clamp, s.rotation_rate, s.reset_distance, s.reset_gap, s.position_transition,
-                s.aiming_follow / 100.0, 0};
+                s.aiming_follow / 100.0, s.probe_fov, s.probe_roll, 0};
     }
 
     // Every field but generation.
@@ -88,7 +89,8 @@ namespace
                a.catchup_distance == b.catchup_distance && a.min_rate_scale == b.min_rate_scale && a.max_lag_h == b.max_lag_h &&
                a.max_lag_v == b.max_lag_v && a.soft_leash == b.soft_leash && a.rotation_smoothing == b.rotation_smoothing &&
                a.wall_clamp == b.wall_clamp && a.rotation_rate == b.rotation_rate && a.reset_distance == b.reset_distance &&
-               a.reset_gap == b.reset_gap && a.transition == b.transition && a.aiming_keep == b.aiming_keep;
+               a.reset_gap == b.reset_gap && a.transition == b.transition && a.aiming_keep == b.aiming_keep &&
+               a.probe_fov == b.probe_fov && a.probe_roll == b.probe_roll;
     }
 
     using GetCameraViewFn = void(__fastcall*)(void* self, float delta_time, void* desired_view);
@@ -533,6 +535,12 @@ namespace
             view.location[0] = result.x;
             view.location[1] = result.y;
             view.location[2] = result.z;
+            // Probe: a hook-side FOV and roll write, checked from the game thread with GetFOVAngle / GetCameraRotation.
+            if (enabled && (t.probe_fov != 0.0 || t.probe_roll != 0.0))
+            {
+                if (fov_ok) view.fov = std::clamp(view.fov + static_cast<float>(t.probe_fov), 5.0f, 170.0f);
+                view.rotation[2] += t.probe_roll;
+            }
             if (!guarded_write(desired_view, &view, VIEW_BYTES))
             {
                 lose_view();
@@ -663,7 +671,15 @@ class DWSmoothwalker : public CppUserModBase
             DWORD prev{};
             if (VirtualProtect(g_vtable_entry, sizeof(*g_vtable_entry), PAGE_READWRITE, &prev))
             {
-                *g_vtable_entry = reinterpret_cast<uintptr_t*>(g_original);
+                // Only this mod's own entry is put back: another mod hooked after us would otherwise be unhooked too.
+                if (*g_vtable_entry == reinterpret_cast<uintptr_t*>(&get_camera_view_hook))
+                {
+                    *g_vtable_entry = reinterpret_cast<uintptr_t*>(g_original);
+                }
+                else
+                {
+                    Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] unload: slot {} no longer holds this mod's hook, left as is\n"), GET_CAMERA_VIEW_SLOT);
+                }
                 VirtualProtect(g_vtable_entry, sizeof(*g_vtable_entry), prev, &prev);
             }
             // A worker may have read the old entry just before the restore and not entered the hook yet.

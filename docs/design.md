@@ -763,8 +763,12 @@ source at `97b7e501`, and the public source of Combat Camera - Configurable 3.1.
   lerps FOV between view targets during a blend. Nothing else rewrites `POV.FOV` or `POV.Rotation.Roll`;
   `LockedFOV` (the `fov` console command) only changes what `GetFOVAngle()` returns. So a hook-side FOV
   or roll write reaches the render unless `RebelPlayerCameraManager` overrides these natively, which
-  reflection cannot show (it has no reflected functions). That is the one thing left for a probe build:
-  a dev flag that adds a fixed FOV delta and a roll in the hook and logs `GetFOVAngle()`.
+  reflection cannot show (it has no reflected functions). **Measured with a probe build the same day:**
+  `probe_fov = 20`, `probe_roll = 10` (two file-only keys, off by default, added to the view after the
+  follow) in the Cinematic preset with the LongRange mode at FOV 95: `PlayerCameraManager:GetFOVAngle()`
+  read **115** and `GetCameraRotation().Roll` read **10**, and the picture was visibly wider and tilted.
+  `LockedFOV` was unset. So the hook's FOV and roll are what the game renders; nothing downstream
+  rewrites them. A per-frame FOV or roll layer is buildable.
 - **Loader proxies.** The UE4SS proxy here is `dwmapi.dll`. Free Combat Camera's standalone
   `version.dll` or `winmm.dll` would load beside it as a second proxy, not collide with it: the note
   above is about two injectors, not a filename clash.
