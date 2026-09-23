@@ -82,10 +82,11 @@ constant 96 below the centre, so nothing else changes. Horizontal follow, the ar
 cut test still use the centre. Measured live 2026-09-21 at rest: root 16231.9 standing / 16177.9 crouched,
 the camera component 80 above the root in both, the game pivot root + 45 in both.
 
-`log_trace = 1` keeps the last 240 frames of the vertical follow (dt, root Z, half height, feet Z, smoothed
-Z, game camera Z, output Z, shown lag, cut) in a ring and writes them to the log 90 frames after every half
-height change, so a crouch or stand sits in the middle of the dump. It exists because sampling the
-transition over the Lua bridge at 50 ms crashed the game (see the toolkit's bridge notes).
+`log_trace = 1` kept the last 240 frames of the vertical follow (dt, root Z, half height, feet Z, smoothed
+Z, game camera Z, output Z, shown lag, cut) in a ring and wrote them to the log 90 frames after every half
+height change, so a crouch or stand sat in the middle of the dump. It existed because sampling the
+transition over the Lua bridge at 50 ms crashed the game (see the toolkit's bridge notes). Removed in
+0.10.0; the trace code is at commit `9e528f2` and earlier.
 
 Verified 2026-09-21 with the trace, 18 dumps over repeated crouches and stands at rest: on the change frame
 the root moves 54, the feet and the smoothed Z do not move, and the output Z equals the game camera Z to
@@ -103,7 +104,7 @@ settled; `crouch_smoothed` trails it at `follow_rate_v` with the curve, and the 
 scaled by the aiming factor, lifts the shown pivot (holds the camera up in a crouch, down in a stand).
 `crouch_drop` stops updating 0.6 s in, after the game's easing, so a later pitch change cannot leak into it;
 the hold then decays to nothing and the episode ends. A stand before the crouch has settled folds the running
-hold into the new episode, so the output stays continuous. A cut clears it. The trace has a `hold` column.
+hold into the new episode, so the output stays continuous. A cut clears it. The trace had a `hold` column.
 Traced the same day: the game's camera starts down about 130 ms after the capsule change and is 90 % down
 by 290 ms, moving or not; with the hold the output reaches those marks at about 180 and 450 ms, hold peak
 21 cm. What remains is the game's: a crouch pressed while the character is still coming to a stop shrinks
@@ -1111,6 +1112,31 @@ Switched off, `RemoveFromParent` and the references go; switched on again, a new
 - **Not run in game yet.** The widget calls follow the probe; the styling, the slot placement and the text
   refresh are checked against the 5.5.4 source only.
 
+## Logging
+
+Four levels since 0.10.0. `LogLevel` only picks the UE4SS console color (`DynamicOutput/OutputDevice.hpp`:
+Normal none, Verbose cyan, Warning yellow, Error red); `UE4SS.log` writes every level the same, so an error
+line says what stopped in its own words ("mod inactive", "smoothing inactive").
+
+- **Normal**, the default log: one load line (version, on or off, saved slots, presets from the folder),
+  `GetCameraView hooked`, `API consumer '{}' registered`, and changes the player made: the toggle, shoulder
+  swap, debug overlay key, a saved or loaded preset, a key ignored, settings applied, missing ini keys added,
+  pending settings applied. The `log_stats` report is Normal too, but opt-in.
+- **Warning**: something is off or falls back, the mod still runs. A missing property with a fallback, a
+  failed write, a skipped preset, banners or the overlay off.
+- **Error**: the mod or the follow cannot work. Camera class defaults missing, slot 214 not overridden, a
+  failed `VirtualProtect`, `RelativeLocation` or the `ComponentToWorld` translation not found, the UE4SS
+  `EngineTick` hook off.
+- **Verbose**, only with `log_verbose = 1` (ini only): player discovery, the controller found, not found yet
+  and gone lines, `following`, the translation offset, `Mod Menu open`, the presets-folder lines, the camera
+  mode layout, `Base_LongRange`, `camera position applied` with its duration, a mode loaded late, the debug
+  overlay shown, and combat and traversal camera on and off. The flag is `dwsc::g_log_verbose`
+  (`config.hpp`), published with the other settings. At startup it is read from `smoothwalker.ini` before
+  `load_presets_locked()`, which runs ahead of the full settings load and logs presets-folder lines.
+
+The diagnostic switches are `log_stats` (Mod Menu page: per-frame hook cost, mean lag and wall clamp share
+every 5 s), `log_verbose` (ini only) and `debug_overlay` with `debug_key` (see "Debug overlay").
+
 ## Known limits
 
 - **One game build.** The hook needs `GetCameraView` at vtable slot 214 as on build 25232147; when slot 214
@@ -1243,3 +1269,7 @@ its own function (`follow_rate`), and the mode tuner keeps the untracked camera 
 0.10.0 also carries what landed after the 0.9.0 release without a version bump: the camera API (docs/api.md),
 `combat_follow` / `combat_rotation`, `traversal_follow` / `traversal_rotation`, and missing ini keys added at
 startup. Not yet tested in game.
+
+Logging: `log_trace` removed; `log_verbose` added (ini only). The default log keeps the load line, the
+player's own changes, warnings and errors; the rest moved behind `log_verbose`. Lines use the UE4SS log
+levels for color: Error for what stops the mod, Verbose for the gated detail. See "Logging".

@@ -128,7 +128,6 @@ namespace
     std::atomic<uint64_t> g_toggle_generation{0};   // toggle key
     std::atomic<uint64_t> g_position_generation{0}; // mode writes; their FOV lands on the next camera update
     std::atomic<bool> g_log_stats{false};
-    std::atomic<bool> g_log_trace{false};
     std::atomic<bool> g_aiming{false}; // an aiming camera mode is blending in or active
     std::atomic<bool> g_combat{false}; // a combat camera mode is blending in or active
     std::atomic<bool> g_traversal{false}; // a traversal camera mode is blending in or active
@@ -299,55 +298,6 @@ namespace
         publish_debug_idle();
     }
 
-    // Runs with enabled false too, while the crossfade back to the game's own view is under way.
-    // A per-frame trace of the vertical follow, kept in a ring and written to the log 90 frames after the capsule
-    // half height changes (a crouch or a stand), so the transition sits in the middle of it. log_trace = 1. Hook
-    // state, game thread only.
-    struct TraceFrame
-    {
-        double dt, root_z, half_height, feet_z, smoothed_z, camera_z, result_z, shown_v, hold;
-        bool cut;
-    };
-    struct Trace
-    {
-        static constexpr int SIZE = 240;
-        TraceFrame frames[SIZE]{};
-        int next = 0, count = 0;
-        double last_half_height = NAN;
-        int countdown = -1; // frames until the dump; -1 idle
-        uint64_t dumps = 0;
-
-        auto push(const TraceFrame& f) -> void
-        {
-            frames[next] = f;
-            next = (next + 1) % SIZE;
-            if (count < SIZE) ++count;
-            if (countdown < 0 && std::isfinite(last_half_height) && std::isfinite(f.half_height) && f.half_height != last_half_height)
-            {
-                countdown = 90;
-            }
-            last_half_height = f.half_height;
-            if (countdown < 0) return;
-            if (--countdown >= 0) return;
-            dump();
-        }
-
-        auto dump() -> void
-        {
-            ++dumps;
-            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] trace {}: {} frames; dt_ms root_z half feet_z smoothed_z camera_z result_z shown_v hold\n"),
-                                           dumps, count);
-            for (int i = 0; i < count; ++i)
-            {
-                const auto& f = frames[(next - count + i + SIZE) % SIZE];
-                Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] trace {} {:3}: {:6.2f} {:9.2f} {:5.1f} {:9.2f} {:9.2f} {:9.2f} {:9.2f} {:6.2f} {:6.2f}{}\n"),
-                                               dumps, i, f.dt * 1000.0, f.root_z, f.half_height, f.feet_z, f.smoothed_z, f.camera_z,
-                                               f.result_z, f.shown_v, f.hold, f.cut ? STR(" cut") : STR(""));
-            }
-        }
-    };
-    Trace g_trace;
-
     auto update_view(void* desired_view, float delta_time, bool enabled) -> void
     {
         // Ownership is sampled once, first, and that one sample is used for the whole update. A release runs on the
@@ -443,7 +393,6 @@ namespace
 
         dwsc::Vec3 result = camera;
         dwsc::Quat result_rotation = rotation;
-        double trace_shown_v = 0.0, trace_hold = 0.0;
         if (!enabled)
         {
             g_follow.valid = false; // switched back on, the follow restarts from the capsule
@@ -570,9 +519,7 @@ namespace
                 if (g_follow.crouch_elapsed > 0.6 && std::abs(hold) < 0.1) g_follow.crouch_base = NAN;
             }
             double shown_hold = std::copysign(leash(std::abs(hold), t.max_lag_v, t.soft_leash), hold) * keep_pos;
-            trace_hold = shown_hold;
             dwsc::Vec3 shown_pivot{pivot.x - lag_hx * scale_h, pivot.y - lag_hy * scale_h, pivot.z - shown_v + shown_hold};
-            trace_shown_v = shown_v;
 
             // The arm swings with the smoothed rotation so the camera still orbits the pivot.
             dwsc::Vec3 arm = camera - pivot;
@@ -703,10 +650,6 @@ namespace
                 return;
             }
         }
-        if (g_log_trace.load(std::memory_order_relaxed))
-        {
-            g_trace.push({dt, pivot.z, static_cast<double>(half_height), feet_z, g_follow.pivot_smoothed.z, camera.z, result.z, trace_shown_v, trace_hold, cut});
-        }
         g_follow.out_rotation = dwsc::multiply(result_rotation, dwsc::conjugate(rotation));
         g_follow.out_offset = pivot + dwsc::rotate(g_follow.out_rotation, camera - pivot) - result;
         // Owned: the game's FOV, not a layer's, so the glide back starts from the view the owner left on screen.
@@ -824,13 +767,22 @@ class DWSmoothwalker : public CppUserModBase
 
         QueryPerformanceFrequency(&g_qpc_frequency);
         std::lock_guard guard(m_file_mutex);
+        // log_verbose is read once here, ahead of load_presets_locked(), so its per-preset lines are gated from
+        // the start; reload_settings_locked(true) below re-derives the same value from the full parse.
+        if (auto content = dwsc::read_file(SETTINGS_PATH))
+        {
+            auto numbers = dwsc::parse_numbers(*content);
+            if (auto found = numbers.find("log_verbose"); found != numbers.end()) dwsc::g_log_verbose.store(found->second != 0.0);
+        }
         load_presets_locked();
         reload_settings_locked(true);
         add_missing_keys_locked();
         // Once, without the camera_live() gate: no Mod Menu page can be open this early (docs/design.md, "Startup
         // flush"). Fixes a preset id the regenerated manifest may not list yet, before the page can fail on it.
         if (m_flush_pending.load()) flush_locked(std::chrono::steady_clock::now());
-        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] v{} loaded, {}\n"), ModVersion, g_enabled.load() ? STR("on") : STR("off"));
+        auto s = [](size_t n) { return n == 1 ? STR("") : STR("s"); };
+        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] v{} loaded, {}, {} saved slot{}, {} preset{} from the presets folder\n"), ModVersion,
+                                       g_enabled.load() ? STR("on") : STR("off"), m_loaded_slots, s(m_loaded_slots), m_loaded_dropins, s(m_loaded_dropins));
     }
 
     // UE4SS frees the DLL right after this (hot reload). UnregisterCallback waits for running callbacks, so the
@@ -921,10 +873,13 @@ class DWSmoothwalker : public CppUserModBase
         bool engine_tick =
                 hooks.bHookEngineTick && add(Hook::RegisterEngineTickPostCallback([this](auto&, UEngine* engine, float, bool) { on_engine_tick(engine); }, options));
         auto state = [](bool on) { return on ? STR("on") : STR("off"); };
-        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] player discovery: new-object callback {}, BeginPlay {}, EndPlay {}, LoadMap {}; engine tick "
-                                           "checks world and liveness, FindFirstOf fallback from 2 s backing off to 60 s without a controller\n"),
-                                       state(new_object), state(begin_play), state(end_play), state(load_map));
-        if (!engine_tick) Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] UE4SS EngineTick hook is off: the camera cannot find the player\n"));
+        if (dwsc::g_log_verbose.load(std::memory_order_relaxed))
+        {
+            Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] player discovery: new-object callback {}, BeginPlay {}, EndPlay {}, LoadMap {}; engine tick "
+                                               "checks world and liveness, FindFirstOf fallback from 2 s backing off to 60 s without a controller\n"),
+                                           state(new_object), state(begin_play), state(end_play), state(load_map));
+        }
+        if (!engine_tick) Output::send<LogLevel::Error>(STR("[DWSmoothwalker] UE4SS EngineTick hook is off: the camera cannot find the player\n"));
 
         bind(m_toggle_key, STR("toggle_key"), [this]() {
             std::lock_guard guard(m_file_mutex);
@@ -1018,6 +973,7 @@ class DWSmoothwalker : public CppUserModBase
     bool m_menu_logged = false;
     bool m_custom_pinned = false;                 // Custom was picked: shown until a preset is loaded or a slot adopted
     std::vector<dwsc::Preset> m_presets;          // built-ins, slots, drop-ins, in cycle order; scanned once per session
+    size_t m_loaded_slots = 0, m_loaded_dropins = 0; // load_presets_locked()'s counts, for the constructor's load line
     std::string m_pending_file;                   // content last written to smoothwalker.pending; empty when none
     std::atomic<bool> m_flush_pending{false};     // live settings differ from m_baseline
     bool m_flush_failing = false;                 // a write-back failed; warned once until one succeeds
@@ -1223,7 +1179,7 @@ class DWSmoothwalker : public CppUserModBase
         }
         ReleaseSRWLockExclusive(&g_tuning_lock);
         g_log_stats.store(m_settings.log_stats);
-        g_log_trace.store(m_settings.log_trace);
+        dwsc::g_log_verbose.store(m_settings.log_verbose);
         m_show_banner.store(m_settings.show_banner);
         m_debug_overlay.store(m_settings.debug_overlay);
         {
@@ -1270,10 +1226,10 @@ class DWSmoothwalker : public CppUserModBase
         // off: no per-tick GetState calls either
         auto state = camera && g_enabled.load() ? m_tuner.mode_state(camera) : dwsc::ModeState{};
         g_aiming.store(state.aiming);
-        if (state.combat != g_combat.exchange(state.combat))
-            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] combat camera {}\n"), state.combat ? STR("on") : STR("off"));
-        if (state.traversal != g_traversal.exchange(state.traversal))
-            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] traversal camera {}\n"), state.traversal ? STR("on") : STR("off"));
+        if (state.combat != g_combat.exchange(state.combat) && dwsc::g_log_verbose.load(std::memory_order_relaxed))
+            Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] combat camera {}\n"), state.combat ? STR("on") : STR("off"));
+        if (state.traversal != g_traversal.exchange(state.traversal) && dwsc::g_log_verbose.load(std::memory_order_relaxed))
+            Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] traversal camera {}\n"), state.traversal ? STR("on") : STR("off"));
         if (!camera) return;
         auto generation = m_position_generation.load();
         if (generation == m_position_applied_generation) return;
@@ -1534,14 +1490,22 @@ class DWSmoothwalker : public CppUserModBase
                                             dropins.size());
             dropins.clear();
         }
-        for (auto& p : dropins)
+        bool verbose = dwsc::g_log_verbose.load(std::memory_order_relaxed);
+        if (verbose)
         {
-            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] preset {} from the presets folder: {}\n"), p.id, dwsc::to_wide(p.name));
+            for (auto& p : dropins)
+            {
+                Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] preset {} from the presets folder: {}\n"), p.id, dwsc::to_wide(p.name));
+            }
         }
         size_t slots = m_presets.size() - dwsc::builtin_presets().size();
         m_presets.insert(m_presets.end(), std::make_move_iterator(dropins.begin()), std::make_move_iterator(dropins.end()));
-        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] presets: {} saved slots, {} from the presets folder\n"), slots,
-                                       m_presets.size() - slots - dwsc::builtin_presets().size());
+        m_loaded_slots = slots;
+        m_loaded_dropins = m_presets.size() - slots - dwsc::builtin_presets().size();
+        if (verbose)
+        {
+            Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] presets: {} saved slots, {} from the presets folder\n"), m_loaded_slots, m_loaded_dropins);
+        }
     }
 
     // The Dawnwalker Mod Menu (Nexus 271) creates its host as a plain CommonActivatableWidget (main.lua, library:Create
@@ -1571,7 +1535,8 @@ class DWSmoothwalker : public CppUserModBase
         if (m_menu_host && !m_menu_logged)
         {
             m_menu_logged = true;
-            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] Mod Menu open: {}\n"), m_menu_host->GetFullName());
+            if (dwsc::g_log_verbose.load(std::memory_order_relaxed))
+                Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] Mod Menu open: {}\n"), m_menu_host->GetFullName());
         }
         return m_menu_host != nullptr;
     }
@@ -1836,14 +1801,14 @@ class DWSmoothwalker : public CppUserModBase
         auto* rebel = UObjectGlobals::StaticFindObject<UObject*>(nullptr, nullptr, STR("/Script/RebelCamera.Default__RebelCameraComponent"));
         if (!camera || !rebel)
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] camera class defaults not found, mod inactive\n"));
+            Output::send<LogLevel::Error>(STR("[DWSmoothwalker] camera class defaults not found, mod inactive\n"));
             return false;
         }
         auto** base = *reinterpret_cast<uintptr_t***>(camera);
         auto** vtable = *reinterpret_cast<uintptr_t***>(rebel);
         if (base[GET_CAMERA_VIEW_SLOT] == vtable[GET_CAMERA_VIEW_SLOT])
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] slot {} not overridden: unsupported game build, mod inactive\n"), GET_CAMERA_VIEW_SLOT);
+            Output::send<LogLevel::Error>(STR("[DWSmoothwalker] slot {} not overridden: unsupported game build, mod inactive\n"), GET_CAMERA_VIEW_SLOT);
             return false;
         }
 
@@ -1851,7 +1816,7 @@ class DWSmoothwalker : public CppUserModBase
         DWORD prev{};
         if (!VirtualProtect(entry, sizeof(*entry), PAGE_READWRITE, &prev))
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] vtable protect failed, mod inactive\n"));
+            Output::send<LogLevel::Error>(STR("[DWSmoothwalker] vtable protect failed, mod inactive\n"));
             return false;
         }
         g_original = reinterpret_cast<GetCameraViewFn>(*entry);
@@ -1909,7 +1874,7 @@ class DWSmoothwalker : public CppUserModBase
         forget_player();
         m_controller = controller;
         m_player_known.store(true);
-        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] player controller found\n"));
+        if (dwsc::g_log_verbose.load(std::memory_order_relaxed)) Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] player controller found\n"));
     }
 
     // GEngine->GameViewport->World, both reflected properties (not hard offsets); compared only, never followed.
@@ -1981,9 +1946,9 @@ class DWSmoothwalker : public CppUserModBase
         {
             adopt_controller(candidate);
         }
-        else if (requested)
+        else if (requested && dwsc::g_log_verbose.load(std::memory_order_relaxed))
         {
-            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] player controller not found yet\n"));
+            Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] player controller not found yet\n"));
         }
     }
 
@@ -1994,7 +1959,7 @@ class DWSmoothwalker : public CppUserModBase
         check_world(engine);
         if (m_controller.object && !m_controller.alive())
         {
-            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] player controller gone\n"));
+            if (dwsc::g_log_verbose.load(std::memory_order_relaxed)) Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] player controller gone\n"));
             forget_player();
             rescan_now();
         }
@@ -2067,7 +2032,8 @@ class DWSmoothwalker : public CppUserModBase
         m_position_applied_generation = 0; // a new pawn: its modes get the current position
         m_tuner.camera_changed();
         m_offset_wait = std::chrono::seconds(2);
-        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] following {} (CapsuleHalfHeight at 0x{:X})\n"), pawn->GetName(), g_half_height_offset.load());
+        if (dwsc::g_log_verbose.load(std::memory_order_relaxed))
+            Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] following {} (CapsuleHalfHeight at 0x{:X})\n"), pawn->GetName(), g_half_height_offset.load());
     }
 
     // ComponentToWorld is not reflected. A root's world translation equals its RelativeLocation, so the offset
@@ -2077,7 +2043,7 @@ class DWSmoothwalker : public CppUserModBase
         auto* relative = root->GetValuePtrByPropertyNameInChain<double>(STR("RelativeLocation"));
         if (!relative)
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] RelativeLocation not found, smoothing inactive\n"));
+            Output::send<LogLevel::Error>(STR("[DWSmoothwalker] RelativeLocation not found, smoothing inactive\n"));
             return false;
         }
         auto base = reinterpret_cast<uint8_t*>(root);
@@ -2101,12 +2067,13 @@ class DWSmoothwalker : public CppUserModBase
         }
         if (matches != 1)
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] ComponentToWorld translation: {} matches, smoothing inactive\n"), matches);
+            Output::send<LogLevel::Error>(STR("[DWSmoothwalker] ComponentToWorld translation: {} matches, smoothing inactive\n"), matches);
             return false;
         }
         g_translation_offset.store(found);
-        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] ComponentToWorld translation at 0x{:X} (RelativeLocation 0x{:X})\n"), found,
-                                       relative_offset);
+        if (dwsc::g_log_verbose.load(std::memory_order_relaxed))
+            Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] ComponentToWorld translation at 0x{:X} (RelativeLocation 0x{:X})\n"), found,
+                                           relative_offset);
         return true;
     }
 };

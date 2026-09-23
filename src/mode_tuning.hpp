@@ -208,10 +208,11 @@ namespace dwsc
                         continue;
                     }
                     mode.has_original = true;
-                    if (std::wstring_view(mode.spec.name) == L"Base_LongRange" && !mode.original.offsets.empty())
+                    if (std::wstring_view(mode.spec.name) == L"Base_LongRange" && !mode.original.offsets.empty() &&
+                        g_log_verbose.load(std::memory_order_relaxed))
                     {
                         auto& first = mode.original.offsets.front();
-                        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] Base_LongRange: fov {}, game lag {}/{}, pitch {}/{}, {} offsets, key {} at ({}, {}, {})\n"),
+                        Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] Base_LongRange: fov {}, game lag {}/{}, pitch {}/{}, {} offsets, key {} at ({}, {}, {})\n"),
                                                        mode.original.fov, mode.original.hlag_on ? STR("on") : STR("off"),
                                                        mode.original.vlag_on ? STR("on") : STR("off"), mode.original.pitch_min,
                                                        mode.original.pitch_max, mode.original.offsets.size(), first.key, first.x, first.y, first.z);
@@ -398,8 +399,11 @@ namespace dwsc
             // Only CameraOffsets needs the flip; the lag switch and an inactive tuning move none.
             if (tuning.active || m_was_active) request_flip(player_camera);
             m_was_active = tuning.active;
-            auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
-            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] camera position applied: {} mode classes, {} live modes, {:.1f} ms\n"), classes, live, ms);
+            if (g_log_verbose.load(std::memory_order_relaxed))
+            {
+                auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+                Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] camera position applied: {} mode classes, {} live modes, {:.1f} ms\n"), classes, live, ms);
+            }
         }
 
         // At unload, after the mod's callbacks are gone. Live instances keep their values until the game pushes
@@ -642,8 +646,11 @@ namespace dwsc
             }
             m_map_layout = FScriptMap::GetScriptLayout(1, 1, m_off.offset_size, m_off.offset_align); // ECameraType key: one byte
             m_layout_ok = true;
-            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] camera mode layout: offsets map 0x{:X}, CameraOffset {} bytes, value at 0x{:X}\n"),
-                                           m_off.offsets_map, m_off.offset_size, m_map_layout.ValueOffset);
+            if (g_log_verbose.load(std::memory_order_relaxed))
+            {
+                Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] camera mode layout: offsets map 0x{:X}, CameraOffset {} bytes, value at 0x{:X}\n"),
+                                               m_off.offsets_map, m_off.offset_size, m_map_layout.ValueOffset);
+            }
             return true;
         }
 
@@ -761,7 +768,8 @@ namespace dwsc
                 if (name != std::wstring(L"BP_CameraMode_") + mode.spec.name + L"_C") continue;
                 mode.missing = false;
                 capture();
-                Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] {} loaded late: {}\n"), mode.spec.name, mode.captured ? STR("tuned") : STR("not found"));
+                if (g_log_verbose.load(std::memory_order_relaxed))
+                    Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] {} loaded late: {}\n"), mode.spec.name, mode.captured ? STR("tuned") : STR("not found"));
                 if (!mode.captured || !keep_if_mode(ref)) return false;
                 write(mode.cdo, mode, m_last);
                 write(ref.object, mode, m_last);

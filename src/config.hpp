@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -73,14 +74,18 @@ namespace dwsc
         int preset = 102;                 // the preset the live settings match: 0 Custom, 101-103 built-in, 1-MAX_SLOTS slot, FIRST_DROPIN_ID on drop-in
 
         bool log_stats = false;
-        bool log_trace = false; // per-frame vertical-follow trace, written to the log around every crouch and stand
+        bool log_verbose = false; // discovery, offsets, layouts, camera mode changes in the log; ini only, not on the Mod Menu page
 
         bool debug_overlay = false; // the live panel at the top right of the screen (debug_overlay.hpp)
         std::string debug_key;      // shows and hides it; empty: not bound
     };
 
+    // Settings::log_verbose as published, for the headers that log without the settings (mode_tuning.hpp,
+    // debug_overlay.hpp). A Verbose line is sent only while it is set.
+    inline std::atomic<bool> g_log_verbose{false};
+
     // A preset is a camera look: follow, turning, the look limits and camera position. Not the switches (enabled,
-    // camera_tuning, shoulder_swap, show_banner, log_stats, log_trace, debug_overlay), the safety values (wall_clamp,
+    // camera_tuning, shoulder_swap, show_banner, log_stats, log_verbose, debug_overlay), the safety values (wall_clamp,
     // reset_distance, reset_gap), position_transition, the key names, or preset.
     inline const std::array<const char*, 41> PRESET_KEYS{
             "follow_rate_h", "follow_rate_v", "curve_h", "curve_v", "catchup_distance", "min_rate_scale", "max_lag_h", "max_lag_v",
@@ -98,7 +103,7 @@ namespace dwsc
             "camera_tuning", "exploration_distance", "exploration_height", "exploration_shoulder", "exploration_fov", "sprint_distance",
             "sprint_height", "sprint_shoulder", "sprint_fov", "combat_distance", "combat_height", "combat_shoulder", "combat_fov", "focus_distance", "focus_height", "focus_shoulder", "focus_fov",
             "aiming_distance", "aiming_height", "aiming_shoulder", "aiming_fov", "traversal_distance", "traversal_height", "traversal_fov",
-            "shoulder_swap", "pitch_min", "pitch_max", "position_transition", "preset", "log_stats", "log_trace", "debug_overlay"};
+            "shoulder_swap", "pitch_min", "pitch_max", "position_transition", "preset", "log_stats", "log_verbose", "debug_overlay"};
 
     inline auto is_preset_key(const std::string& key) -> bool
     {
@@ -202,7 +207,7 @@ namespace dwsc
         else if (key == "pitch_max") number(s.pitch_max);
         else if (key == "preset") integer(s.preset);
         else if (key == "log_stats") flag(s.log_stats);
-        else if (key == "log_trace") flag(s.log_trace);
+        else if (key == "log_verbose") flag(s.log_verbose);
         else if (key == "debug_overlay") flag(s.debug_overlay);
         else if (key == "debug_key") s.debug_key = value;
     }
@@ -358,7 +363,7 @@ namespace dwsc
         if (key == "position_transition") return s.position_transition;
         if (key == "preset") return s.preset;
         if (key == "log_stats") return flag(s.log_stats);
-        if (key == "log_trace") return flag(s.log_trace);
+        if (key == "log_verbose") return flag(s.log_verbose);
         if (key == "debug_overlay") return flag(s.debug_overlay);
         return 0.0;
     }
@@ -480,7 +485,7 @@ namespace dwsc
             {"position_transition", "s a position change or shoulder swap glides over; 0 snaps"},
             {"preset", "0 Custom, 101 Tight, 102 Balanced, 103 Cinematic, 1-6 a slot, 201+ a preset from the config/presets folder: shows the matching preset; change it to load one, or to an unused slot to save your settings into it"},
             {"log_stats", "every 5 s in UE4SS.log: smoothed frames, mean lag, wall clamp share"},
-            {"log_trace", "1 writes a per-frame trace of the vertical follow to UE4SS.log around every crouch and stand (240 lines each)"},
+            {"log_verbose", "1 adds detail to UE4SS.log: player discovery, offsets, camera mode layouts, combat and traversal camera changes"},
             {"debug_overlay", "1 shows a live panel of the camera state at the top right of the screen"},
             {"debug_key", "shows and hides that panel in game (blank: no key)"},
         };

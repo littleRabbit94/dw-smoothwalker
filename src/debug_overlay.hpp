@@ -479,7 +479,7 @@ namespace dwsc
             }
 
             m_build_warned = false;
-            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] debug overlay shown\n"));
+            if (g_log_verbose.load(std::memory_order_relaxed)) Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] debug overlay shown\n"));
             return true;
         }
 
