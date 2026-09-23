@@ -84,6 +84,8 @@ namespace
         double rotation_rate, reset_distance, reset_gap;
         double transition;   // position_transition: the crossfade after a change
         double aiming_keep;  // aiming_follow as a share: the trail and turning smoothing kept while aiming
+        double combat_follow_keep;   // combat_follow as a share: the trail kept while a combat camera is up
+        double combat_rotation_keep; // combat_rotation as a share: the turning smoothing kept while a combat camera is up
         uint64_t generation; // bumped by a publish that changed a value
     };
 
@@ -91,7 +93,7 @@ namespace
     {
         return {s.follow_rate_h, s.follow_rate_v, s.curve_h, s.curve_v, s.catchup_distance, s.min_rate_scale, s.max_lag_h, s.max_lag_v,
                 s.soft_leash, s.rotation_smoothing, s.wall_clamp, s.rotation_rate, s.reset_distance, s.reset_gap, s.position_transition,
-                s.aiming_follow / 100.0, 0};
+                s.aiming_follow / 100.0, s.combat_follow / 100.0, s.combat_rotation / 100.0, 0};
     }
 
     // Every field but generation.
@@ -101,7 +103,8 @@ namespace
                a.catchup_distance == b.catchup_distance && a.min_rate_scale == b.min_rate_scale && a.max_lag_h == b.max_lag_h &&
                a.max_lag_v == b.max_lag_v && a.soft_leash == b.soft_leash && a.rotation_smoothing == b.rotation_smoothing &&
                a.wall_clamp == b.wall_clamp && a.rotation_rate == b.rotation_rate && a.reset_distance == b.reset_distance &&
-               a.reset_gap == b.reset_gap && a.transition == b.transition && a.aiming_keep == b.aiming_keep;
+               a.reset_gap == b.reset_gap && a.transition == b.transition && a.aiming_keep == b.aiming_keep &&
+               a.combat_follow_keep == b.combat_follow_keep && a.combat_rotation_keep == b.combat_rotation_keep;
     }
 
     using GetCameraViewFn = void(__fastcall*)(void* self, float delta_time, void* desired_view);
@@ -121,6 +124,7 @@ namespace
     std::atomic<bool> g_log_stats{false};
     std::atomic<bool> g_log_trace{false};
     std::atomic<bool> g_aiming{false}; // an aiming camera mode is blending in or active
+    std::atomic<bool> g_combat{false}; // a combat camera mode is blending in or active
     std::atomic<void*> g_player_camera{nullptr};
     std::atomic<void*> g_player_root{nullptr};
     std::atomic<int32_t> g_translation_offset{-1}; // USceneComponent::ComponentToWorld.Translation
@@ -181,6 +185,7 @@ namespace
         dwsc::Quat rotation_smoothed{};
         double nominal_distance = 0.0;
         double aim = 0.0;          // 0 to 1, eased toward g_aiming: how far the follow is handed to the player's aim
+        double combat = 0.0;       // 0 to 1, eased toward g_combat: how far the follow is handed to the combat camera
         double nominal_hold = 0.0; // s left in which nominal_distance tracks the game: a position write is gliding
         LARGE_INTEGER last_call{};
 
@@ -395,6 +400,7 @@ namespace
         {
             g_follow.valid = true;
             g_follow.aim = g_aiming.load(std::memory_order_relaxed) ? 1.0 : 0.0;
+            g_follow.combat = g_combat.load(std::memory_order_relaxed) ? 1.0 : 0.0;
             g_follow.pivot_smoothed = dwsc::Vec3{pivot.x, pivot.y, feet_z};
             g_follow.rotation_smoothed = rotation;
             g_follow.half_last = static_cast<double>(half_height);
@@ -440,11 +446,21 @@ namespace
             // pivot and rotation run on underneath, so the trail returns without an edge.
             double aim_target = g_aiming.load(std::memory_order_relaxed) ? 1.0 : 0.0;
             g_follow.aim += (aim_target - g_follow.aim) * (1.0 - std::exp(-8.0 * dt));
-            double keep = 1.0 - g_follow.aim * (1.0 - std::clamp(t.aiming_keep, 0.0, 1.0));
+            double combat_target = g_combat.load(std::memory_order_relaxed) ? 1.0 : 0.0;
+            g_follow.combat += (combat_target - g_follow.combat) * (1.0 - std::exp(-8.0 * dt));
 
-            double shown_h = leash(lag_h, t.max_lag_h, t.soft_leash) * keep;
+            // Combat hands the shown trail and turning to combat_follow/combat_rotation as it comes up; aiming
+            // then takes over from wherever combat left it, smoothly, as the player raises their aim.
+            auto lerp = [](double a, double b, double f) { return a + (b - a) * f; };
+            double aiming_keep = std::clamp(t.aiming_keep, 0.0, 1.0);
+            double combat_follow_keep = std::clamp(t.combat_follow_keep, 0.0, 1.0);
+            double combat_rotation_keep = std::clamp(t.combat_rotation_keep, 0.0, 1.0);
+            double keep_pos = lerp(lerp(1.0, combat_follow_keep, g_follow.combat), aiming_keep, g_follow.aim);
+            double keep_rot = lerp(lerp(1.0, combat_rotation_keep, g_follow.combat), aiming_keep, g_follow.aim);
+
+            double shown_h = leash(lag_h, t.max_lag_h, t.soft_leash) * keep_pos;
             double scale_h = lag_h > 0.0 ? shown_h / lag_h : 0.0;
-            double shown_v = std::copysign(leash(std::abs(lag_v), t.max_lag_v, t.soft_leash), lag_v) * keep;
+            double shown_v = std::copysign(leash(std::abs(lag_v), t.max_lag_v, t.soft_leash), lag_v) * keep_pos;
 
             // The crouch hold (see Follow). Folding the running hold into a new episode keeps the output continuous
             // when a stand follows a crouch before it has settled.
@@ -469,7 +485,7 @@ namespace
                 hold = g_follow.crouch_drop - g_follow.crouch_smoothed;
                 if (g_follow.crouch_elapsed > 0.6 && std::abs(hold) < 0.1) g_follow.crouch_base = NAN;
             }
-            double shown_hold = std::copysign(leash(std::abs(hold), t.max_lag_v, t.soft_leash), hold) * keep;
+            double shown_hold = std::copysign(leash(std::abs(hold), t.max_lag_v, t.soft_leash), hold) * keep_pos;
             trace_hold = shown_hold;
             dwsc::Vec3 shown_pivot{pivot.x - lag_hx * scale_h, pivot.y - lag_hy * scale_h, pivot.z - shown_v + shown_hold};
             trace_shown_v = shown_v;
@@ -487,7 +503,7 @@ namespace
                 constexpr double MAX_TRAIL = 0.5 * 3.14159265358979323846;
                 double trail = dwsc::angle_between(g_follow.rotation_smoothed, rotation);
                 if (trail > MAX_TRAIL) g_follow.rotation_smoothed = dwsc::slerp(rotation, g_follow.rotation_smoothed, MAX_TRAIL / trail);
-                dwsc::Quat shown = keep < 1.0 ? dwsc::slerp(g_follow.rotation_smoothed, rotation, 1.0 - keep) : g_follow.rotation_smoothed;
+                dwsc::Quat shown = keep_rot < 1.0 ? dwsc::slerp(g_follow.rotation_smoothed, rotation, 1.0 - keep_rot) : g_follow.rotation_smoothed;
                 dwsc::Quat delta = dwsc::multiply(shown, dwsc::conjugate(rotation));
                 arm = dwsc::rotate(delta, arm);
                 dwsc::to_rotator(shown, view.rotation[0], view.rotation[1], view.rotation[2]);
@@ -1137,7 +1153,11 @@ class DWSmoothwalker : public CppUserModBase
     {
         auto* camera = static_cast<UObject*>(g_player_camera.load());
         m_tuner.tick(g_view_updates.load(), g_view_seconds.load(), camera);
-        g_aiming.store(camera && g_enabled.load() && m_tuner.aiming()); // off: no per-tick GetState calls either
+        // off: no per-tick GetState calls either
+        auto state = camera && g_enabled.load() ? m_tuner.mode_state() : dwsc::ModeState{};
+        g_aiming.store(state.aiming);
+        if (state.combat != g_combat.exchange(state.combat))
+            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] combat camera {}\n"), state.combat ? STR("on") : STR("off"));
         if (!camera) return;
         auto generation = m_position_generation.load();
         if (generation == m_position_applied_generation) return;

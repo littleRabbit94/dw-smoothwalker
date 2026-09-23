@@ -148,6 +148,14 @@ namespace dwsc
         return p;
     }
 
+    // Whether an Aiming-group or a Combat-group mode is blending in or active, from one scan of the player's
+    // live modes.
+    struct ModeState
+    {
+        bool aiming = false;
+        bool combat = false;
+    };
+
     class ModeTuner
     {
       public:
@@ -231,21 +239,23 @@ namespace dwsc
             m_scan_needed = true;
         }
 
-        // Whether an aiming mode is blending in or active (ECameraModeState 0 or 1; 2 blending out, 3 popped).
-        // One GetState call per live aiming mode per engine tick. False until an apply has scanned this camera.
-        auto aiming() -> bool
+        // Whether an Aiming-group or Combat-group mode is blending in or active (ECameraModeState 0 or 1; 2
+        // blending out, 3 popped). One GetState call per live instance of those two groups per engine tick,
+        // skipped once a group's flag is already set. False until an apply has scanned this camera.
+        auto mode_state() -> ModeState
         {
-            if (!m_layout_ok || !m_get_state || m_scan_needed) return false;
+            ModeState state;
+            if (!m_layout_ok || !m_get_state || m_scan_needed) return state;
             adopt_new();
-            bool found = false;
             for_each_instance([&](UObject* instance, Mode& mode) {
-                if (found || mode.spec.group != Aiming) return;
+                bool* found = mode.spec.group == Aiming ? &state.aiming : mode.spec.group == Combat ? &state.combat : nullptr;
+                if (!found || *found) return;
                 uint8_t params[16]{};
                 params[0] = 0xFF;
                 instance->ProcessEvent(m_get_state, params);
-                found = params[0] <= 1;
+                *found = params[0] <= 1;
             });
-            return found;
+            return state;
         }
 
         // A new player camera: its modes were made before the new-object callback could see them.

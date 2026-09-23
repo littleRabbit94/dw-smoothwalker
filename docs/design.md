@@ -121,16 +121,22 @@ speed 1, a 360 spin, the camera reversed halfway). At speed 1 a fast spin now ri
 behind, and catches up over about a second when the turn stops. A turn past 180 degrees inside one frame is
 still ambiguous, as it is for any smoothing.
 
-- **Aiming** (`aiming_follow`, percent, default 30; not a preset key). A trail and smoothed turning behind
-  the crosshair read as input lag. The camera component has no "active mode" call, but every mode has
-  `GetState()` (`ECameraModeState`: BlendingIn 0, Active 1, BlendingOut 2, Popped 3; checked live), and the
-  tuner already holds the player's live modes with their group. Each engine tick it calls `GetState` on the
-  live aiming-group modes only (none while there is none) and publishes one atomic flag. The hook eases a
-  0-1 factor toward it (rate 8/s on the world delta, about a third of a second) and scales only what is
-  shown: the shown lag, and the shown rotation slerped from smoothed toward the game's. The smoothed pivot
-  and rotation run on underneath, so the trail is back when the aim is lowered, with no edge either way. A
-  cut snaps the factor. Guessing from the arm length was rejected: a close `exploration_distance` reads
-  the same as aiming.
+- **Aiming and combat** (`aiming_follow`, `combat_follow`, `combat_rotation`, percent, default 30 / 100 / 100).
+  A trail and smoothed turning behind the crosshair read as input lag; in a fight the same trail can be a
+  liability, so combat gets its own pair, split into position and turning. The camera component has no
+  "active mode" call, but every mode has `GetState()` (`ECameraModeState`: BlendingIn 0, Active 1,
+  BlendingOut 2, Popped 3; checked live), and the tuner already holds the player's live modes with their
+  group. Each engine tick one pass (`ModeTuner::mode_state()`) calls `GetState` on the live Aiming- and
+  Combat-group modes only, skipping a group once its flag is already set (none while there is neither), and
+  publishes two atomic flags. The hook eases two 0-1 factors toward them (rate 8/s on the world delta, about
+  a third of a second): `aim` and `combat`. Two keep shares are built from them, aiming taking over from
+  wherever combat left it: `keep_pos = lerp(lerp(1, combat_follow_keep, combat), aiming_keep, aim)`, and
+  `keep_rot` the same with `combat_rotation_keep`. `keep_pos` scales only what is shown: the shown lag;
+  `keep_rot` scales the shown rotation slerped from smoothed toward the game's (visible only with rotation
+  smoothing on). The smoothed pivot and rotation run on underneath, so the trail is back once both factors
+  ease to zero, with no edge either way. A cut snaps both factors. Focus mode is its own group, not combat
+  (see "Position tuning (`mode_tuning.hpp`)"), so `combat_follow` / `combat_rotation` leave it alone.
+  Guessing from the arm length was rejected: a close `exploration_distance` reads the same as aiming.
 - **Soft leash** (`soft_leash = 1`, 0.5.0): the internal lag may run to 3x `max_lag`, and the camera shows
   `max_lag * tanh(lag / max_lag)`, so reaching the limit has no edge. With `soft_leash = 0` the leash is a
   hard clamp.
@@ -394,16 +400,18 @@ the centre (0.7.4).
 
 ### Presets
 
-- **Presets carry 36 keys** (32 in 0.8.0; four `focus_` keys since 0.9.0, when focus left the combat group; a file or preset without them takes its combat values, in `parse_settings` and `fill_focus`; 36 until 2026-09-19, when `wall_clamp`, `reset_distance`, `reset_gap` and
+- **Presets carry 39 keys** (32 in 0.8.0; four `focus_` keys since 0.9.0, when focus left the combat group; a file or preset without them takes its combat values, in `parse_settings` and `fill_focus`; 36 from 2026-09-19, when `wall_clamp`, `reset_distance`, `reset_gap` and
   `position_transition` left: a preset is a camera look, and the first three are off the menu page, so a
-  preset would have changed settings the player cannot see): follow, turning, the look limits and every group's distance, height, shoulder and
+  preset would have changed settings the player cannot see; 39 from 2026-09-22, when `aiming_follow` joined
+  and `combat_follow` / `combat_rotation` were added, both new settings for the combat camera, split into
+  position and turning like aiming's): follow, turning, the look limits and every group's distance, height, shoulder and
   FOV. Not `enabled`, `camera_tuning`, `shoulder_swap`, `show_banner`, `log_stats`, the key names,
   or `preset`. A preset file holding fewer keys loads and matches on the keys it has.
 - **Built-ins** (cycle order): Tight, Balanced, Cinematic. Follow values, horizontal retuned 2026-09-19 for the game's lag being off (it had
   added up to 30 cm of trail; before: 25 cm 18/s, 70 cm 8/s; Cinematic was tried at 145 cm 3/s, too much, and kept as it was): Tight (lag 40/20 cm,
   12/20 per s, constant), Balanced (the shipped default: 85/50 cm, 6.5/10 per s; 95 cm 5.5/s was tried and read too loose, smoothstep h), Cinematic
   (120/80 cm, 4/6 per s, ease in-out, floor 0.35, turning smoothed at 25). Balanced equals the shipped
-  `smoothwalker.ini` on all 36 keys.
+  `smoothwalker.ini` on all 39 keys.
 
   | Key | Tight | Balanced | Cinematic |
   |---|---|---|---|
