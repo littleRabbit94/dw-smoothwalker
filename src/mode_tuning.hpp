@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -23,6 +24,7 @@
 #include <Unreal/Core/Containers/Map.hpp>
 #include <Unreal/CoreUObject/UObject/Class.hpp>
 #include <Unreal/CoreUObject/UObject/UnrealType.hpp>
+#include <Unreal/Property/FEnumProperty.hpp>
 #include <Unreal/UClass.hpp>
 #include <Unreal/UFunction.hpp>
 #include <Unreal/UObject.hpp>
@@ -70,6 +72,12 @@ namespace dwsc
         Traversal,
         GroupCount
     };
+
+    inline auto group_name(Group group) -> const wchar_t*
+    {
+        static constexpr const wchar_t* names[GroupCount]{L"Exploration", L"Sprint", L"Combat", L"Focus", L"Aiming", L"Traversal"};
+        return group >= 0 && group < GroupCount ? names[group] : L"?";
+    }
 
     struct ModeClassSpec
     {
@@ -157,6 +165,15 @@ namespace dwsc
         bool traversal = false;
     };
 
+    // One live mode on the player's camera, for the debug overlay.
+    struct ModeListing
+    {
+        std::wstring name; // BP_CameraMode_<name>_C, or the class name without _C
+        uint8_t state;     // ECameraModeState: 0 blending in, 1 active, 2 blending out
+        int group;         // Group; -1 for a mode this mod does not track
+        bool tuned;        // tracked, and the last apply wrote the camera position into it
+    };
+
     class ModeTuner
     {
       public:
@@ -237,6 +254,7 @@ namespace dwsc
             m_flip_again = false;
             m_flip_camera = nullptr;
             m_live.clear();
+            m_untracked.clear();
             m_scan_needed = true;
         }
 
@@ -259,12 +277,87 @@ namespace dwsc
                               : mode.spec.group == Traversal ? &state.traversal
                                                              : nullptr;
                 if (!found || *found) return;
-                uint8_t params[16]{};
-                params[0] = 0xFF;
-                instance->ProcessEvent(m_get_state, params);
-                *found = params[0] <= 1;
+                *found = get_state(instance) <= 1;
             });
             return state;
+        }
+
+        // Every live mode on the player's camera with its state, newest first, popped ones (3) left out: the tracked
+        // modes and the other RebelCameraMode subclasses the hand-off and the scan found (m_untracked). For the debug
+        // overlay's refresh, a quarter second apart, never per tick: one GetState call per listed mode, and no object
+        // walk. `stale`: a rescan is pending (a new camera or world, or a hand-off overflow), served by mode_state()
+        // or the next apply, so the list may be short until then.
+        auto list_modes(UObject* player_camera, bool& stale) -> std::vector<ModeListing>
+        {
+            stale = m_scan_needed;
+            if (!m_layout_ok || !m_get_state || !player_camera) return {};
+            adopt_new(); // mode_state() does this each tick while on; off, only an apply or this keeps the lists current
+            std::vector<std::pair<uint64_t, ModeListing>> found;
+            bool tuned = m_applied && m_last.active;
+            drop_dead_classes();
+            for (auto& live : m_live)
+            {
+                auto& mode = m_modes[live.index];
+                if (!mode.captured || mode.cls != live.ref.cls || !live.ref.alive() || live.ref.object->GetOuterPrivate() != player_camera) continue;
+                auto state = get_state(live.ref.object);
+                if (state <= 2) found.push_back({live.seq, {mode.spec.name, state, mode.spec.group, tuned}});
+            }
+            std::erase_if(m_untracked, [](auto& entry) { return !entry.ref.alive(); });
+            for (auto& entry : m_untracked)
+            {
+                if (entry.ref.object->GetOuterPrivate() != player_camera) continue;
+                auto state = get_state(entry.ref.object);
+                if (state <= 2) found.push_back({entry.seq, {entry.name, state, -1, false}});
+            }
+            std::sort(found.begin(), found.end(), [](auto& a, auto& b) { return a.first > b.first; });
+            std::vector<ModeListing> out;
+            out.reserve(found.size());
+            for (auto& entry : found) out.push_back(std::move(entry.second));
+            return out;
+        }
+
+        // The player's camera type (ECameraType) by its enum name when the return value's enum is reflected, else the
+        // number; empty before the layout is resolved; "n/a" when the camera is not a RebelCameraComponent (the function
+        // would run on the wrong class). Game thread, one GetCameraType call: the debug overlay's refresh.
+        auto camera_type_name(UObject* player_camera) -> std::wstring
+        {
+            if (!m_get_type || !player_camera) return {};
+            if (!m_camera_class_read)
+            {
+                m_camera_class_read = true;
+                m_camera_class = UObjectGlobals::StaticFindObject<UClass*>(nullptr, nullptr, STR("/Script/RebelCamera.RebelCameraComponent"));
+            }
+            auto* cls = player_camera->GetClassPrivate();
+            if (!m_camera_class || !cls || !cls->IsChildOf(m_camera_class)) return L"n/a";
+            if (!m_type_names_read)
+            {
+                m_type_names_read = true;
+                auto* ret = m_get_type->GetReturnProperty();
+                UEnum* type_enum = nullptr;
+                if (auto* as_enum = CastField<FEnumProperty>(ret)) type_enum = as_enum->GetEnum();
+                else if (auto* as_byte = CastField<FByteProperty>(ret)) type_enum = as_byte->GetEnum();
+                if (ret) m_type_offset = ret->GetOffset_ForInternal();
+                if (type_enum)
+                {
+                    std::vector<std::pair<FName, int64>> names;
+                    type_enum->GetEnumNamesAsVector(names);
+                    for (auto& [name, value] : names)
+                    {
+                        auto text = name.ToString();
+                        if (auto colons = text.rfind(L"::"); colons != std::wstring::npos) text.erase(0, colons + 2);
+                        m_type_names.push_back({value, std::move(text)});
+                    }
+                }
+            }
+            uint8_t params[16]{};
+            if (m_type_offset < 0 || m_type_offset >= static_cast<int32_t>(sizeof(params))) return {};
+            player_camera->ProcessEvent(m_get_type, params);
+            int64 value = params[m_type_offset];
+            for (auto& [known, name] : m_type_names)
+            {
+                if (known == value) return name;
+            }
+            return std::to_wstring(value);
         }
 
         // A new player camera: its modes were made before the new-object callback could see them.
@@ -424,7 +517,26 @@ namespace dwsc
             for (auto& spec : mode_classes()) modes.push_back({spec});
             return modes;
         }();
-        std::vector<std::pair<LiveRef, size_t>> m_live; // the player's live modes, with their m_modes index
+        // The player's live modes, with their m_modes index and the order they were taken in (m_seq): the scan takes
+        // what is already there, the hand-off what is pushed later, so a higher seq is a newer mode.
+        struct LiveMode
+        {
+            LiveRef ref;
+            size_t index;
+            uint64_t seq;
+        };
+        std::vector<LiveMode> m_live;
+        // RebelCameraMode instances on the player's camera whose class is not in mode_classes() (shadowstep attack,
+        // finisher and effect cameras), each with its display name, taken like m_live. Only listed (list_modes).
+        struct Untracked
+        {
+            LiveRef ref;
+            std::wstring name;
+            uint64_t seq;
+        };
+        std::vector<Untracked> m_untracked;
+        static constexpr size_t MAX_UNTRACKED = 32;
+        uint64_t m_seq = 0;
         PositionTuning m_last;                          // what the last apply wrote, for a class that loads later
         bool m_scan_needed = true;                      // m_live does not cover this camera yet
         static constexpr size_t MAX_NEW = 256;
@@ -445,6 +557,12 @@ namespace dwsc
         UFunction* m_set_type = nullptr;
         UFunction* m_get_type = nullptr;
         UFunction* m_get_state = nullptr; // RebelCameraMode:GetState; without it aiming() stays false
+        UStruct* m_mode_base = nullptr;   // RebelCameraMode: what an untracked object must derive from to be listed
+        UClass* m_camera_class = nullptr; // RebelCameraComponent: camera_type_name() calls GetCameraType only on one
+        bool m_camera_class_read = false;
+        bool m_type_names_read = false;   // camera_type_name(): the enum names, read once
+        int32_t m_type_offset = -1;       // GetCameraType's return value in its params
+        std::vector<std::pair<int64, std::wstring>> m_type_names;
 
         enum FlipStage
         {
@@ -493,6 +611,7 @@ namespace dwsc
             m_get_type = UObjectGlobals::StaticFindObject<UFunction*>(nullptr, nullptr, STR("/Script/RebelCamera.RebelCameraComponent:GetCameraType"));
 
             m_get_state = UObjectGlobals::StaticFindObject<UFunction*>(nullptr, nullptr, STR("/Script/RebelCamera.RebelCameraMode:GetState"));
+            m_mode_base = mode;
 
             m_off.fov = offset_in(mode, STR("DefaultFieldOfView"));
             m_off.pitch_min = offset_in(mode, STR("ViewPitchMin"));
@@ -559,24 +678,42 @@ namespace dwsc
             for (size_t i = 0; i < m_modes.size(); ++i)
             {
                 if (!m_modes[i].captured || m_modes[i].cls != ref.cls || ref.object == m_modes[i].cdo) continue;
-                bool held = std::any_of(m_live.begin(), m_live.end(), [&](auto& entry) { return entry.first.object == ref.object; });
-                if (!held) m_live.push_back({ref, i});
+                bool held = std::any_of(m_live.begin(), m_live.end(), [&](auto& entry) { return entry.ref.object == ref.object; });
+                if (!held) m_live.push_back({ref, i, ++m_seq});
                 return true;
             }
             return false;
         }
 
-        // The player's live modes: objects whose outer is the camera and whose class is a captured mode. It reads
-        // every object (24 ms measured; FindAllOf's name compares took 60), so it runs once per camera or world,
-        // where a load hides it, and note_new() supplies modes pushed later. Other cameras' modes are left
-        // alone: new instances copy the CDO, and a new player camera gets its own apply.
+        // An untracked RebelCameraMode on the player's camera joins m_untracked. The class is checked first, so the
+        // camera's other subobjects cost no name. Full: the dead are dropped, then the oldest.
+        auto keep_untracked(LiveRef ref) -> void
+        {
+            if (!m_mode_base || !ref.cls || !ref.cls->IsChildOf(m_mode_base)) return;
+            if (std::any_of(m_untracked.begin(), m_untracked.end(), [&](auto& entry) { return entry.ref.object == ref.object; })) return;
+            if (m_untracked.size() >= MAX_UNTRACKED) std::erase_if(m_untracked, [](auto& entry) { return !entry.ref.alive(); });
+            if (m_untracked.size() >= MAX_UNTRACKED) m_untracked.erase(m_untracked.begin());
+            auto name = ref.cls->GetName();
+            if (name.starts_with(L"BP_CameraMode_")) name.erase(0, 14);
+            if (name.ends_with(L"_C")) name.resize(name.size() - 2);
+            m_untracked.push_back({ref, std::move(name), ++m_seq});
+        }
+
+        // The player's live modes: objects whose outer is the camera and whose class is a captured mode, and the
+        // other camera modes on it into m_untracked. It reads every object (24 ms measured; FindAllOf's name
+        // compares took 60), so it runs once per camera or world, where a load hides it, and note_new() supplies
+        // modes pushed later. Other cameras' modes are left alone: new instances copy the CDO, and a new player
+        // camera gets its own apply.
         auto scan_instances(UObject* player_camera) -> void
         {
             drop_dead_classes();
             m_live.clear();
+            m_untracked.clear();
             if (!player_camera) return;
             UObjectGlobals::ForEachUObject([&](UObject* object, int32, int32) {
-                if (object->GetOuterPrivate() == player_camera) keep_if_mode(LiveRef::of(object));
+                if (object->GetOuterPrivate() != player_camera) return LoopAction::Continue;
+                auto ref = LiveRef::of(object);
+                if (!keep_if_mode(ref)) keep_untracked(ref);
                 return LoopAction::Continue;
             });
             m_scan_needed = false;
@@ -604,19 +741,19 @@ namespace dwsc
                 m_new_overflow = false;
             }
             drop_dead_classes();
-            std::erase_if(m_live, [](auto& entry) { return !entry.first.alive(); });
+            std::erase_if(m_live, [](auto& entry) { return !entry.ref.alive(); });
             for (auto& ref : fresh)
             {
-                if (ref.alive() && !keep_if_mode(ref)) adopt_late(ref);
+                if (ref.alive() && !keep_if_mode(ref) && !adopt_late(ref)) keep_untracked(ref);
             }
         }
 
         // A mode whose class loaded after the last apply (CombatSprinting is loaded by day only): its
         // CDO and this first instance still hold the game's values. The name is compared first, so the effect
-        // cameras pushed on the same camera cost no object lookup.
-        auto adopt_late(LiveRef ref) -> void
+        // cameras pushed on the same camera cost no object lookup. True if the instance joined m_live.
+        auto adopt_late(LiveRef ref) -> bool
         {
-            if (!m_applied) return;
+            if (!m_applied) return false;
             auto name = ref.cls->GetName();
             for (auto& mode : m_modes)
             {
@@ -625,12 +762,13 @@ namespace dwsc
                 mode.missing = false;
                 capture();
                 Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] {} loaded late: {}\n"), mode.spec.name, mode.captured ? STR("tuned") : STR("not found"));
-                if (!mode.captured || !keep_if_mode(ref)) return;
+                if (!mode.captured || !keep_if_mode(ref)) return false;
                 write(mode.cdo, mode, m_last);
                 write(ref.object, mode, m_last);
                 if (m_last.active) request_flip(ref.object->GetOuterPrivate());
-                return;
+                return true;
             }
+            return false;
         }
 
         // LiveRefs, not pointers: a popped mode can be collected at any GC.
@@ -638,11 +776,11 @@ namespace dwsc
         auto for_each_instance(Visit&& visit) -> void
         {
             drop_dead_classes();
-            for (auto& [ref, index] : m_live)
+            for (auto& live : m_live)
             {
-                auto& mode = m_modes[index];
-                if (!mode.captured || mode.cls != ref.cls || !ref.alive()) continue;
-                visit(ref.object, mode);
+                auto& mode = m_modes[live.index];
+                if (!mode.captured || mode.cls != live.ref.cls || !live.ref.alive()) continue;
+                visit(live.ref.object, mode);
             }
         }
 
@@ -726,6 +864,15 @@ namespace dwsc
                     break;
                 }
             });
+        }
+
+        // ECameraModeState; 0xFF if the call wrote nothing.
+        auto get_state(UObject* mode) -> uint8_t
+        {
+            uint8_t params[16]{};
+            params[0] = 0xFF;
+            mode->ProcessEvent(m_get_state, params);
+            return params[0];
         }
 
         auto get_camera_type(UObject* camera) -> uint8_t

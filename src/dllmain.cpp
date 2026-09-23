@@ -41,6 +41,7 @@
 #include <Unreal/UnrealInitializer.hpp>
 
 #include "lua_api.hpp"
+#include "debug_overlay.hpp"
 
 using namespace RC;
 using namespace RC::Unreal;
@@ -123,6 +124,7 @@ namespace
     // Published by the game thread, read by the hook. Pointers are only compared or read under SEH.
     std::atomic<bool> g_enabled{true};
     std::atomic<bool> g_reset{true}; // a hard cut: snap, no crossfade
+    std::atomic<int> g_reset_reason{static_cast<int>(dwsc::Snap::Startup)}; // why g_reset was set; stored before it (request_cut, lua_api.hpp)
     std::atomic<uint64_t> g_toggle_generation{0};   // toggle key
     std::atomic<uint64_t> g_position_generation{0}; // mode writes; their FOV lands on the next camera update
     std::atomic<bool> g_log_stats{false};
@@ -143,6 +145,29 @@ namespace
     std::atomic<double> g_view_seconds{0.0};  // world time over those updates: the flip's glide runs on it
     std::atomic<uint64_t> g_calls_timed{0};
     std::atomic<uint64_t> g_ticks_spent{0};
+
+    // The debug overlay's feed (debug_overlay.hpp): written by the hook on the player's camera updates, read on the
+    // game thread at the overlay's refresh. Numbers only and relaxed, so a refresh may pair values from two frames.
+    // NAN: not following (off, or the view was lost).
+    std::atomic<double> g_debug_keep_follow{NAN}; // share of the trail shown after the traversal, combat and aiming blends
+    std::atomic<double> g_debug_keep_turn{NAN};   // share of the turning smoothing shown
+    std::atomic<int> g_debug_influence{0};        // dwsc::Influence: the largest weight in those blends
+    std::atomic<double> g_debug_lag_h{NAN};       // cm of lag on screen (out_offset), horizontal
+    std::atomic<double> g_debug_lag_v{NAN};       // and vertical
+    std::atomic<double> g_debug_rate_h{NAN};      // 1/s, the horizontal follow rate after the curve at the current lag
+    std::atomic<int> g_debug_snap{0};             // dwsc::Snap of the last restart from the capsule
+    std::atomic<int64_t> g_debug_snap_qpc{0};     // QPC of it; 0: none yet
+    std::atomic<bool> g_debug_glide{false};       // the crossfade running was started by a release("glide")
+
+    // Game thread: a hard cut on the next camera update, and why. The first reason since the hook last took a cut is
+    // kept: a level change is followed by a new controller and a new pawn, and the level change is the one to show.
+    // A hook taking the cut between the load and the stores leaves this cut with the older reason (display only).
+    // release("cut") names its own reason (lua_api.hpp).
+    auto request_cut(dwsc::Snap why) -> void
+    {
+        if (!g_reset.load()) g_reset_reason.store(static_cast<int>(why));
+        g_reset.store(true);
+    }
 
     // Kept free of C++ objects: __try needs a plain frame.
     auto guarded_read(void* from, void* to, size_t bytes) -> bool
@@ -209,6 +234,8 @@ namespace
         float from_fov = NAN;
         uint64_t seen_tuning = 0, seen_toggle = 0, seen_position = 0, seen_release = 0;
         bool was_owned = false; // another mod owned the camera on the last update: the falling edge is a cut
+        dwsc::Snap invalid_reason = dwsc::Snap::Startup; // why valid went false, for the debug overlay's last snap
+        bool blend_glide = false;                         // the running crossfade came from a release("glide")
     };
     Follow g_follow;
     LARGE_INTEGER g_qpc_frequency{};
@@ -251,12 +278,25 @@ namespace
         return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
     }
 
+    // The debug overlay's feed while nothing is followed.
+    auto publish_debug_idle() -> void
+    {
+        g_debug_keep_follow.store(NAN, std::memory_order_relaxed);
+        g_debug_keep_turn.store(NAN, std::memory_order_relaxed);
+        g_debug_lag_h.store(NAN, std::memory_order_relaxed);
+        g_debug_lag_v.store(NAN, std::memory_order_relaxed);
+        g_debug_rate_h.store(NAN, std::memory_order_relaxed);
+        g_debug_glide.store(false, std::memory_order_relaxed);
+    }
+
     auto lose_view() -> void
     {
         g_follow.valid = false;
+        g_follow.invalid_reason = dwsc::Snap::ViewLost;
         g_follow.out_valid = false;
         g_follow.blending = false;
         dwapi::g_blending.store(false, std::memory_order_relaxed);
+        publish_debug_idle();
     }
 
     // Runs with enabled false too, while the crossfade back to the game's own view is under way.
@@ -330,7 +370,11 @@ namespace
         // and sets g_reset: those edges restart the follow from the capsule here, which is what a cut does. A glide
         // is left alone, because resetting would throw away the warm follow it is meant to ease back into and the
         // crossfade would run from nothing to nothing.
-        if (g_follow.was_owned && !owned && !release_changed) g_follow.valid = false;
+        if (g_follow.was_owned && !owned && !release_changed)
+        {
+            g_follow.valid = false;
+            g_follow.invalid_reason = dwsc::Snap::ClaimEnded;
+        }
         g_follow.was_owned = owned;
 
         AcquireSRWLockShared(&g_tuning_lock);
@@ -386,8 +430,10 @@ namespace
         g_follow.seen_toggle = toggle;
         g_follow.seen_position = position;
         g_follow.seen_release = release;
-        bool cut = g_reset.exchange(false, std::memory_order_relaxed) || seconds_between(g_follow.last_call, now) > t.reset_gap ||
-                   !(dwsc::length(pivot - g_follow.pivot_last) <= t.reset_distance);
+        const bool reset = g_reset.exchange(false, std::memory_order_relaxed);
+        const bool gap = seconds_between(g_follow.last_call, now) > t.reset_gap;
+        const bool jump = !(dwsc::length(pivot - g_follow.pivot_last) <= t.reset_distance);
+        bool cut = reset || gap || jump;
         g_follow.last_call = now;
         g_follow.pivot_last = pivot;
 
@@ -401,9 +447,22 @@ namespace
         if (!enabled)
         {
             g_follow.valid = false; // switched back on, the follow restarts from the capsule
+            g_follow.invalid_reason = dwsc::Snap::Toggle;
+            g_debug_keep_follow.store(NAN, std::memory_order_relaxed);
+            g_debug_keep_turn.store(NAN, std::memory_order_relaxed);
+            g_debug_rate_h.store(NAN, std::memory_order_relaxed);
         }
         else if (cut || !g_follow.valid)
         {
+            // Why, for the debug overlay: switched back on beats a cut still pending from while it was off; then
+            // whoever asked for the cut; then why the follow was dropped; then the hook's own gap and teleport checks.
+            auto why = !g_follow.valid && g_follow.invalid_reason == dwsc::Snap::Toggle ? dwsc::Snap::Toggle
+                       : reset                                                        ? static_cast<dwsc::Snap>(g_reset_reason.load(std::memory_order_relaxed))
+                       : !g_follow.valid                                              ? g_follow.invalid_reason
+                       : gap                                                          ? dwsc::Snap::Gap
+                                                                                      : dwsc::Snap::Teleport;
+            g_debug_snap_qpc.store(now.QuadPart, std::memory_order_relaxed);
+            g_debug_snap.store(static_cast<int>(why), std::memory_order_relaxed);
             g_follow.valid = true;
             g_follow.aim = g_aiming.load(std::memory_order_relaxed) ? 1.0 : 0.0;
             g_follow.combat = g_combat.load(std::memory_order_relaxed) ? 1.0 : 0.0;
@@ -424,6 +483,7 @@ namespace
             double lag_hx = pivot.x - ps.x, lag_hy = pivot.y - ps.y;
             double lag_h = std::sqrt(lag_hx * lag_hx + lag_hy * lag_hy);
             double a_h = dwsc::follow_alpha(t.follow_rate_h, t.curve_h, lag_h, t.catchup_distance, t.min_rate_scale, dt);
+            g_debug_rate_h.store(dwsc::follow_rate(t.follow_rate_h, t.curve_h, lag_h, t.catchup_distance, t.min_rate_scale), std::memory_order_relaxed);
             ps.x += lag_hx * a_h;
             ps.y += lag_hy * a_h;
             lag_hx = pivot.x - ps.x;
@@ -469,6 +529,18 @@ namespace
             double traversal_rotation_keep = std::clamp(t.traversal_rotation_keep, 0.0, 1.0);
             double keep_pos = lerp(lerp(lerp(1.0, traversal_follow_keep, g_follow.traversal), combat_follow_keep, g_follow.combat), aiming_keep, g_follow.aim);
             double keep_rot = lerp(lerp(lerp(1.0, traversal_rotation_keep, g_follow.traversal), combat_rotation_keep, g_follow.combat), aiming_keep, g_follow.aim);
+            g_debug_keep_follow.store(keep_pos, std::memory_order_relaxed);
+            g_debug_keep_turn.store(keep_rot, std::memory_order_relaxed);
+            {
+                // The weight each keep carries in the chain above: aiming's, combat's under it, traversal's under
+                // both, and the rest (none). They sum to 1; the largest names the influence.
+                double w_aim = g_follow.aim;
+                double w_combat = g_follow.combat * (1.0 - g_follow.aim);
+                double w_traversal = g_follow.traversal * (1.0 - g_follow.combat) * (1.0 - g_follow.aim);
+                double weights[4]{1.0 - w_aim - w_combat - w_traversal, w_traversal, w_combat, w_aim}; // in dwsc::Influence order
+                int influence = static_cast<int>(std::max_element(std::begin(weights), std::end(weights)) - std::begin(weights));
+                g_debug_influence.store(influence, std::memory_order_relaxed);
+            }
 
             double shown_h = leash(lag_h, t.max_lag_h, t.soft_leash) * keep_pos;
             double scale_h = lag_h > 0.0 ? shown_h / lag_h : 0.0;
@@ -575,6 +647,7 @@ namespace
         else if (changed && g_follow.out_valid)
         {
             g_follow.blending = true;
+            g_follow.blend_glide = release_changed;
             g_follow.blend_elapsed = 0.0;
             g_follow.blend_duration = t.transition;
             g_follow.from_offset = g_follow.out_offset;
@@ -640,6 +713,9 @@ namespace
         g_follow.out_fov = fov_ok ? (owned ? game_view.fov : view.fov) : NAN;
         g_follow.out_valid = true;
         dwapi::g_blending.store(g_follow.blending, std::memory_order_relaxed);
+        g_debug_glide.store(g_follow.blending && g_follow.blend_glide, std::memory_order_relaxed);
+        g_debug_lag_h.store(std::hypot(g_follow.out_offset.x, g_follow.out_offset.y), std::memory_order_relaxed);
+        g_debug_lag_v.store(std::abs(g_follow.out_offset.z), std::memory_order_relaxed);
         publish_api_view(game_view, wrote ? view : game_view, &pivot);
     }
 
@@ -669,8 +745,10 @@ namespace
             !dwapi::g_layers_any.load(std::memory_order_relaxed))
         {
             g_follow.valid = false;
+            g_follow.invalid_reason = dwsc::Snap::Toggle;
             g_follow.out_valid = false;
             dwapi::g_blending.store(false, std::memory_order_relaxed);
+            publish_debug_idle();
             ViewHead view{};
             if (guarded_read(desired_view, &view, VIEW_BYTES)) publish_api_view(view, view, nullptr);
             return;
@@ -737,9 +815,10 @@ class DWSmoothwalker : public CppUserModBase
     DWSmoothwalker() : CppUserModBase()
     {
         ModName = STR("DWSmoothwalker");
-        ModVersion = STR("0.9.0");
+        ModVersion = STR("0.10.0");
         dwapi::g_enabled = &g_enabled;
         dwapi::g_reset = &g_reset; // release("cut") snaps through the same flag a teleport sets
+        dwapi::g_reset_reason = &g_reset_reason;
         ModDescription = STR("Frame-interpolated third-person camera");
         ModAuthors = STR("littleRabbit6");
 
@@ -788,7 +867,7 @@ class DWSmoothwalker : public CppUserModBase
     // C++ mods are started first (docs/design.md, "Checks run 2026-09-22").
     auto on_lua_start(StringViewType mod_name, LuaMadeSimple::Lua& lua, LuaMadeSimple::Lua&, LuaMadeSimple::Lua&, LuaMadeSimple::Lua*) -> void override
     {
-        dwapi::install(lua.get_lua_state(), to_string(mod_name), "0.9.0");
+        dwapi::install(lua.get_lua_state(), to_string(mod_name), "0.10.0");
     }
 
     auto on_lua_stop(StringViewType, LuaMadeSimple::Lua& lua, LuaMadeSimple::Lua&, LuaMadeSimple::Lua&, LuaMadeSimple::Lua*) -> void override
@@ -862,6 +941,15 @@ class DWSmoothwalker : public CppUserModBase
         bind(m_shoulder_key, STR("shoulder_key"), [this]() {
             if (key_live(STR("shoulder"))) swap_shoulder();
         });
+        // Written back like the toggle key's change, so the Mod Menu page shows it. Live under a pause too: it moves
+        // nothing in the game.
+        bind(m_debug_key, STR("debug_key"), [this]() {
+            std::lock_guard guard(m_file_mutex);
+            m_settings.debug_overlay = !m_settings.debug_overlay;
+            publish_locked();
+            mark_pending_locked();
+            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] debug overlay {}\n"), m_settings.debug_overlay ? STR("on") : STR("off"));
+        });
 
         m_find_requested.store(true); // after a hot reload the controller has already begun play
         m_last_report = m_last_poll = std::chrono::steady_clock::now();
@@ -934,7 +1022,7 @@ class DWSmoothwalker : public CppUserModBase
     std::atomic<bool> m_flush_pending{false};     // live settings differ from m_baseline
     bool m_flush_failing = false;                 // a write-back failed; warned once until one succeeds
     std::chrono::steady_clock::time_point m_next_flush{};
-    std::string m_toggle_key, m_preset_key, m_shoulder_key;
+    std::string m_toggle_key, m_preset_key, m_shoulder_key, m_debug_key;
 
     dwsc::ModeTuner m_tuner; // game thread only
     std::mutex m_position_mutex;
@@ -957,6 +1045,12 @@ class DWSmoothwalker : public CppUserModBase
     UFunction* m_banner_function = nullptr;
     UObject* m_banner_library = nullptr;
     dwsc::LiveRef m_notifications; // NotificationSubsystem, game thread only, checked live before use
+
+    dwsc::DebugOverlay m_overlay;          // game thread only
+    std::atomic<bool> m_debug_overlay{false};
+    std::mutex m_debug_mutex;              // m_debug_preset, m_debug_tuning: written by publish_locked, read by the overlay's refresh
+    std::wstring m_debug_preset;           // the active preset's name, or Custom
+    bool m_debug_tuning = true;            // camera_tuning
 
     // Debounced: a burst of presses shows one banner, with the last text.
     // Dropped without a player: a banner queued at the main menu would show minutes later, after a load.
@@ -1131,6 +1225,13 @@ class DWSmoothwalker : public CppUserModBase
         g_log_stats.store(m_settings.log_stats);
         g_log_trace.store(m_settings.log_trace);
         m_show_banner.store(m_settings.show_banner);
+        m_debug_overlay.store(m_settings.debug_overlay);
+        {
+            auto* active = m_settings.preset != 0 ? find_preset(m_settings.preset) : nullptr;
+            std::lock_guard guard(m_debug_mutex);
+            m_debug_preset = m_settings.preset == 0 ? STR("Custom") : active ? dwsc::to_wide(active->name) : STR("preset ") + std::to_wstring(m_settings.preset);
+            m_debug_tuning = m_settings.camera_tuning;
+        }
 
         // enabled off is the game as shipped, camera modes and its own lag included (position_of).
         auto position = dwsc::position_of(m_settings);
@@ -1209,6 +1310,7 @@ class DWSmoothwalker : public CppUserModBase
             m_toggle_key = m_settings.toggle_key;
             m_preset_key = m_settings.preset_key;
             m_shoulder_key = m_settings.shoulder_key;
+            m_debug_key = m_settings.debug_key;
             publish_locked();
             return;
         }
@@ -1221,6 +1323,7 @@ class DWSmoothwalker : public CppUserModBase
             m_toggle_key = m_settings.toggle_key;
             m_preset_key = m_settings.preset_key;
             m_shoulder_key = m_settings.shoulder_key;
+            m_debug_key = m_settings.debug_key;
             m_baseline = std::move(file);
             apply_pending_file_locked();
             // Not a load request: only which of several matching presets to show.
@@ -1615,7 +1718,7 @@ class DWSmoothwalker : public CppUserModBase
         std::string names;
         for (auto& key : added)
         {
-            m_baseline[key] = std::stod(dwsc::format_number(dwsc::number_of(m_settings, key)));
+            if (dwsc::is_numeric_key(key)) m_baseline[key] = std::stod(dwsc::format_number(dwsc::number_of(m_settings, key))); // debug_key is a name
             names += (names.empty() ? "" : ", ") + key;
         }
         mark_pending_locked(); // the added keys are no longer pending, and the side file takes the new stamp
@@ -1690,6 +1793,43 @@ class DWSmoothwalker : public CppUserModBase
         mark_pending_locked(); // nothing left: clears the flag and deletes smoothwalker.pending
     }
 
+    // The debug overlay's panel, gathered at its refresh (a quarter second apart) on the game thread: the hook's feed,
+    // g_tuning under its shared lock, the copy publish_locked leaves in m_debug_*, the tuner and the API claim. Never
+    // m_file_mutex, which the engine tick does not take.
+    auto debug_panel(UObject* camera) -> dwsc::DebugPanel
+    {
+        dwsc::DebugPanel p;
+        p.enabled = g_enabled.load();
+        {
+            std::lock_guard guard(m_debug_mutex);
+            p.preset = m_debug_preset;
+            p.camera_tuning = m_debug_tuning;
+        }
+        p.camera_type = m_tuner.camera_type_name(camera);
+        p.modes = m_tuner.list_modes(camera, p.modes_stale);
+        AcquireSRWLockShared(&g_tuning_lock);
+        p.max_lag_h = g_tuning.max_lag_h;
+        p.max_lag_v = g_tuning.max_lag_v;
+        p.rotation_smoothing = g_tuning.rotation_smoothing;
+        ReleaseSRWLockShared(&g_tuning_lock);
+        p.keep_follow = g_debug_keep_follow.load(std::memory_order_relaxed);
+        p.keep_turn = g_debug_keep_turn.load(std::memory_order_relaxed);
+        p.influence = static_cast<dwsc::Influence>(g_debug_influence.load(std::memory_order_relaxed));
+        p.lag_h = g_debug_lag_h.load(std::memory_order_relaxed);
+        p.lag_v = g_debug_lag_v.load(std::memory_order_relaxed);
+        p.rate_h = g_debug_rate_h.load(std::memory_order_relaxed);
+        p.snap = static_cast<dwsc::Snap>(g_debug_snap.load(std::memory_order_relaxed));
+        if (auto at = g_debug_snap_qpc.load(std::memory_order_relaxed))
+        {
+            LARGE_INTEGER now{};
+            QueryPerformanceCounter(&now);
+            p.snap_age = static_cast<double>(now.QuadPart - at) / static_cast<double>(g_qpc_frequency.QuadPart);
+        }
+        p.api = dwsc::api_status();
+        p.api.glide = g_debug_glide.load(std::memory_order_relaxed);
+        return p;
+    }
+
     auto install_hook() -> bool
     {
         auto* camera = UObjectGlobals::StaticFindObject<UObject*>(nullptr, nullptr, STR("/Script/Engine.Default__CameraComponent"));
@@ -1722,11 +1862,11 @@ class DWSmoothwalker : public CppUserModBase
         return true;
     }
 
-    auto forget_player() -> void
+    auto forget_player(dwsc::Snap why = dwsc::Snap::Player) -> void
     {
         g_player_camera.store(nullptr);
         g_player_root.store(nullptr);
-        g_reset.store(true);
+        request_cut(why);
         m_controller = m_pawn = m_camera = m_root = {};
         m_player_known.store(false);
     }
@@ -1734,9 +1874,10 @@ class DWSmoothwalker : public CppUserModBase
     // A level change, called from the LoadMap pre hook and the engine tick; harmless if run twice for one load.
     auto forget_world() -> void
     {
-        forget_player();
+        forget_player(dwsc::Snap::World);
         m_tuner.forget();
         m_position_applied_generation = 0; // re-apply in the next world
+        m_overlay.forget();                // the level took the panel off the viewport; the next pawn gets a new one
     }
 
     // A duplicate of the new-object path where UE4SS installs BeginPlay. Game thread.
@@ -1759,7 +1900,7 @@ class DWSmoothwalker : public CppUserModBase
     {
         g_player_camera.store(nullptr);
         g_player_root.store(nullptr);
-        g_reset.store(true);
+        request_cut(dwsc::Snap::Pawn);
         m_pawn = m_camera = m_root = {};
     }
 
@@ -1865,6 +2006,7 @@ class DWSmoothwalker : public CppUserModBase
 
         show_pending_banner();
         apply_position();
+        m_overlay.tick(m_debug_overlay.load(), m_controller.object, m_camera.object, [&] { return dwsc::format_panel(debug_panel(m_camera.object)); });
         if (!m_controller.object) return;
 
         // Name lookup once per controller class, then a plain read.

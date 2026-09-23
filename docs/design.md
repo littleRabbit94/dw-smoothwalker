@@ -998,6 +998,119 @@ source at `97b7e501`, and the public source of Combat Camera - Configurable 3.1.
   `version.dll` or `winmm.dll` would load beside it as a second proxy, not collide with it: the note
   above is about two injectors, not a filename clash.
 
+## Debug overlay
+
+Since 0.10.0 (`src/debug_overlay.hpp`). `debug_overlay = 1` (ini, or Debug overlay on the Mod Menu page) puts
+a text panel at the top right of the screen with the live camera state; `debug_key` (ini only, unbound by
+default) flips the same setting and writes it back like the toggle key. Off by default. Built for tuning
+presets and for bug reports: one screenshot shows what the follow, the game's modes and the API were doing.
+
+### What it shows
+
+```
+Smoothwalker  ON   preset: Slot 2   tuning: on
+camera type   Exploration
+modes         Aiming              active     [Aiming, tuned]
+              Base                blend out  [Exploration, tuned]
+              Shadowstep_Attack   active     [untracked]
+follow 30%   turn off   (aiming)
+lag h 12/85 cm   v 4/50 cm   rate 6.5/s
+last snap     teleport, 41 s ago
+api           none
+```
+
+| Line | Source |
+|---|---|
+| Smoothwalker, preset, tuning | `g_enabled`; the active preset's name (or Custom) and `camera_tuning`, copied by `publish_locked` into `m_debug_*` under `m_debug_mutex`, because the engine tick never takes `m_file_mutex` |
+| camera type | `RebelCameraComponent:GetCameraType` on the player camera; the name from the return value's reflected `UEnum` (the part after `::`), else the number |
+| modes | `ModeTuner::list_modes`: every live `RebelCameraMode` on the player camera, newest first, with `RebelCameraMode:GetState` (0 blend in, 1 active, 2 blend out; 3, popped, is left out). Tracked modes show their group and `tuned` when the last apply wrote the camera position (`camera_tuning` and `enabled` on), else `as shipped`. At most 8 lines, then `+N more`; `(rescan pending)` while a scan is due |
+| follow, turn | the hook's `keep_pos` / `keep_rot` after the eased `aim`, `combat` and `traversal` blends; `turn off` without rotation smoothing. The name in brackets is the largest weight in that chain: aiming `aim`, combat `combat * (1 - aim)`, traversal `traversal * (1 - combat) * (1 - aim)`, none the rest |
+| lag | horizontal and vertical length of `out_offset`, the lag actually on screen (leash, keep share, wall clamp and crossfade included), over `max_lag_h` / `max_lag_v`; `rate` is `follow_rate_h` scaled by the curve at the current horizontal lag (`dwsc::follow_rate`, which `follow_alpha` now uses) |
+| last snap | the last restart of the follow from the capsule, with its age from QPC |
+| api | the claim as `Smoothwalker.owner()` reads it (under `dwapi::g_mutex`, an expired lease reads as nobody) with the lease left; `glide` while the crossfade started by a `release("glide")` runs |
+
+**Snap reasons.** Whoever sets `g_reset` names the reason first (`request_cut`, and `release_locked` for
+`api cut`); the first reason since the hook last took a cut is kept, so a level load reads `world change`,
+not the controller and pawn changes that follow it. The hook adds its own: `gap` (`reset_gap`), `teleport`
+(`reset_distance`), `toggle` (switched back on; wins over a cut left pending while off), `api lease ended`
+(the falling edge of a claim whose lease ran out, before the game thread drops it), `view lost` (the pivot
+or view unreadable, or a non-finite result). The first snap of a session reads `startup`.
+
+**Untracked modes.** `note_new()` already hands over every object constructed with the player camera as
+its outer. `adopt_new()` used to drop those whose class is not in `mode_classes()`; now one whose class
+derives from `/Script/RebelCamera.RebelCameraMode` goes into `m_untracked` (a `LiveRef`, the class name without
+`BP_CameraMode_` and `_C`, and a sequence number), capped at 32, dead entries pruned on each listing. Modes
+that existed before the camera was known come from `scan_instances()`, the one object walk per camera or
+world that already finds the tracked ones: an object on the camera that is not a captured mode goes through
+the same check. Tracked modes carry the same sequence number, so the listing sorts both by the order they
+were taken in.
+
+### Building the panel
+
+UMG from C++ through reflection, the region banner's idiom (`StaticFindObject`, a zeroed params buffer,
+`ProcessEvent`). Functions, classes and property offsets are looked up once; parameter offsets come from
+each `UFunction`'s properties, and struct parameters are written member by member through their
+`FProperty` offsets, so UE 5's double `FVector2D` is never assumed.
+
+1. `WidgetBlueprintLibrary::Create(controller, UserWidget, controller)`. Proven with a Lua probe
+   (2026-09-23): a plain `UserWidget` comes back with its `WidgetTree` already made.
+2. A `Border` and a `TextBlock` constructed with the tree as outer. Before anything is added: `Visibility`
+   `HitTestInvisible` (3) on all three, `BrushColor` black at 0.6, `Padding` 8, `Font.Size` 22 (the CDO's font is
+   `/Engine/EngineFonts/Roboto`, the only one cooked), `ColorAndOpacity.SpecifiedColor` off-white. `RebuildWidget`
+   then `SynchronizeProperties` apply them. A missing styling property is logged once and left at the engine
+   default; a missing function, class or placement property, or a position, anchor or alignment member that is
+   not a float or a double, turns the overlay off with one warning.
+3. `WidgetTree.RootWidget = Border` (must precede `AddToViewport`: `RebuildWidget` reads it), then
+   `Border:SetContent(TextBlock)` and `TextBlock:SetText`.
+4. The viewport slot, before `AddToViewport`, all through `UGameViewportSubsystem` (UE 5.5.4
+   `GameViewportSubsystem.cpp` and `UserWidget.cpp`, read via gh): `SetPositionInViewport((-16, 16), false)`
+   first, because `SetWidgetSlotPosition` resets the anchors to (0, 0); then `SetAnchorsInViewport` (1, 0) to
+   (1, 0) and `SetAlignmentInViewport` (1, 0). Point anchors with a zero size make `CalculateOffsetArgument`
+   auto-size the slot to the panel. The default slot anchors (0, 0, 1, 1) would stretch the Border over the
+   whole screen. The setters work before the widget is added (`SetWidgetSlot` does `FindOrAdd`), so the first
+   frame is already in place.
+5. `AddToViewport(1000)`, then `Widget:IsInViewport`: a refusal counts as a failed build (retried every 2 s,
+   warned once), not a panel shown.
+
+Switched off, `RemoveFromParent` and the references go; switched on again, a new panel is built.
+
+### Threading and cost
+
+- **Game thread only.** Built, refreshed and removed from the engine tick (`on_engine_tick`, after
+  `apply_position`). The hook touches no UObject for it: it stores numbers in relaxed atomics
+  (`g_debug_keep_follow`, `g_debug_keep_turn`, `g_debug_influence`, `g_debug_lag_h`, `g_debug_lag_v`,
+  `g_debug_rate_h`, `g_debug_snap`, `g_debug_snap_qpc`, `g_debug_glide`), a few stores per camera update
+  whether the overlay is on or not. A refresh may pair values from two frames.
+- **Lifecycle.** Built lazily, only while the setting is on and the player camera is known, so the main menu
+  never shows it. Held as a `LiveRef`; a dead widget or text block is rebuilt on a later tick (retried every
+  2 s after a failure, the failure logged once). `forget_world()` drops the references: the level change takes
+  the panel off the viewport, and the next pawn gets a new one. Each refresh also asks `Widget:IsInViewport`,
+  so a panel the game took off the screen without a level change is rebuilt instead of waiting for its GC.
+- **Cost.** Off: one atomic load per tick. On: at most one refresh per 250 ms, which calls `IsInViewport` and `GetCameraType` once,
+  `GetState` once per listed mode, takes `dwapi::g_mutex` and `g_tuning_lock` shared briefly, and calls
+  `SetText` only when the text changed. No `FindAllOf`, `ForEachUObject` or object-array walk on the refresh
+  path (a per-tick `FindAllOf` sampler froze this game before). The listing also takes the new-object hand-off,
+  so it stays current while Smoothwalker is off and `mode_state()` is not running.
+
+### Known limits
+
+- **Hot reload freezes it.** The destructor runs off the game thread and must not touch UMG, so a panel on
+  screen at a reload keeps its last text until the next level change removes it; the reloaded DLL builds a
+  new one over it.
+- **Photo mode and a hidden HUD do not hide it.** It is a viewport widget of its own, not part of the game's
+  HUD. Switch it off for screenshots.
+- **Roboto is proportional.** No monospace font is cooked (RobotoMono and DroidSansMono are absent), so the
+  columns line up only roughly.
+- **Mode order is the order taken, not the camera's stack.** Modes present before the camera was known are
+  ordered by the object array; if the game reuses a mode instance, it keeps its first position.
+- **An untracked mode of a tracked class.** A mode whose class is in `mode_classes()` but not captured yet
+  (loaded after the last apply, before `adopt_late` can tune it) is listed `[untracked]` until the next scan.
+- **Bare `UserWidget` relies on a shipping build.** The panel's class is the abstract native `UUserWidget`,
+  which `CreateWidget` accepts only in Shipping and Test builds (`ValidateUserWidgetClass` is compiled out,
+  `UserWidget.cpp` 2465-2477 in 5.5.4); proven working in this game's shipping build by the Lua probe.
+- **Not run in game yet.** The widget calls follow the probe; the styling, the slot placement and the text
+  refresh are checked against the 5.5.4 source only.
+
 ## Known limits
 
 - **One game build.** The hook needs `GetCameraView` at vtable slot 214 as on build 25232147; when slot 214
@@ -1014,6 +1127,8 @@ source at `97b7e501`, and the public source of Combat Camera - Configurable 3.1.
 - **Finisher and shadowstep attack cameras** (~40 classes) are left as shipped.
 - **Stats race.** The stats accumulator's load-then-store race is not fixed (stats only).
 - **The `FindFirstOf` fallback's cost** for one object walk is not measured.
+- **The debug overlay** freezes across a hot reload, shows through photo mode and a hidden HUD, and lines up
+  only roughly in Roboto; see "Debug overlay".
 
 ## Version history
 
@@ -1118,3 +1233,13 @@ startup flush ("The settings file"); presets carrying 37 keys (32 now), ten slot
 normalized cached values, the regenerated manifest, the Preset picker and V cycling through all of them
 ("Presets"); the crossfade ("Crossfade"); banners needing a player ("Banners"); and discovery that works in
 every loader profile ("Loader profiles").
+
+### 0.10.0: debug overlay
+
+`debug_overlay` and `debug_key`: a live UMG panel at the top right of the screen with the follow, the game's
+camera modes, the last snap and the API claim ("Debug overlay"). The Mod Menu page has a Debug overlay toggle
+in the Debug group. Hard cuts now carry a reason (`request_cut`, `Snap`), the follow rate after the curve is
+its own function (`follow_rate`), and the mode tuner keeps the untracked camera modes it sees for the listing.
+0.10.0 also carries what landed after the 0.9.0 release without a version bump: the camera API (docs/api.md),
+`combat_follow` / `combat_rotation`, `traversal_follow` / `traversal_rotation`, and missing ini keys added at
+startup. Not yet tested in game.

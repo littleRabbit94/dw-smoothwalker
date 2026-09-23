@@ -54,6 +54,7 @@ namespace dwapi
     inline Snapshot g_snapshot{};
     inline std::atomic<bool>* g_enabled = nullptr; // the mod's live switch, set by dllmain
     inline std::atomic<bool>* g_reset = nullptr;   // the hook's hard-cut flag, set by dllmain: release("cut")
+    inline std::atomic<int>* g_reset_reason = nullptr; // why g_reset was set (dwsc::Snap), set by dllmain; the debug overlay shows it
     inline std::atomic<uint32_t> g_game_thread{0};  // captured on the engine tick
 
     // ---------------------------------------------------------------------------------------------- authority
@@ -504,7 +505,11 @@ namespace dwapi
         // How to come back goes out first: the hook's acquire-load of the slot then implies this is visible, so an
         // update that sees the claim dropped always sees the glide too and never takes the falling edge's cut.
         if (glide) g_release_generation.fetch_add(1, std::memory_order_relaxed);
-        else if (g_reset) g_reset->store(true, std::memory_order_relaxed);
+        else if (g_reset)
+        {
+            if (g_reset_reason) g_reset_reason->store(static_cast<int>(dwsc::Snap::ApiCut), std::memory_order_relaxed);
+            g_reset->store(true, std::memory_order_relaxed);
+        }
         g_owner_keep_layers.store(false, std::memory_order_relaxed);
         g_owner_expires.store(0, std::memory_order_relaxed);
         g_owner_slot.store(-1, std::memory_order_release);

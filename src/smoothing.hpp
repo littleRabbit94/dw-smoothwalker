@@ -128,10 +128,42 @@ namespace dwsc
         }
     }
 
+    // The catch-up rate in effect at this lag, 1/s: the rate scaled by the curve.
+    inline double follow_rate(double rate, int kind, double lag, double catchup, double floor_scale)
+    {
+        double scale = kind == 0 ? 1.0 : floor_scale + (1.0 - floor_scale) * curve(kind, catchup > 0.0 ? lag / catchup : 1.0);
+        return std::max(rate, 0.0) * scale;
+    }
+
     // Frame-rate independent: the same lag closes at the same speed at any frame time.
     inline double follow_alpha(double rate, int kind, double lag, double catchup, double floor_scale, double dt)
     {
-        double scale = kind == 0 ? 1.0 : floor_scale + (1.0 - floor_scale) * curve(kind, catchup > 0.0 ? lag / catchup : 1.0);
-        return 1.0 - std::exp(-std::max(rate, 0.0) * scale * dt);
+        return 1.0 - std::exp(-follow_rate(rate, kind, lag, catchup, floor_scale) * dt);
     }
+
+    // Why the follow last restarted from the capsule (a hard cut), for the debug overlay. Whoever sets the hook's
+    // reset flag names the reason first; the hook works out the rest (a gap, a teleport, the toggle) itself.
+    enum class Snap : int
+    {
+        None,
+        Startup,
+        Teleport,   // pivot moved more than reset_distance in one update
+        Gap,        // no update for more than reset_gap (pause, load, cutscene, free camera)
+        World,      // level change
+        Player,     // player controller found, changed or gone
+        Pawn,       // new or lost pawn
+        Toggle,     // switched back on
+        ApiCut,     // release("cut"), or a claim dropped by an uninstall or a Lua restart
+        ClaimEnded, // a claim's lease ran out, seen by the hook before the game thread dropped it
+        ViewLost,   // the pivot or the view could not be read, or a result was not finite
+    };
+
+    // Which override the shown trail mostly follows: the largest weight in the traversal, combat, aiming chain.
+    enum class Influence : int
+    {
+        None,
+        Traversal,
+        Combat,
+        Aiming,
+    };
 } // namespace dwsc

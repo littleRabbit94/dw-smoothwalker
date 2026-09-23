@@ -18,6 +18,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -73,10 +74,13 @@ namespace dwsc
 
         bool log_stats = false;
         bool log_trace = false; // per-frame vertical-follow trace, written to the log around every crouch and stand
+
+        bool debug_overlay = false; // the live panel at the top right of the screen (debug_overlay.hpp)
+        std::string debug_key;      // shows and hides it; empty: not bound
     };
 
     // A preset is a camera look: follow, turning, the look limits and camera position. Not the switches (enabled,
-    // camera_tuning, shoulder_swap, show_banner, log_stats, log_trace), the safety values (wall_clamp,
+    // camera_tuning, shoulder_swap, show_banner, log_stats, log_trace, debug_overlay), the safety values (wall_clamp,
     // reset_distance, reset_gap), position_transition, the key names, or preset.
     inline const std::array<const char*, 41> PRESET_KEYS{
             "follow_rate_h", "follow_rate_v", "curve_h", "curve_v", "catchup_distance", "min_rate_scale", "max_lag_h", "max_lag_v",
@@ -87,14 +91,14 @@ namespace dwsc
             "traversal_height", "traversal_fov"};
 
     // Every numeric setting: the ones the Mod Menu can move and the mod writes back.
-    inline const std::array<const char*, 52> NUMERIC_KEYS{
+    inline const std::array<const char*, 53> NUMERIC_KEYS{
             "enabled", "follow_rate_h", "follow_rate_v", "curve_h", "curve_v", "catchup_distance", "min_rate_scale", "max_lag_h",
             "max_lag_v", "soft_leash", "aiming_follow", "combat_follow", "traversal_follow", "rotation_smoothing", "rotation_rate", "combat_rotation",
             "traversal_rotation", "wall_clamp", "reset_distance", "reset_gap", "show_banner",
             "camera_tuning", "exploration_distance", "exploration_height", "exploration_shoulder", "exploration_fov", "sprint_distance",
             "sprint_height", "sprint_shoulder", "sprint_fov", "combat_distance", "combat_height", "combat_shoulder", "combat_fov", "focus_distance", "focus_height", "focus_shoulder", "focus_fov",
             "aiming_distance", "aiming_height", "aiming_shoulder", "aiming_fov", "traversal_distance", "traversal_height", "traversal_fov",
-            "shoulder_swap", "pitch_min", "pitch_max", "position_transition", "preset", "log_stats", "log_trace"};
+            "shoulder_swap", "pitch_min", "pitch_max", "position_transition", "preset", "log_stats", "log_trace", "debug_overlay"};
 
     inline auto is_preset_key(const std::string& key) -> bool
     {
@@ -199,6 +203,8 @@ namespace dwsc
         else if (key == "preset") integer(s.preset);
         else if (key == "log_stats") flag(s.log_stats);
         else if (key == "log_trace") flag(s.log_trace);
+        else if (key == "debug_overlay") flag(s.debug_overlay);
+        else if (key == "debug_key") s.debug_key = value;
     }
 
     // The Mod Menu's ranges (mod_settings.ini). Live values are written back into the file, and a value outside
@@ -256,7 +262,7 @@ namespace dwsc
             auto key = trim(line.substr(0, eq));
             auto value = trim(line.substr(eq + 1));
             // A blank key name is kept, so it unbinds the key instead of falling back to the default.
-            bool key_name = key == "toggle_key" || key == "preset_key" || key == "shoulder_key";
+            bool key_name = key == "toggle_key" || key == "preset_key" || key == "shoulder_key" || key == "debug_key";
             if (!key.empty() && (!value.empty() || key_name)) set_value(s, key, value);
             if (key.rfind("focus_", 0) == 0 && !value.empty()) focus_seen = true;
         }
@@ -353,6 +359,7 @@ namespace dwsc
         if (key == "preset") return s.preset;
         if (key == "log_stats") return flag(s.log_stats);
         if (key == "log_trace") return flag(s.log_trace);
+        if (key == "debug_overlay") return flag(s.debug_overlay);
         return 0.0;
     }
 
@@ -474,6 +481,8 @@ namespace dwsc
             {"preset", "0 Custom, 101 Tight, 102 Balanced, 103 Cinematic, 1-6 a slot, 201+ a preset from the config/presets folder: shows the matching preset; change it to load one, or to an unused slot to save your settings into it"},
             {"log_stats", "every 5 s in UE4SS.log: smoothed frames, mean lag, wall clamp share"},
             {"log_trace", "1 writes a per-frame trace of the vertical follow to UE4SS.log around every crouch and stand (240 lines each)"},
+            {"debug_overlay", "1 shows a live panel of the camera state at the top right of the screen"},
+            {"debug_key", "shows and hides that panel in game (blank: no key)"},
         };
         auto found = comments.find(key);
         return found == comments.end() ? nullptr : found->second;
@@ -484,6 +493,8 @@ namespace dwsc
     // assignment line (a commented-out one does not count; one with a bad value does, and the flush rewrites it)
     // gets "key = value ; comment" after the line of the nearest earlier NUMERIC_KEYS entry the file has, else
     // after the last line. Every other byte is kept, the newline style and a missing final newline included.
+    // debug_key is added the same way, after debug_overlay: not a ConfigKey, but a blank line to fill in is how a
+    // player finds it. The older key names predate this writer and are in every file it meets.
     // Returns the new content and the added keys.
     inline auto with_missing_keys(const std::string& content, const Settings& s) -> std::pair<std::string, std::vector<std::string>>
     {
@@ -514,14 +525,21 @@ namespace dwsc
             auto eq = line.find('=');
             if (eq == std::string::npos) continue;
             auto key = trim(line.substr(0, eq));
-            if (is_numeric_key(key)) line_of[key] = i;
+            if (is_numeric_key(key) || key == "debug_key") line_of[key] = i;
+        }
+
+        std::vector<const char*> order; // NUMERIC_KEYS, with debug_key after debug_overlay
+        for (auto* key : NUMERIC_KEYS)
+        {
+            order.push_back(key);
+            if (std::string_view(key) == "debug_overlay") order.push_back("debug_key");
         }
 
         std::vector<std::string> added;
         std::map<size_t, std::string> after; // line index -> the lines added after it, each led by a newline
         std::string tail;                    // an empty file: the added lines alone
-        std::optional<size_t> anchor;        // the line of the last key seen in NUMERIC_KEYS order; an added key goes after the one before it
-        for (auto* key : NUMERIC_KEYS)
+        std::optional<size_t> anchor;        // the line of the last key seen in `order`; an added key goes after the one before it
+        for (auto* key : order)
         {
             if (auto found = line_of.find(key); found != line_of.end())
             {
@@ -529,7 +547,7 @@ namespace dwsc
                 continue;
             }
             // Laid out as the shipped file: the key padded to 16, the value to 6, then its comment.
-            auto name = std::string(key), value = format_number(number_of(s, key));
+            auto name = std::string(key), value = name == "debug_key" ? s.debug_key : format_number(number_of(s, key));
             auto text = name + std::string(name.size() < 16 ? 16 - name.size() : 0, ' ') + " = " + value;
             if (auto* comment = shipped_comment(name)) text += std::string(value.size() < 6 ? 6 - value.size() : 1, ' ') + "; " + comment;
             if (lines.empty()) tail += text + newline;

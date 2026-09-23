@@ -72,7 +72,7 @@ that slot picked and every Apply saves into it. Copy the file under any other na
 ## Checking a change in game
 
 With `log_stats = 1` the mod logs the per-frame hook cost every 5 s. With `log_trace = 1` it writes the last 240
-frames of the vertical follow to the log 90 frames after every crouch or stand, the transition in the middle. Every camera position apply logs its own
+frames of the vertical follow to the log 90 frames after every crouch or stand, the transition in the middle. With `debug_overlay = 1` (or a key named in `debug_key`) a panel at the top right of the screen shows the live follow, the game's camera modes, the last snap and the API claim; see `docs/design.md`, "Debug overlay". Every camera position apply logs its own
 duration (`camera position applied: ... ms`): after the first apply of a session it should read about 0 ms,
 and a number in the tens means something walks the object array on a key press again.
 
