@@ -129,7 +129,7 @@ still ambiguous, as it is for any smoothing.
   Active 1, BlendingOut 2, Popped 3; checked live), and the tuner already holds the player's live modes with
   their group. Each engine tick one pass (`ModeTuner::mode_state()`) calls `GetState` on the live Aiming-,
   Combat- and Traversal-group modes only, skipping a group once its flag is already set (none while there
-  is none of them), and publishes three atomic flags. The hook eases three 0-1 factors toward them (rate 8/s
+  is none of them), and publishes three atomic flags. A rescan request (a new camera or world, or over 256 modes waiting in the hand-off) is served by that pass on the next tick through `ensure_scanned` (capture, adopt, one `ForEachUObject` walk), not left to an apply that may never come; every other tick only adopts the hand-off. The hook eases three 0-1 factors toward them (rate 8/s
   on the world delta, about a third of a second): `aim`, `combat` and `traversal`. Two keep shares are built
   from them, combat taking over from wherever traversal left it and aiming from wherever combat left it:
   `keep_pos = lerp(lerp(lerp(1, traversal_follow_keep, traversal), combat_follow_keep, combat), aiming_keep, aim)`,
@@ -295,7 +295,7 @@ the centre (0.7.4).
   filled two ways. Once per camera or world, one `ForEachUObject` pass compares each object's outer with the
   camera, then its class with the captured classes. After that the new-object callback hands over anything
   constructed with the player's camera as outer (one pointer compare per constructed object, a locked
-  hand-off on a match, at most 256 waiting or the next apply scans again), and the apply sorts modes from
+  hand-off on a match, at most 256 waiting or the next tick scans again), and the apply sorts modes from
   the rest and drops collected ones. History: every apply and both flip stages called
   `FindAllOf("RebelCameraModeTPP")`, which compares names up every object's class chain: 58-64 ms a call on
   the game thread (435,100 objects), so each N or V dropped 3-4 frames at the press, again on the next frame
@@ -401,6 +401,7 @@ the centre (0.7.4).
   uninstalls Lua mods before C++ mods reload (`UE4SSProgram.cpp` `uninstall_mods`, `queue_reinstall_mods`). This
   rewrites a `preset` id the regenerated manifest no longer lists (a deleted drop-in) before the page could
   fail on it ("configured value is outside declared choices", `choices.lua`).
+- **Missing keys added at startup.** Just before that flush the constructor adds each numeric key the file lacks (an ini copied back from an older version; a commented-out line counts as missing) as `key = value` with the live value, after the nearest earlier key the file has, keeping every other byte and the newline style (`with_missing_keys`): the page opens only if every `ConfigKey` is in the file, and the flush rewrites only lines that exist.
 
 ### Presets
 

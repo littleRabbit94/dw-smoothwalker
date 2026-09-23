@@ -747,6 +747,7 @@ class DWSmoothwalker : public CppUserModBase
         std::lock_guard guard(m_file_mutex);
         load_presets_locked();
         reload_settings_locked(true);
+        add_missing_keys_locked();
         // Once, without the camera_live() gate: no Mod Menu page can be open this early (docs/design.md, "Startup
         // flush"). Fixes a preset id the regenerated manifest may not list yet, before the page can fail on it.
         if (m_flush_pending.load()) flush_locked(std::chrono::steady_clock::now());
@@ -1166,7 +1167,7 @@ class DWSmoothwalker : public CppUserModBase
         auto* camera = static_cast<UObject*>(g_player_camera.load());
         m_tuner.tick(g_view_updates.load(), g_view_seconds.load(), camera);
         // off: no per-tick GetState calls either
-        auto state = camera && g_enabled.load() ? m_tuner.mode_state() : dwsc::ModeState{};
+        auto state = camera && g_enabled.load() ? m_tuner.mode_state(camera) : dwsc::ModeState{};
         g_aiming.store(state.aiming);
         if (state.combat != g_combat.exchange(state.combat))
             Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] combat camera {}\n"), state.combat ? STR("on") : STR("off"));
@@ -1593,6 +1594,32 @@ class DWSmoothwalker : public CppUserModBase
             return;
         }
         m_pending_file = std::move(content);
+    }
+
+    // Once, in the constructor after the full parse, so the Mod Menu never reads a file without them: an ini copied
+    // back from an older version lacks the newer keys, and the page opens only if every ConfigKey is in the file.
+    // The added lines hold the live values, so the baseline takes them as written, as the flush does.
+    auto add_missing_keys_locked() -> void
+    {
+        if (last_write(SETTINGS_PATH) != m_settings_stamp) return; // missing (stamp 0 both), or changed since the parse
+        auto content = dwsc::read_file(SETTINGS_PATH);
+        if (!content) return;
+        auto [updated, added] = dwsc::with_missing_keys(*content, m_settings);
+        if (added.empty()) return;
+        if (!dwsc::write_file(SETTINGS_PATH, updated))
+        {
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] smoothwalker.ini: could not add {} missing keys\n"), added.size());
+            return;
+        }
+        m_settings_stamp = last_write(SETTINGS_PATH);
+        std::string names;
+        for (auto& key : added)
+        {
+            m_baseline[key] = std::stod(dwsc::format_number(dwsc::number_of(m_settings, key)));
+            names += (names.empty() ? "" : ", ") + key;
+        }
+        mark_pending_locked(); // the added keys are no longer pending, and the side file takes the new stamp
+        Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] smoothwalker.ini: added {} missing keys: {}\n"), added.size(), widen(names));
     }
 
     // A write-back the last session missed. Applied only if smoothwalker.ini still has the stamped write time.

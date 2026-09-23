@@ -420,6 +420,136 @@ namespace dwsc
         return out;
     }
 
+    // The trailing comment each numeric key has in the shipped mod/config/smoothwalker.ini, for a line
+    // with_missing_keys adds back. Keep in step with that file; a key without one there is left out here.
+    inline auto shipped_comment(const std::string& key) -> const char*
+    {
+        static const std::map<std::string, const char*> comments{
+            {"enabled", "0 is the game's own camera: no follow, no camera position changes, preset and shoulder keys ignored"},
+            {"follow_rate_h", "horizontal catch-up rate"},
+            {"follow_rate_v", "vertical catch-up rate"},
+            {"curve_h", "0 constant, 1 linear, 2 smoothstep, 3 ease in-out"},
+            {"catchup_distance", "cm of lag at which a curve reaches the full rate"},
+            {"min_rate_scale", "rate multiplier at zero lag for curves 1-3"},
+            {"max_lag_h", "cm the camera may fall behind horizontally; 0 is no trail, and that axis's rate and curve do nothing"},
+            {"max_lag_v", "cm vertically; 0 as above"},
+            {"soft_leash", "1 eases into the limit, 0 stops hard at it"},
+            {"aiming_follow", "percent of the trail and the turning smoothing kept while you aim: 0 none, 100 all"},
+            {"combat_follow", "percent of the trail kept while a combat camera is up: 0 none, 100 all"},
+            {"traversal_follow", "percent of the trail kept while a traversal camera is up: 0 none, 100 all"},
+            {"combat_rotation", "percent of the turning smoothing kept while a combat camera is up: 0 none, 100 all"},
+            {"traversal_rotation", "percent of the turning smoothing kept while a traversal camera is up: 0 none, 100 all"},
+            {"wall_clamp", "keep the camera in front of walls the game pulled it in for"},
+            {"reset_distance", "cm moved in one frame that counts as a teleport: snap instead of smoothing"},
+            {"reset_gap", "s without camera updates (cutscene, free camera, load) before a snap"},
+            {"show_banner", "show the preset name and on/off in the game's region banner"},
+            {"camera_tuning", "0 puts every camera mode back as the game ships it"},
+            {"exploration_distance", "percent of the game's distance behind the character"},
+            {"exploration_height", "cm higher"},
+            {"exploration_shoulder", "cm further out to the side (centred camera modes are left alone)"},
+            {"exploration_fov", "degrees of field of view added"},
+            {"sprint_distance", "percent of the game's distance behind the character"},
+            {"sprint_height", "cm higher"},
+            {"sprint_shoulder", "cm further out to the side (centred camera modes are left alone)"},
+            {"sprint_fov", "degrees of field of view added"},
+            {"combat_distance", "percent of the game's distance behind the character"},
+            {"combat_height", "cm higher"},
+            {"combat_shoulder", "cm further out to the side (centred camera modes are left alone)"},
+            {"combat_fov", "degrees of field of view added"},
+            {"focus_distance", "percent of the game's distance behind the character"},
+            {"focus_height", "cm higher"},
+            {"focus_shoulder", "cm further out to the side (centred camera modes are left alone)"},
+            {"focus_fov", "degrees of field of view added"},
+            {"aiming_distance", "percent of the game's distance behind the character"},
+            {"aiming_height", "cm higher"},
+            {"aiming_shoulder", "cm further out to the side (centred camera modes are left alone)"},
+            {"aiming_fov", "degrees of field of view added"},
+            {"traversal_distance", "percent of the game's distance behind the character"},
+            {"traversal_height", "cm higher"},
+            {"traversal_fov", "degrees of field of view added"},
+            {"shoulder_swap", "1 puts the camera over the other shoulder"},
+            {"pitch_min", "how far down you can look (the game: -60)"},
+            {"pitch_max", "how far up you can look (the game: 40)"},
+            {"position_transition", "s a position change or shoulder swap glides over; 0 snaps"},
+            {"preset", "0 Custom, 101 Tight, 102 Balanced, 103 Cinematic, 1-6 a slot, 201+ a preset from the config/presets folder: shows the matching preset; change it to load one, or to an unused slot to save your settings into it"},
+            {"log_stats", "every 5 s in UE4SS.log: smoothed frames, mean lag, wall clamp share"},
+            {"log_trace", "1 writes a per-frame trace of the vertical follow to UE4SS.log around every crouch and stand (240 lines each)"},
+        };
+        auto found = comments.find(key);
+        return found == comments.end() ? nullptr : found->second;
+    }
+
+    // The Mod Menu page opens only if every ConfigKey is in the file, and rewrite_numbers changes only lines that
+    // exist, so an ini copied back from an older version needs the newer keys added. A numeric key with no
+    // assignment line (a commented-out one does not count; one with a bad value does, and the flush rewrites it)
+    // gets "key = value ; comment" after the line of the nearest earlier NUMERIC_KEYS entry the file has, else
+    // after the last line. Every other byte is kept, the newline style and a missing final newline included.
+    // Returns the new content and the added keys.
+    inline auto with_missing_keys(const std::string& content, const Settings& s) -> std::pair<std::string, std::vector<std::string>>
+    {
+        struct Line
+        {
+            size_t start, text_end, end; // text_end: before "\r\n" or "\n"; end: after it
+        };
+        std::vector<Line> lines;
+        for (size_t pos = 0; pos < content.size();)
+        {
+            auto nl = content.find('\n', pos);
+            if (nl == std::string::npos)
+            {
+                lines.push_back({pos, content.size(), content.size()});
+                break;
+            }
+            lines.push_back({pos, nl > pos && content[nl - 1] == '\r' ? nl - 1 : nl, nl + 1});
+            pos = nl + 1;
+        }
+        auto first_nl = content.find('\n');
+        std::string newline = first_nl != std::string::npos && first_nl > 0 && content[first_nl - 1] == '\r' ? "\r\n" : "\n";
+
+        std::map<std::string, size_t> line_of; // a repeated key: its last line, as parse_numbers keeps the last value
+        for (size_t i = 0; i < lines.size(); ++i)
+        {
+            auto line = content.substr(lines[i].start, lines[i].text_end - lines[i].start);
+            if (auto cut = line.find_first_of(";#"); cut != std::string::npos) line.resize(cut);
+            auto eq = line.find('=');
+            if (eq == std::string::npos) continue;
+            auto key = trim(line.substr(0, eq));
+            if (is_numeric_key(key)) line_of[key] = i;
+        }
+
+        std::vector<std::string> added;
+        std::map<size_t, std::string> after; // line index -> the lines added after it, each led by a newline
+        std::string tail;                    // an empty file: the added lines alone
+        std::optional<size_t> anchor;        // the line of the last key seen in NUMERIC_KEYS order; an added key goes after the one before it
+        for (auto* key : NUMERIC_KEYS)
+        {
+            if (auto found = line_of.find(key); found != line_of.end())
+            {
+                anchor = found->second;
+                continue;
+            }
+            // Laid out as the shipped file: the key padded to 16, the value to 6, then its comment.
+            auto name = std::string(key), value = format_number(number_of(s, key));
+            auto text = name + std::string(name.size() < 16 ? 16 - name.size() : 0, ' ') + " = " + value;
+            if (auto* comment = shipped_comment(name)) text += std::string(value.size() < 6 ? 6 - value.size() : 1, ' ') + "; " + comment;
+            if (lines.empty()) tail += text + newline;
+            else after[anchor.value_or(lines.size() - 1)] += newline + text;
+            added.push_back(key);
+        }
+        if (added.empty()) return {content, added};
+
+        std::string out;
+        out.reserve(content.size() + tail.size() + 64 * added.size());
+        for (size_t i = 0; i < lines.size(); ++i)
+        {
+            out.append(content, lines[i].start, lines[i].text_end - lines[i].start);
+            if (auto extra = after.find(i); extra != after.end()) out += extra->second;
+            out.append(content, lines[i].text_end, lines[i].end - lines[i].text_end);
+        }
+        out += tail;
+        return {out, added};
+    }
+
     inline auto read_file(const std::string& path) -> std::optional<std::string>
     {
         std::ifstream file(path, std::ios::binary);

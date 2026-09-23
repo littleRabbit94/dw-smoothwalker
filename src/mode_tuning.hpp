@@ -242,12 +242,17 @@ namespace dwsc
 
         // Whether an Aiming-, Combat- or Traversal-group mode is blending in or active (ECameraModeState 0 or 1;
         // 2 blending out, 3 popped). One GetState call per live instance of those three groups per engine tick,
-        // skipped once a group's flag is already set. False until an apply has scanned this camera.
-        auto mode_state() -> ModeState
+        // skipped once a group's flag is already set. A rescan request (a new camera or world, or an overflow in
+        // adopt_new) is served here on the next tick, not left to an apply that may never come. Only then does it
+        // capture and walk every object; every other tick only adopts the hand-off. capture() on every tick would
+        // retry a class dropped by an unload each time (about 50 ms a failed lookup) and capture a reloaded one
+        // without the late-class write adopt_late() gives it.
+        auto mode_state(UObject* player_camera) -> ModeState
         {
             ModeState state;
+            if (m_scan_needed) ensure_scanned(player_camera);
+            else adopt_new();
             if (!m_layout_ok || !m_get_state || m_scan_needed) return state;
-            adopt_new();
             for_each_instance([&](UObject* instance, Mode& mode) {
                 bool* found = mode.spec.group == Aiming      ? &state.aiming
                               : mode.spec.group == Combat    ? &state.combat
@@ -280,7 +285,7 @@ namespace dwsc
         auto apply(const PositionTuning& tuning, UObject* player_camera) -> void
         {
             auto started = std::chrono::steady_clock::now();
-            capture();
+            ensure_scanned(player_camera);
             if (!m_layout_ok) return;
             int classes = 0;
             for (auto& mode : m_modes)
@@ -290,8 +295,6 @@ namespace dwsc
                 ++classes;
             }
             int live = 0;
-            adopt_new();
-            if (m_scan_needed) scan_instances(player_camera);
             for_each_instance([&](UObject* instance, Mode& mode) {
                 write(instance, mode, tuning);
                 ++live;
@@ -579,8 +582,18 @@ namespace dwsc
             m_scan_needed = false;
         }
 
+        // Capture first: after forget() nothing is captured, and a scan then would find no modes yet clear
+        // m_scan_needed, leaving the apply to write the CDOs only.
+        auto ensure_scanned(UObject* player_camera) -> void
+        {
+            capture();
+            if (!m_layout_ok) return;
+            adopt_new();
+            if (m_scan_needed) scan_instances(player_camera);
+        }
+
         // Game thread. Takes what note_new() handed over and drops collected modes. After an overflow the
-        // list may have missed a mode, so the next apply scans.
+        // list may have missed a mode, so the next mode_state() or apply scans.
         auto adopt_new() -> void
         {
             std::vector<LiveRef> fresh;
