@@ -148,12 +148,13 @@ namespace dwsc
         return p;
     }
 
-    // Whether an Aiming-group or a Combat-group mode is blending in or active, from one scan of the player's
-    // live modes.
+    // Whether an Aiming-, a Combat- or a Traversal-group mode is blending in or active, from one scan of the
+    // player's live modes.
     struct ModeState
     {
         bool aiming = false;
         bool combat = false;
+        bool traversal = false;
     };
 
     class ModeTuner
@@ -239,8 +240,8 @@ namespace dwsc
             m_scan_needed = true;
         }
 
-        // Whether an Aiming-group or Combat-group mode is blending in or active (ECameraModeState 0 or 1; 2
-        // blending out, 3 popped). One GetState call per live instance of those two groups per engine tick,
+        // Whether an Aiming-, Combat- or Traversal-group mode is blending in or active (ECameraModeState 0 or 1;
+        // 2 blending out, 3 popped). One GetState call per live instance of those three groups per engine tick,
         // skipped once a group's flag is already set. False until an apply has scanned this camera.
         auto mode_state() -> ModeState
         {
@@ -248,7 +249,10 @@ namespace dwsc
             if (!m_layout_ok || !m_get_state || m_scan_needed) return state;
             adopt_new();
             for_each_instance([&](UObject* instance, Mode& mode) {
-                bool* found = mode.spec.group == Aiming ? &state.aiming : mode.spec.group == Combat ? &state.combat : nullptr;
+                bool* found = mode.spec.group == Aiming      ? &state.aiming
+                              : mode.spec.group == Combat    ? &state.combat
+                              : mode.spec.group == Traversal ? &state.traversal
+                                                             : nullptr;
                 if (!found || *found) return;
                 uint8_t params[16]{};
                 params[0] = 0xFF;

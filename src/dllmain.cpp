@@ -86,6 +86,8 @@ namespace
         double aiming_keep;  // aiming_follow as a share: the trail and turning smoothing kept while aiming
         double combat_follow_keep;   // combat_follow as a share: the trail kept while a combat camera is up
         double combat_rotation_keep; // combat_rotation as a share: the turning smoothing kept while a combat camera is up
+        double traversal_follow_keep;   // traversal_follow as a share: the trail kept while a traversal camera is up
+        double traversal_rotation_keep; // traversal_rotation as a share: the turning smoothing kept while a traversal camera is up
         uint64_t generation; // bumped by a publish that changed a value
     };
 
@@ -93,7 +95,8 @@ namespace
     {
         return {s.follow_rate_h, s.follow_rate_v, s.curve_h, s.curve_v, s.catchup_distance, s.min_rate_scale, s.max_lag_h, s.max_lag_v,
                 s.soft_leash, s.rotation_smoothing, s.wall_clamp, s.rotation_rate, s.reset_distance, s.reset_gap, s.position_transition,
-                s.aiming_follow / 100.0, s.combat_follow / 100.0, s.combat_rotation / 100.0, 0};
+                s.aiming_follow / 100.0, s.combat_follow / 100.0, s.combat_rotation / 100.0, s.traversal_follow / 100.0,
+                s.traversal_rotation / 100.0, 0};
     }
 
     // Every field but generation.
@@ -104,7 +107,8 @@ namespace
                a.max_lag_v == b.max_lag_v && a.soft_leash == b.soft_leash && a.rotation_smoothing == b.rotation_smoothing &&
                a.wall_clamp == b.wall_clamp && a.rotation_rate == b.rotation_rate && a.reset_distance == b.reset_distance &&
                a.reset_gap == b.reset_gap && a.transition == b.transition && a.aiming_keep == b.aiming_keep &&
-               a.combat_follow_keep == b.combat_follow_keep && a.combat_rotation_keep == b.combat_rotation_keep;
+               a.combat_follow_keep == b.combat_follow_keep && a.combat_rotation_keep == b.combat_rotation_keep &&
+               a.traversal_follow_keep == b.traversal_follow_keep && a.traversal_rotation_keep == b.traversal_rotation_keep;
     }
 
     using GetCameraViewFn = void(__fastcall*)(void* self, float delta_time, void* desired_view);
@@ -125,6 +129,7 @@ namespace
     std::atomic<bool> g_log_trace{false};
     std::atomic<bool> g_aiming{false}; // an aiming camera mode is blending in or active
     std::atomic<bool> g_combat{false}; // a combat camera mode is blending in or active
+    std::atomic<bool> g_traversal{false}; // a traversal camera mode is blending in or active
     std::atomic<void*> g_player_camera{nullptr};
     std::atomic<void*> g_player_root{nullptr};
     std::atomic<int32_t> g_translation_offset{-1}; // USceneComponent::ComponentToWorld.Translation
@@ -186,6 +191,7 @@ namespace
         double nominal_distance = 0.0;
         double aim = 0.0;          // 0 to 1, eased toward g_aiming: how far the follow is handed to the player's aim
         double combat = 0.0;       // 0 to 1, eased toward g_combat: how far the follow is handed to the combat camera
+        double traversal = 0.0;    // 0 to 1, eased toward g_traversal: how far the follow is handed to the traversal camera
         double nominal_hold = 0.0; // s left in which nominal_distance tracks the game: a position write is gliding
         LARGE_INTEGER last_call{};
 
@@ -401,6 +407,7 @@ namespace
             g_follow.valid = true;
             g_follow.aim = g_aiming.load(std::memory_order_relaxed) ? 1.0 : 0.0;
             g_follow.combat = g_combat.load(std::memory_order_relaxed) ? 1.0 : 0.0;
+            g_follow.traversal = g_traversal.load(std::memory_order_relaxed) ? 1.0 : 0.0;
             g_follow.pivot_smoothed = dwsc::Vec3{pivot.x, pivot.y, feet_z};
             g_follow.rotation_smoothed = rotation;
             g_follow.half_last = static_cast<double>(half_height);
@@ -448,15 +455,20 @@ namespace
             g_follow.aim += (aim_target - g_follow.aim) * (1.0 - std::exp(-8.0 * dt));
             double combat_target = g_combat.load(std::memory_order_relaxed) ? 1.0 : 0.0;
             g_follow.combat += (combat_target - g_follow.combat) * (1.0 - std::exp(-8.0 * dt));
+            double traversal_target = g_traversal.load(std::memory_order_relaxed) ? 1.0 : 0.0;
+            g_follow.traversal += (traversal_target - g_follow.traversal) * (1.0 - std::exp(-8.0 * dt));
 
-            // Combat hands the shown trail and turning to combat_follow/combat_rotation as it comes up; aiming
-            // then takes over from wherever combat left it, smoothly, as the player raises their aim.
+            // Traversal hands the shown trail and turning to traversal_follow/traversal_rotation as it comes up;
+            // combat takes over from wherever traversal left it, and aiming from wherever combat left it, smoothly.
+            // Aiming wins over traversal: AimingClawRide and AntiGravAiming stack on top of ClawRide and AntiGrav.
             auto lerp = [](double a, double b, double f) { return a + (b - a) * f; };
             double aiming_keep = std::clamp(t.aiming_keep, 0.0, 1.0);
             double combat_follow_keep = std::clamp(t.combat_follow_keep, 0.0, 1.0);
             double combat_rotation_keep = std::clamp(t.combat_rotation_keep, 0.0, 1.0);
-            double keep_pos = lerp(lerp(1.0, combat_follow_keep, g_follow.combat), aiming_keep, g_follow.aim);
-            double keep_rot = lerp(lerp(1.0, combat_rotation_keep, g_follow.combat), aiming_keep, g_follow.aim);
+            double traversal_follow_keep = std::clamp(t.traversal_follow_keep, 0.0, 1.0);
+            double traversal_rotation_keep = std::clamp(t.traversal_rotation_keep, 0.0, 1.0);
+            double keep_pos = lerp(lerp(lerp(1.0, traversal_follow_keep, g_follow.traversal), combat_follow_keep, g_follow.combat), aiming_keep, g_follow.aim);
+            double keep_rot = lerp(lerp(lerp(1.0, traversal_rotation_keep, g_follow.traversal), combat_rotation_keep, g_follow.combat), aiming_keep, g_follow.aim);
 
             double shown_h = leash(lag_h, t.max_lag_h, t.soft_leash) * keep_pos;
             double scale_h = lag_h > 0.0 ? shown_h / lag_h : 0.0;
@@ -1158,6 +1170,8 @@ class DWSmoothwalker : public CppUserModBase
         g_aiming.store(state.aiming);
         if (state.combat != g_combat.exchange(state.combat))
             Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] combat camera {}\n"), state.combat ? STR("on") : STR("off"));
+        if (state.traversal != g_traversal.exchange(state.traversal))
+            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] traversal camera {}\n"), state.traversal ? STR("on") : STR("off"));
         if (!camera) return;
         auto generation = m_position_generation.load();
         if (generation == m_position_applied_generation) return;

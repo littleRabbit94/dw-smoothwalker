@@ -43,7 +43,7 @@ will not open while a `ConfigKey` is missing from it.
 | Path | Contents |
 |---|---|
 | `CMakeLists.txt` | Superbuild: RE-UE4SS from `DW_RE_UE4SS_SOURCE_DIR`, then the `DWSmoothwalker` target |
-| `src/` | The DLL source: `dllmain.cpp` (hook, follow, settings, player discovery), `config.hpp` (settings and presets), `mode_tuning.hpp` (camera position in the game's modes, aiming and combat state), `smoothing.hpp` (math) |
+| `src/` | The DLL source: `dllmain.cpp` (hook, follow, settings, player discovery), `config.hpp` (settings and presets), `mode_tuning.hpp` (camera position in the game's modes, aiming, combat and traversal state), `smoothing.hpp` (math) |
 | `mod/` | Exactly what ships under `ue4ss/Mods/DWSmoothwalker/`: `enabled.txt`, `LICENSE`, `mod_settings.ini` (Mod Menu page), `config/smoothwalker.ini`; `dlls/` is build output |
 | `release/` | `Build-Package.py`, the Nexus page description and metadata, `example-preset/` |
 | `docs/design.md` | How the mod works, the game's camera, measurements and version history |
@@ -61,7 +61,7 @@ writes `release/dist/Smoothwalker-<version>.zip` and `release/dist/Smoothwalker-
 
 Copy `release/example-preset/Template.ini` into `ue4ss/Mods/DWSmoothwalker/config/presets/` under a new name,
 change the `name` line and the values, and restart the game. Every key is commented with its range and
-default. The preset format and rules (39 keys, clamping, the 54 drop-in limit) are in `docs/design.md`,
+default. The preset format and rules (41 keys, clamping, the 54 drop-in limit) are in `docs/design.md`,
 "Presets". Switches are not preset keys; a preset that sets them is ignored on those lines.
 
 To start from a camera you tuned in game, set the Preset picker on the Mod Menu page to a slot marked
