@@ -103,7 +103,9 @@ differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 - max_lag_h or max_lag_v at 0 switches that axis's trail off entirely.
 - Settings keys added by an update are written into an existing config/smoothwalker.ini at startup, so an old file keeps working.
 - Logging: log_trace is gone; log_verbose (ini only) adds the detail lines. The default log keeps the load line, your own changes, warnings and errors.
-- Updating: close the game and extract over the old folder. The archive replaces config/smoothwalker.ini, so save your look to a slot first, or keep a copy of the file and put it back; slots and installed presets survive.
+- Updating: close the game and extract over the old folder, or skip config/smoothwalker.ini to keep your settings; new keys are added to it at the next start. Slots and installed presets survive.
+- Example Preset (optional file): the template now carries every preset key, with the new ones commented: aiming_follow, combat and traversal follow and turning, the focus group. Distance range starts at 25 %.
+- Example API Mod (new optional file): a complete UE4SS Lua mod that uses the camera API. F9 a zoom layer, F10 a dutch angle, F11 a claim with a glide back, and a console command that prints the reads. For mod authors; remove it when done.
 
 0.9.0 - Crouch, turning, profiles
 
@@ -138,8 +140,8 @@ differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 - It also fails when `main.dll` is older than the newest file in `src/`. A `git
   checkout` touches source mtimes, so after switching branches rebuild before packaging.
 - The description's Settings spoiler lists the shipped defaults by hand; after changing a default
-  in `smoothwalker.ini`, update it. `aiming_follow` is a setting but not a preset key: it belongs in the
-  Settings spoiler and must stay out of the preset authors' key list.
+  in `smoothwalker.ini`, update it. Since 0.10.0 `aiming_follow` is a preset key like the other follow
+  percentages; the preset authors' key list and the example template carry it.
 - Voice: the description is first person and short, a hobbyist engineer explaining a utility they built, technical but casual. Say what
   was measured and why a choice was made; no sales language, no em dashes.
 - The description links the GitHub repo: make it public (after the hygiene sweep) before posting, or
