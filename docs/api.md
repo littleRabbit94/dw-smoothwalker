@@ -17,7 +17,8 @@ its functions just start answering `unloaded`.
 
 ## Example mod
 
-`release/example-consumer/SmoothwalkerExample/` in this repo is a complete UE4SS Lua mod that uses the API:
+`release/example-consumer/SmoothwalkerExample/` in this repo (and the optional file Smoothwalker Example API
+Mod on the Nexus page) is a complete UE4SS Lua mod that uses the API:
 F9 toggles a zoom layer (`layer_set{ fov_abs }`), F10 a dutch-angle layer (`layer_set{ rotation }`), F11
 claims the camera and releases it with a glide, and the console command `swexample view|layers|owner` prints
 the reads. Copy the folder into `ue4ss/Mods/` (it carries its own `enabled.txt`, no `mods.txt` edit) and read

@@ -14,6 +14,10 @@ No PDB and no presets folder: the mod creates config/presets/ at startup.
 Optional file: release/dist/Smoothwalker-Example-Preset-<version>.zip, the commented example in
 release/example-preset/ at ue4ss/Mods/DWSmoothwalker/config/presets/<file name>.
 
+Optional file: release/dist/Smoothwalker-Example-API-Mod-<version>.zip, the drop-in Lua mod in
+release/example-consumer/ at ue4ss/Mods/<folder>/ (Scripts/main.lua, enabled.txt, LICENSE). luac -p
+gates its syntax; the build fails when luac is not found.
+
 Source: mod/ in this repo; mod/dlls/main.dll is the git-ignored build output of src/.
 Version: ModVersion in src/dllmain.cpp. The build fails if:
   - ModVersion, mod_settings.ini [Mod] Version and the newest entry in the changelog block of
@@ -31,6 +35,8 @@ Usage: python release/Build-Package.py (from any directory)
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -41,6 +47,8 @@ MOD = REPO / "mod"
 SRC = REPO / "src"
 SHEET = HERE / "nexus-page-metadata.md"
 EXAMPLE_DIR = HERE / "example-preset"
+CONSUMER_DIR = HERE / "example-consumer"
+LUAC_FALLBACK = Path.home() / "AppData/Local/Programs/Lua/bin/luac.exe"
 DIST = HERE / "dist"
 MOD_NAME = "DWSmoothwalker"
 
@@ -179,6 +187,25 @@ def check_example(path: Path, sections: dict[str, dict[str, str]]) -> None:
         fail(f"{path.name}:\n  " + "\n  ".join(errors))
 
 
+def consumer_mod() -> Path:
+    """The one mod folder under example-consumer/, with its script syntax-checked by luac."""
+    folders = [p for p in CONSUMER_DIR.iterdir() if p.is_dir()]
+    if len(folders) != 1:
+        fail(f"expected one mod folder in {CONSUMER_DIR}, found {len(folders)}")
+    mod = folders[0]
+    script = mod / "Scripts" / "main.lua"
+    for p in (script, mod / "enabled.txt"):
+        if not p.is_file():
+            fail(f"missing {p}")
+    luac = shutil.which("luac") or (str(LUAC_FALLBACK) if LUAC_FALLBACK.is_file() else None)
+    if not luac:
+        fail("luac not found on PATH; the example mod's syntax gate needs Lua 5.4")
+    run = subprocess.run([luac, "-p", str(script)], capture_output=True, text=True)
+    if run.returncode != 0:
+        fail(f"luac -p {script.name}:\n  {run.stderr.strip()}")
+    return mod
+
+
 def check_dll_fresh(dll: Path) -> None:
     if not dll.is_file():
         fail(f"{dll} missing; build it:\n  {BUILD_HINT}")
@@ -206,6 +233,7 @@ def main() -> int:
     if len(examples) != 1:
         fail(f"expected one example preset in {EXAMPLE_DIR}, found {len(examples)}")
     check_example(examples[0], sections)
+    consumer = consumer_mod()
 
     DIST.mkdir(exist_ok=True)
     out = DIST / f"Smoothwalker-{ver}.zip"
@@ -227,6 +255,16 @@ def main() -> int:
         z.write(examples[0], prefix + "config/presets/" + examples[0].name)
     print(example_zip, f"{example_zip.stat().st_size:,} bytes")
     for i in zipfile.ZipFile(example_zip).infolist():
+        print(f"  {i.file_size:>9,} {i.filename}")
+
+    consumer_zip = DIST / f"Smoothwalker-Example-API-Mod-{ver}.zip"
+    cprefix = f"ue4ss/Mods/{consumer.name}/"
+    with zipfile.ZipFile(consumer_zip, "w", zipfile.ZIP_DEFLATED) as z:
+        z.write(consumer / "Scripts" / "main.lua", cprefix + "Scripts/main.lua")
+        z.writestr(cprefix + "enabled.txt", "")
+        z.write(MOD / "LICENSE", cprefix + "LICENSE")
+    print(consumer_zip, f"{consumer_zip.stat().st_size:,} bytes")
+    for i in zipfile.ZipFile(consumer_zip).infolist():
         print(f"  {i.file_size:>9,} {i.filename}")
     return 0
 

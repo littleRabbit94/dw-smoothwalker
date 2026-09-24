@@ -54,8 +54,9 @@ will not open while a `ConfigKey` is missing from it.
 python release/Build-Package.py
 ```
 
-Checks versions, the Mod Menu manifest against `smoothwalker.ini`, DLL freshness and the example preset, then
-writes `release/dist/Smoothwalker-<version>.zip` and `release/dist/Smoothwalker-Example-Preset-<version>.zip`.
+Checks versions, the Mod Menu manifest against `smoothwalker.ini`, DLL freshness, the example preset and the
+example mod's Lua syntax (`luac -p`, Lua 5.4), then writes `release/dist/Smoothwalker-<version>.zip`,
+`Smoothwalker-Example-Preset-<version>.zip` and `Smoothwalker-Example-API-Mod-<version>.zip`.
 
 ## Making presets
 

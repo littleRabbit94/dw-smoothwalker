@@ -31,7 +31,7 @@ AI-Generated Content (read 2026-09-16).
 | File name | `Smoothwalker` |
 | Version | `0.10.0` |
 | Category | Main Files |
-| File | `dist/Smoothwalker-0.10.0.zip`, 404,556 bytes, built 2026-09-24 |
+| File | `dist/Smoothwalker-0.10.0.zip`, 404,578 bytes, built 2026-09-24 |
 | Description | `Close the game, then extract into the folder that holds the ue4ss folder (Dawnwalker/Binaries/Win64, the one with Dawnwalker.exe). The archive carries the folder path, so the mod lands in ue4ss/Mods/DWSmoothwalker by itself. Needs UE4SS (mod 18 or mod 283) and Steam build 25232147. No mods.txt edit.` |
 
 Optional file:
@@ -41,11 +41,24 @@ Optional file:
 | File name | `Smoothwalker Example Preset` |
 | Version | `0.10.0` |
 | Category | Optional Files |
-| File | `dist/Smoothwalker-Example-Preset-0.10.0.zip`, 1,371 bytes, built 2026-09-24 |
+| File | `dist/Smoothwalker-Example-Preset-0.10.0.zip`, 1,382 bytes, built 2026-09-24 |
 | Description | `One preset, Over the Shoulder: a closer camera further out over the shoulder, with a quicker follow to match. I commented every key with its range and default, so it doubles as a template for your own. Extract into Dawnwalker/Binaries/Win64 like the main file; it lands in ue4ss/Mods/DWSmoothwalker/config/presets. Restart the game, then pick it from the Mod Menu or with preset in the ini. Needs the main file.` |
 
 Source: `example-preset/`. The build checks it holds a name and all 41 preset keys, each once, inside
 the Mod Menu range and on its step.
+
+Second optional file:
+
+| Field | Value |
+|---|---|
+| File name | `Smoothwalker Example API Mod` |
+| Version | `0.10.0` |
+| Category | Optional Files |
+| File | `dist/Smoothwalker-Example-API-Mod-0.10.0.zip`, 14,659 bytes, built 2026-09-24 |
+| Description | `For mod authors. A complete UE4SS Lua mod that uses the Smoothwalker camera API: F9 toggles a zoom layer, F10 a dutch-angle layer, F11 claims the camera and releases it with a glide, and the console command swexample view/layers/owner prints the reads. Extract into Dawnwalker/Binaries/Win64 like the main file; it lands in ue4ss/Mods/SmoothwalkerExample with its own enabled.txt, no mods.txt edit. Read Scripts/main.lua for the game-thread route and the checks for a missing or unloaded Smoothwalker; copy from it freely (GPL-3.0-or-later). Needs the main file. Not for players: remove it when you are done, it binds F9, F10 and F11.` |
+
+Source: `example-consumer/`. The build syntax-checks `Scripts/main.lua` with `luac -p` and ships it with
+an empty `enabled.txt` and the LICENSE.
 
 Contents: `dlls/main.dll` (no PDB), `mod_settings.ini`, `config/smoothwalker.ini`, empty
 `enabled.txt`, `LICENSE`. No exe or installer. No presets folder is shipped: the mod creates
@@ -81,7 +94,7 @@ differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 ```
 0.10.0 - Camera API, combat and traversal follow, debug overlay
 
-- Camera API for other UE4SS Lua mods: a Smoothwalker table in every mod's Lua state with view, live and enabled reads, one offset/rotation/FOV layer per mod, and claim/release so a mod can take the camera over and hand it back with a cut or a glide. Reference and a drop-in example in docs/api.md on GitHub.
+- Camera API for other UE4SS Lua mods: a Smoothwalker table in every mod's Lua state with view, live and enabled reads, one offset/rotation/FOV layer per mod, and claim/release so a mod can take the camera over and hand it back with a cut or a glide. Reference in docs/api.md on GitHub; a complete example mod is on the Files tab.
 - Follow in combat and in traversal (claw ride, anti-grav, shadowstep): combat_follow, traversal_follow, combat_rotation and traversal_rotation set how much of the trail and the turning smoothing stays while those cameras are up, easing in and out. All default to 100, which is the old behaviour. In presets and on the menu page.
 - Plays along with mods that change the game's camera modes. A distance, FOV or look limit another mod writes is kept as the base, Smoothwalker's settings apply on top, and UE4SS.log says which mode and value. Checked before every apply, at unload and for classes loaded late. Before, such a value was overwritten.
 - Which camera modes take the look limits (pitch_min, pitch_max) is now fixed by name: the modes the game ships at -60 / 40 (exploring, sprinting, focus, the shadowstep base). Before it was judged on the values read at startup, which another mod could change first.
