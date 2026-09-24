@@ -15,6 +15,15 @@ stale pointer into a DLL that is no longer there. Check `api_version` once at th
 local reference across a long idle period; a `local SW = Smoothwalker` you keep does not go stale on its own,
 its functions just start answering `unloaded`.
 
+## Example mod
+
+`release/example-consumer/SmoothwalkerExample/` in this repo is a complete UE4SS Lua mod that uses the API:
+F9 toggles a zoom layer (`layer_set{ fov_abs }`), F10 a dutch-angle layer (`layer_set{ rotation }`), F11
+claims the camera and releases it with a glide, and the console command `swexample view|layers|owner` prints
+the reads. Copy the folder into `ue4ss/Mods/` (it carries its own `enabled.txt`, no `mods.txt` edit) and read
+`Scripts/main.lua`: it shows the game-thread route for key binds, per-feature layer state, and the checks for
+a missing or unloaded Smoothwalker. GPL-3.0-or-later like the rest of the repo, so copy from it freely.
+
 ## Threads
 
 Get this wrong and every call either does nothing or errors out silently into a `nil, reason` you didn't log.

@@ -169,7 +169,7 @@ Smoothwalker puts a [font=Courier New]Smoothwalker[/font] table into every UE4SS
 [*][font=Courier New]layer_set{ offset, rotation, fov, fov_abs, weight, blend, ttl }[/font], [font=Courier New]layer_clear()[/font]: one layer per mod, eight slots, applied after the follow. A lease ([font=Courier New]ttl[/font]) fades it out if your mod stops refreshing it.[/*]
 [*][font=Courier New]claim{ keep_layers, ttl }[/font], [font=Courier New]release("cut" or "glide")[/font], [font=Courier New]owner()[/font]: one owner at a time takes the camera over; on release Smoothwalker cuts or glides back to its follow.[/*]
 [/list]
-The write calls are game-thread only and answer [font=Courier New]nil, reason[/font] instead of throwing. The full reference, the threading rules and a drop-in example mod are in [url=https://github.com/littleRabbit94/dw-smoothwalker/blob/main/docs/api.md]docs/api.md[/url] on GitHub.[/spoiler]
+The write calls are game-thread only and answer [font=Courier New]nil, reason[/font] instead of throwing. The full reference and the threading rules are in [url=https://github.com/littleRabbit94/dw-smoothwalker/blob/main/docs/api.md]docs/api.md[/url] on GitHub, and [url=https://github.com/littleRabbit94/dw-smoothwalker/tree/main/release/example-consumer]release/example-consumer[/url] there is a complete drop-in Lua mod using it: F9 a zoom layer, F10 a dutch angle, F11 a claim with a glide back.[/spoiler]
 
 [size=4][b]Source[/b][/size]
 Source is on [url=https://github.com/littleRabbit94/dw-smoothwalker]GitHub[/url].
