@@ -1,5 +1,6 @@
 // Camera position tuning: per-group distance, height, shoulder and FOV, and the look limits, plus the
-// switch for the game's own camera lag, written into the game's camera modes. Game thread only, except note_new() (any thread) and
+// switch for the game's own camera lag, written into the game's camera modes. Game thread only, except note_new() (any thread; it
+// touches tuner state only when called on the game thread) and
 // restore() at unload.
 //
 // Every write is computed from a per-mode base, never from the current value, so applies cannot compound.
@@ -379,9 +380,19 @@ namespace dwsc
         }
 
         // From the new-object callback, on whatever thread constructs the object, for an object whose outer is
-        // the player's camera: only the hand-off. adopt_new() sorts modes from the rest on the game thread.
-        auto note_new(LiveRef object) -> void
+        // the player's camera. On the game thread a captured mode is written here, before the game pushes it
+        // (write_new()); anything else is only handed off, and adopt_new() sorts it on the game thread.
+        auto note_new(LiveRef object, bool game_thread) -> void
         {
+            if (game_thread && m_layout_ok && m_applied)
+            {
+                drop_dead_classes();
+                if (auto* mode = keep_if_mode(object, true))
+                {
+                    write_new(*mode, object);
+                    return;
+                }
+            }
             std::lock_guard guard(m_new_mutex);
             if (m_new.size() < MAX_NEW) m_new.push_back(object);
             else m_new_overflow = true;
@@ -708,8 +719,8 @@ namespace dwsc
 
         // m_live gains a live object if it is one of the captured modes and not held yet. known: from the hand-off
         // (see LiveMode); a held mode the hand-off brings again becomes known. A rescan clears m_live, so every mode
-        // it finds starts unknown again.
-        auto keep_if_mode(LiveRef ref, bool known) -> bool
+        // it finds starts unknown again. The mode it joined, or nullptr.
+        auto keep_if_mode(LiveRef ref, bool known) -> Mode*
         {
             for (size_t i = 0; i < m_modes.size(); ++i)
             {
@@ -717,9 +728,9 @@ namespace dwsc
                 auto held = std::find_if(m_live.begin(), m_live.end(), [&](auto& entry) { return entry.ref.object == ref.object; });
                 if (held == m_live.end()) m_live.push_back({ref, i, ++m_seq, known});
                 else held->known = held->known || known;
-                return true;
+                return &m_modes[i];
             }
-            return false;
+            return nullptr;
         }
 
         // An untracked RebelCameraMode on the player's camera joins m_untracked. The class is checked first, so the
@@ -781,8 +792,32 @@ namespace dwsc
             std::erase_if(m_live, [](auto& entry) { return !entry.ref.alive(); });
             for (auto& ref : fresh)
             {
-                if (ref.alive() && !keep_if_mode(ref, true) && !adopt_late(ref)) keep_untracked(ref);
+                if (!ref.alive()) continue;
+                if (auto* mode = keep_if_mode(ref, true)) write_new(*mode, ref);
+                else if (!adopt_late(ref)) keep_untracked(ref);
             }
+        }
+
+        // A new instance does not copy its whole CDO: a Blueprint class copies only the properties whose CDO value
+        // differed from its native parent's when its list was built (UBlueprintGeneratedClass::
+        // CustomPropertyListForPostConstruction, UE 5.5.4 BlueprintGeneratedClass.cpp), and the rest keep the native
+        // constructor's. The native modes default to FOV 90, so the modes shipped at 90 (the CombatFromArm ranges,
+        // CombatSprinting, Base_LongRange) were built at 90 whatever the CDO held (measured 2026-09-24: five draws,
+        // each CombatFromArm_VeryLongRange born at 90 under a CDO at 110). So every hand-off instance is written,
+        // CDO first as in adopt_late(). It must happen in the construction callback (note_new()): the push copies
+        // DefaultFieldOfView into a native field GetFieldOfView() returns, and a write on the next tick left the
+        // instance at 120 and GetFieldOfView() at 90; written at construction, both read 120 and the screen blended
+        // to 120 (measured 2026-09-24). A mode handed off from another thread still gets this on the next tick.
+        // No flip: CameraOffsets differs from the native default and so is copied.
+        auto write_new(Mode& mode, LiveRef ref) -> void
+        {
+            if (!m_applied) return;
+            std::vector<Original> seen(2);
+            read_values(mode.cdo, seen[0]);
+            read_values(ref.object, seen[1]);
+            adopt_from(mode, seen);
+            write(mode.cdo, mode, m_last);
+            write(ref.object, mode, m_last);
         }
 
         // A mode whose class loaded after the last apply (CombatSprinting is loaded by day only): its

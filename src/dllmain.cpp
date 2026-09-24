@@ -932,7 +932,8 @@ class DWSmoothwalker : public CppUserModBase
                                                       options));
         // Runs on whatever thread constructs the object (async loading threads too): only a flag test, a pointer
         // and an FName compare and, on a match, an index read and a locked hand-off (a mode pushed on the
-        // player's camera into m_tuner, the controller into m_new_controller).
+        // player's camera into m_tuner, the controller into m_new_controller). On the game thread a tracked mode is
+        // written here instead: the push that follows copies its FOV (ModeTuner::write_new()).
         bool new_object = add(Hook::RegisterStaticConstructObjectPostCallback(
                 [this](auto& info, const FStaticConstructObjectParameters& params) {
                     if (static_cast<uint32_t>(params.SetFlags) & static_cast<uint32_t>(RF_ClassDefaultObject | RF_ArchetypeObject)) return;
@@ -941,7 +942,8 @@ class DWSmoothwalker : public CppUserModBase
                     auto* camera = g_player_camera.load(std::memory_order_relaxed);
                     if (camera && params.Outer == camera)
                     {
-                        if (auto* mode = info.GetCurrentResolvedReturnValue()) m_tuner.note_new(dwsc::LiveRef::of(mode));
+                        if (auto* mode = info.GetCurrentResolvedReturnValue())
+                            m_tuner.note_new(dwsc::LiveRef::of(mode), GetCurrentThreadId() == dwapi::g_game_thread.load(std::memory_order_relaxed));
                         return;
                     }
                     if (cls->GetNamePrivate() != m_player_controller_name) return;

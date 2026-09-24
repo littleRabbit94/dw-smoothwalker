@@ -232,6 +232,18 @@ Measured live on the running game.
 - **CDO writes reach new instances.** `Default__BP_CameraMode_Sprint_C.DefaultFieldOfView` 95 -> 120,
   then sprint: the new `BP_CameraMode_Sprint_C` instance read 120 and `GetFOVAngle()` 120. So a mod
   writes the CDO for modes not yet pushed and the live instance for modes on the stack.
+- **But only for fields that ship different from the native parent.** A Blueprint class copies into a new
+  instance only the properties on its `CustomPropertyListForPostConstruction`, built by diffing its CDO against
+  the native parent's (UE 5.5.4 `BlueprintGeneratedClass.cpp`, `UpdateCustomPropertyListForPostConstruction`);
+  the rest keep the native constructor's value. `RebelCameraMode`, `RebelCameraModeTPP` and `CombatCameraMode`
+  default to FOV 90 and pitch -89 / 89, so the modes shipped at FOV 90 (the CombatFromArm ranges,
+  CombatSprinting, Base_LongRange) never take a CDO FOV write: measured 2026-09-24, five draws each built
+  `CombatFromArm_VeryLongRange` at 90 under a CDO at 110, and `combat_fov` reverted on every draw. Sprint (95)
+  worked above because 95 is on its list. A write on the next tick is too late: the push copies
+  `DefaultFieldOfView` into a native field that `GetFieldOfView()` returns (instance 120, `GetFieldOfView()` 90,
+  screen 90). So a new mode constructed on the game thread is written inside the `StaticConstructObject` callback
+  (`note_new()` -> `write_new()`), before the push; measured the same day, `GetFieldOfView()` read 120 from the
+  first sample and the screen blended 95 -> 120. A mode built on another thread is still written on the next tick.
 - All test values restored (LongRange -250 / FOV 90 / type blend 1.0, Sprint CDO and instance 95).
 - A world paused under the pause menu does not update the camera: reads there prove nothing.
 
