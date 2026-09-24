@@ -830,7 +830,7 @@ class DWSmoothwalker : public CppUserModBase
             Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] hot reload: restarted on the DLL already loaded (pinned); a rebuilt DLL needs the game restarted\n"));
         }
         ModName = STR("DWSmoothwalker");
-        ModVersion = STR("0.10.0");
+        ModVersion = STR("0.10.1");
         dwapi::g_enabled = &g_enabled;
         dwapi::g_reset = &g_reset; // release("cut") snaps through the same flag a teleport sets
         dwapi::g_reset_reason = &g_reset_reason;
@@ -900,7 +900,7 @@ class DWSmoothwalker : public CppUserModBase
     // C++ mods are started first (docs/design.md, "Checks run 2026-09-22").
     auto on_lua_start(StringViewType mod_name, LuaMadeSimple::Lua& lua, LuaMadeSimple::Lua&, LuaMadeSimple::Lua&, LuaMadeSimple::Lua*) -> void override
     {
-        dwapi::install(lua.get_lua_state(), to_string(mod_name), "0.10.0");
+        dwapi::install(lua.get_lua_state(), to_string(mod_name), "0.10.1");
     }
 
     auto on_lua_stop(StringViewType, LuaMadeSimple::Lua& lua, LuaMadeSimple::Lua&, LuaMadeSimple::Lua&, LuaMadeSimple::Lua*) -> void override

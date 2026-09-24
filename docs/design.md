@@ -1404,3 +1404,11 @@ after all 23 CDOs were read live on 2026-09-24 (nine at -60 / 40, thirteen at -8
 Logging: `log_trace` removed; `log_verbose` added (ini only). The default log keeps the load line, the
 player's own changes, warnings and errors; the rest moved behind `log_verbose`. Lines use the UE4SS log
 levels for color: Error for what stops the mod, Verbose for the gated detail. See "Logging".
+
+### 0.10.1: combat FOV holds
+
+`combat_fov` reverted on every weapon draw: a new camera mode copies from its CDO only the fields whose shipped
+value differs from the native parent's, and the push copies `DefaultFieldOfView` into a native field in the same
+frame. New modes are now written in the `StaticConstructObject` callback on the game thread, before the push
+("How writes land"). Affected in practice: the modes shipped at FOV 90 (CombatFromArm and its ranges,
+CombatSprinting, Base_LongRange).

@@ -16,7 +16,7 @@ AI-Generated Content (read 2026-09-16).
 |---|---|
 | Mod name | `Smoothwalker - Third Person Camera` |
 | Summary | `A third-person camera that trails your character while turning stays instant, and eases off when you aim. Distance, height, shoulder and FOV per situation. Shoulder swap on V; presets and on/off in ini or Mod Menu. Needs UE4SS and Steam build 25232147.` |
-| Version | `0.10.0` |
+| Version | `0.10.1` |
 | Category | `Utilities`, beside FreeCam (mod 350) |
 | Tags | `Camera`, `Quality of Life`, `Utilities for Players`, `AI-Generated Content` |
 | Adult content | No |
@@ -29,9 +29,9 @@ AI-Generated Content (read 2026-09-16).
 | Field | Value |
 |---|---|
 | File name | `Smoothwalker` |
-| Version | `0.10.0` |
+| Version | `0.10.1` |
 | Category | Main Files |
-| File | `dist/Smoothwalker-0.10.0.zip`, 404,578 bytes, built 2026-09-24 |
+| File | `dist/Smoothwalker-0.10.1.zip`, 405,274 bytes, built 2026-09-24 |
 | Description | `Close the game, then extract into the folder that holds the ue4ss folder (Dawnwalker/Binaries/Win64, the one with Dawnwalker.exe). The archive carries the folder path, so the mod lands in ue4ss/Mods/DWSmoothwalker by itself. Needs UE4SS (mod 18 or mod 283) and Steam build 25232147. No mods.txt edit.` |
 
 Optional file:
@@ -44,7 +44,7 @@ Optional file:
 | File | `dist/Smoothwalker-Example-Preset-0.10.0.zip`, 1,382 bytes, built 2026-09-24 |
 | Description | `One preset, Over the Shoulder: a closer camera further out over the shoulder, with a quicker follow to match. I commented every key with its range and default, so it doubles as a template for your own. Extract into Dawnwalker/Binaries/Win64 like the main file; it lands in ue4ss/Mods/DWSmoothwalker/config/presets. Restart the game, then pick it from the Mod Menu or with preset in the ini. Needs the main file.` |
 
-Source: `example-preset/`. The build checks it holds a name and all 41 preset keys, each once, inside
+Unchanged since 0.10.0: keep the uploaded 0.10.0 archive. Source: `example-preset/`. The build checks it holds a name and all 41 preset keys, each once, inside
 the Mod Menu range and on its step.
 
 Second optional file:
@@ -57,6 +57,7 @@ Second optional file:
 | File | `dist/Smoothwalker-Example-API-Mod-0.10.0.zip`, 14,659 bytes, built 2026-09-24 |
 | Description | `For mod authors. A complete UE4SS Lua mod that uses the Smoothwalker camera API: F9 toggles a zoom layer, F10 a dutch-angle layer, F11 claims the camera and releases it with a glide, and the console command swexample view/layers/owner prints the reads. Extract into Dawnwalker/Binaries/Win64 like the main file; it lands in ue4ss/Mods/SmoothwalkerExample with its own enabled.txt, no mods.txt edit. Read Scripts/main.lua for the game-thread route and the checks for a missing or unloaded Smoothwalker; copy from it freely (GPL-3.0-or-later). Needs the main file. Not for players: remove it when you are done, it binds F9, F10 and F11.` |
 
+Unchanged since 0.10.0 (it checks `api_version`, not the mod version): keep the uploaded 0.10.0 archive.
 Source: `example-consumer/`. The build syntax-checks `Scripts/main.lua` with `luac -p` and ships it with
 an empty `enabled.txt` and the LICENSE.
 
@@ -92,6 +93,11 @@ Plain text, no BBCode. `Build-Package.py` reads the first version in this block 
 differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 
 ```
+0.10.1 - Combat FOV fix
+
+- The field of view setting for combat now holds. Before, a changed combat FOV applied until the next time you drew your weapon, then the game's own FOV came back. The same could happen to the exploring FOV on the long-range exploring camera.
+- Updating: close the game and extract over the old folder, or skip config/smoothwalker.ini to keep your settings. Only the main file changed; the Example Preset and Example API Mod are the same as in 0.10.0.
+
 0.10.0 - Camera API, combat and traversal follow, debug overlay
 
 - Camera API for other UE4SS Lua mods: a Smoothwalker table in every mod's Lua state with view, live and enabled reads, one offset/rotation/FOV layer per mod, and claim/release so a mod can take the camera over and hand it back with a cut or a glide. Reference in docs/api.md on GitHub; a complete example mod is on the Files tab.
