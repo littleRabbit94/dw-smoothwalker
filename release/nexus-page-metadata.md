@@ -31,7 +31,7 @@ AI-Generated Content (read 2026-09-16).
 | File name | `Smoothwalker` |
 | Version | `0.10.1` |
 | Category | Main Files |
-| File | `dist/Smoothwalker-0.10.1.zip`, 405,275 bytes, built 2026-09-24 |
+| File | `dist/Smoothwalker-0.10.1.zip`, 405,274 bytes, built 2026-09-24 (uploaded; a later rebuild for a comment-only change in 0560dd3 is 405,275 bytes and was not uploaded) |
 | Description | `Close the game, then extract into the folder that holds the ue4ss folder (Dawnwalker/Binaries/Win64, the one with Dawnwalker.exe). The archive carries the folder path, so the mod lands in ue4ss/Mods/DWSmoothwalker by itself. Needs UE4SS (mod 18 or mod 283) and Steam build 25232147. No mods.txt edit.` |
 
 Optional file:
