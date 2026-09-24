@@ -2,8 +2,9 @@
 // switch for the game's own camera lag, written into the game's camera modes. Game thread only, except note_new() (any thread) and
 // restore() at unload.
 //
-// Every write is computed from the CDO values captured the first time a class is seen, never from the
-// current value, so applies cannot compound. CameraOffsets is only re-read on a camera type change, so an
+// Every write is computed from a per-mode base, never from the current value, so applies cannot compound.
+// The base starts as the CDO values captured the first time a class is seen; a value another mod wrote
+// replaces that field of it (adopt_foreign()). CameraOffsets is only re-read on a camera type change, so an
 // apply flips the player's camera type away and back (docs/design.md, "How writes land").
 #pragma once
 
@@ -14,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -177,8 +179,8 @@ namespace dwsc
     class ModeTuner
     {
       public:
-        // Originals are kept for the session: a class that stays loaded across a map load still holds the
-        // mod's values and must not have them captured as the game's.
+        // Shipped values and the base are kept for the session: a class that stays loaded across a map load
+        // still holds the mod's values and must not have them captured as the game's.
         auto capture() -> void
         {
             if (!m_layout_ok && !resolve_layout()) return;
@@ -196,26 +198,27 @@ namespace dwsc
                     mode.missing = true;
                     continue;
                 }
-                if (!mode.has_original)
+                if (!mode.has_shipped)
                 {
-                    read_original(cdo, mode.original);
+                    read_values(cdo, mode.shipped);
                     // A wrong layout would put every write in the wrong memory.
-                    if (!plausible(mode.original))
+                    if (!plausible(mode.shipped))
                     {
                         Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] {} reads as fov {}, {} offsets: not a camera layout, left as shipped\n"),
-                                                        mode.spec.name, mode.original.fov, mode.original.offsets.size());
+                                                        mode.spec.name, mode.shipped.fov, mode.shipped.offsets.size());
                         mode.usable = false;
                         continue;
                     }
-                    mode.has_original = true;
-                    if (std::wstring_view(mode.spec.name) == L"Base_LongRange" && !mode.original.offsets.empty() &&
+                    mode.has_shipped = true;
+                    mode.base = mode.shipped;
+                    if (std::wstring_view(mode.spec.name) == L"Base_LongRange" && !mode.shipped.offsets.empty() &&
                         g_log_verbose.load(std::memory_order_relaxed))
                     {
-                        auto& first = mode.original.offsets.front();
+                        auto& first = mode.shipped.offsets.front();
                         Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] Base_LongRange: fov {}, game lag {}/{}, pitch {}/{}, {} offsets, key {} at ({}, {}, {})\n"),
-                                                       mode.original.fov, mode.original.hlag_on ? STR("on") : STR("off"),
-                                                       mode.original.vlag_on ? STR("on") : STR("off"), mode.original.pitch_min,
-                                                       mode.original.pitch_max, mode.original.offsets.size(), first.key, first.x, first.y, first.z);
+                                                       mode.shipped.fov, mode.shipped.hlag_on ? STR("on") : STR("off"),
+                                                       mode.shipped.vlag_on ? STR("on") : STR("off"), mode.shipped.pitch_min,
+                                                       mode.shipped.pitch_max, mode.shipped.offsets.size(), first.key, first.x, first.y, first.z);
                     }
                 }
                 mode.cdo = cdo;
@@ -227,7 +230,8 @@ namespace dwsc
         }
 
         // Without a LoadMap hook, forget() may not run before a class unloads; every use of a captured CDO or
-        // class pointer is preceded by this check: capture(), scan_instances(), for_each_instance() (hence set_blend()).
+        // class pointer is preceded by this check: capture(), scan_instances(), adopt_foreign(), for_each_live()
+        // (hence for_each_instance() and set_blend()).
         auto drop_dead_classes() -> void
         {
             for (auto& mode : m_modes)
@@ -381,6 +385,7 @@ namespace dwsc
             auto started = std::chrono::steady_clock::now();
             ensure_scanned(player_camera);
             if (!m_layout_ok) return;
+            adopt_foreign(); // before the writes below overwrite what another mod put there
             int classes = 0;
             for (auto& mode : m_modes)
             {
@@ -389,8 +394,9 @@ namespace dwsc
                 ++classes;
             }
             int live = 0;
-            for_each_instance([&](UObject* instance, Mode& mode) {
-                write(instance, mode, tuning);
+            for_each_live([&](LiveMode& entry, Mode& mode) {
+                write(entry.ref.object, mode, tuning);
+                entry.known = true;
                 ++live;
             });
             m_applied = true;
@@ -406,13 +412,14 @@ namespace dwsc
             }
         }
 
-        // At unload, after the mod's callbacks are gone. Live instances keep their values until the game pushes
-        // new ones.
+        // At unload, after the mod's callbacks are gone. The CDOs get each mode's base, so values another mod
+        // wrote since the last apply stay. Live instances keep their values until the game pushes new ones.
         auto restore() -> void
         {
             if (!m_applied) return;
             capture(); // forget() may have dropped the CDO pointers since the last apply
             if (!m_layout_ok) return;
+            adopt_foreign();
             if (m_flip_stage != Idle) set_blend(false); // unloaded mid-glide: the game's blend time back, a plain write
             PositionTuning neutral;
             neutral.active = false;
@@ -503,9 +510,13 @@ namespace dwsc
             LiveRef cdo_ref, cls_ref; // checked before cdo or cls is used
             bool captured = false;
             bool missing = false; // not loaded at the last lookup
-            bool has_original = false;
+            bool has_shipped = false;
             bool usable = true;
-            Original original;
+            bool keys_warned = false; // the CameraOffsets key-set warning, once per session
+            Original shipped; // the first capture, never changed: for the logs and the pitch-limit rule
+            // What writes are computed from: shipped, with each value another mod wrote in its place. type_blend
+            // and the lag bits stay as captured: the mod writes those itself (the flip, own_lag).
+            Original base;
         };
 
         struct Offsets
@@ -523,11 +534,16 @@ namespace dwsc
         }();
         // The player's live modes, with their m_modes index and the order they were taken in (m_seq): the scan takes
         // what is already there, the hand-off what is pushed later, so a higher seq is a newer mode.
+        // known: its values can be classified by adopt_foreign(). A scan finds modes whose values predate what this
+        // tuner can tell apart (a hot reload leaves the old DLL's writes in them, a new pawn's camera an older
+        // apply's), so they are not checked until an apply or adopt_late() writes them. A hand-off mode was built
+        // from a CDO that is checked, so it is known from the start.
         struct LiveMode
         {
             LiveRef ref;
             size_t index;
             uint64_t seq;
+            bool known = false;
         };
         std::vector<LiveMode> m_live;
         // RebelCameraMode instances on the player's camera whose class is not in mode_classes() (shadowstep attack,
@@ -654,7 +670,9 @@ namespace dwsc
             return true;
         }
 
-        static auto plausible(const Original& o) -> bool
+        // foreign: a value another mod wrote. Only those take the override FOV bound, which no shipped value has
+        // been measured against, so a first capture is gated as before.
+        static auto plausible(const Original& o, bool foreign = false) -> bool
         {
             if (!(o.fov >= 30.0f && o.fov <= 170.0f)) return false;
             if (!(o.pitch_min >= -90.0f && o.pitch_min <= 0.0f && o.pitch_max >= 0.0f && o.pitch_max <= 90.0f)) return false;
@@ -663,6 +681,8 @@ namespace dwsc
             {
                 if (off.key < 1 || off.key > 3) return false;
                 if (!(std::abs(off.x) <= 2000.0 && std::abs(off.y) <= 2000.0 && std::abs(off.z) <= 2000.0)) return false;
+                // 0 where the key has no override; the ceiling is DefaultFieldOfView's. Also rejects NaN.
+                if (foreign && !(off.overridden_fov >= 0.0f && off.overridden_fov <= 170.0f)) return false;
             }
             return true;
         }
@@ -679,14 +699,17 @@ namespace dwsc
             memcpy(reinterpret_cast<uint8_t*>(object) + offset, &value, sizeof(value));
         }
 
-        // m_live gains a live object if it is one of the captured modes and not held yet.
-        auto keep_if_mode(LiveRef ref) -> bool
+        // m_live gains a live object if it is one of the captured modes and not held yet. known: from the hand-off
+        // (see LiveMode); a held mode the hand-off brings again becomes known. A rescan clears m_live, so every mode
+        // it finds starts unknown again.
+        auto keep_if_mode(LiveRef ref, bool known) -> bool
         {
             for (size_t i = 0; i < m_modes.size(); ++i)
             {
                 if (!m_modes[i].captured || m_modes[i].cls != ref.cls || ref.object == m_modes[i].cdo) continue;
-                bool held = std::any_of(m_live.begin(), m_live.end(), [&](auto& entry) { return entry.ref.object == ref.object; });
-                if (!held) m_live.push_back({ref, i, ++m_seq});
+                auto held = std::find_if(m_live.begin(), m_live.end(), [&](auto& entry) { return entry.ref.object == ref.object; });
+                if (held == m_live.end()) m_live.push_back({ref, i, ++m_seq, known});
+                else held->known = held->known || known;
                 return true;
             }
             return false;
@@ -720,7 +743,7 @@ namespace dwsc
             UObjectGlobals::ForEachUObject([&](UObject* object, int32, int32) {
                 if (object->GetOuterPrivate() != player_camera) return LoopAction::Continue;
                 auto ref = LiveRef::of(object);
-                if (!keep_if_mode(ref)) keep_untracked(ref);
+                if (!keep_if_mode(ref, false)) keep_untracked(ref);
                 return LoopAction::Continue;
             });
             m_scan_needed = false;
@@ -751,13 +774,15 @@ namespace dwsc
             std::erase_if(m_live, [](auto& entry) { return !entry.ref.alive(); });
             for (auto& ref : fresh)
             {
-                if (ref.alive() && !keep_if_mode(ref) && !adopt_late(ref)) keep_untracked(ref);
+                if (ref.alive() && !keep_if_mode(ref, true) && !adopt_late(ref)) keep_untracked(ref);
             }
         }
 
         // A mode whose class loaded after the last apply (CombatSprinting is loaded by day only): its
-        // CDO and this first instance still hold the game's values. The name is compared first, so the effect
-        // cameras pushed on the same camera cost no object lookup. True if the instance joined m_live.
+        // CDO and this first instance still hold the game's values, or, for a class captured before a map load,
+        // the shipped ones or another mod's, so they are checked (adopt_from()) before the write. The name is
+        // compared first, so the effect cameras pushed on the same camera cost no object lookup. True if the
+        // instance joined m_live.
         auto adopt_late(LiveRef ref) -> bool
         {
             if (!m_applied) return false;
@@ -770,7 +795,11 @@ namespace dwsc
                 capture();
                 if (g_log_verbose.load(std::memory_order_relaxed))
                     Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] {} loaded late: {}\n"), mode.spec.name, mode.captured ? STR("tuned") : STR("not found"));
-                if (!mode.captured || !keep_if_mode(ref)) return false;
+                if (!mode.captured || !keep_if_mode(ref, true)) return false;
+                std::vector<Original> seen(2);
+                read_values(mode.cdo, seen[0]);
+                read_values(ref.object, seen[1]);
+                adopt_from(mode, seen);
                 write(mode.cdo, mode, m_last);
                 write(ref.object, mode, m_last);
                 if (m_last.active) request_flip(ref.object->GetOuterPrivate());
@@ -781,22 +810,28 @@ namespace dwsc
 
         // LiveRefs, not pointers: a popped mode can be collected at any GC.
         template <typename Visit>
-        auto for_each_instance(Visit&& visit) -> void
+        auto for_each_live(Visit&& visit) -> void
         {
             drop_dead_classes();
             for (auto& live : m_live)
             {
                 auto& mode = m_modes[live.index];
                 if (!mode.captured || mode.cls != live.ref.cls || !live.ref.alive()) continue;
-                visit(live.ref.object, mode);
+                visit(live, mode);
             }
+        }
+
+        template <typename Visit>
+        auto for_each_instance(Visit&& visit) -> void
+        {
+            for_each_live([&](LiveMode& live, Mode& mode) { visit(live.ref.object, mode); });
         }
 
         // transition: the flip's blend time; otherwise each mode's own.
         auto set_blend(bool transition) -> void
         {
             for_each_instance([&](UObject* instance, Mode& mode) {
-                write_float(instance, m_off.type_blend, transition ? m_transition : mode.original.type_blend);
+                write_float(instance, m_off.type_blend, transition ? m_transition : mode.base.type_blend);
             });
         }
 
@@ -813,16 +848,17 @@ namespace dwsc
             }
         }
 
-        auto read_original(UObject* cdo, Original& out) -> void
+        // A CDO's or a live instance's current values: memory reads only.
+        auto read_values(UObject* object, Original& out) -> void
         {
-            out.fov = read_float(cdo, m_off.fov);
-            out.pitch_min = read_float(cdo, m_off.pitch_min);
-            out.pitch_max = read_float(cdo, m_off.pitch_max);
-            out.hlag_on = m_hlag_on->GetPropertyValueInContainer(cdo);
-            out.vlag_on = m_vlag_on->GetPropertyValueInContainer(cdo);
-            out.type_blend = read_float(cdo, m_off.type_blend);
+            out.fov = read_float(object, m_off.fov);
+            out.pitch_min = read_float(object, m_off.pitch_min);
+            out.pitch_max = read_float(object, m_off.pitch_max);
+            out.hlag_on = m_hlag_on->GetPropertyValueInContainer(object);
+            out.vlag_on = m_vlag_on->GetPropertyValueInContainer(object);
+            out.type_blend = read_float(object, m_off.type_blend);
             out.offsets.clear();
-            for_each_offset(cdo, [&](uint8_t key, uint8_t* value) {
+            for_each_offset(object, [&](uint8_t key, uint8_t* value) {
                 OffsetOriginal o{key};
                 double target[3]{};
                 memcpy(target, value + m_off.offset_target, sizeof(target));
@@ -834,44 +870,171 @@ namespace dwsc
             });
         }
 
-        auto write(UObject* object, const Mode& mode, const PositionTuning& t) -> void
+        // What write() puts into a mode for a tuning, computed from its base: the one computation behind the
+        // writes and behind telling the mod's own values from another mod's (adopt_foreign()). type_blend is
+        // carried over, not written: the flip owns it.
+        static auto expected(const Mode& mode, const PositionTuning& t) -> Original
         {
-            const auto& o = mode.original;
+            const auto& b = mode.base;
             const auto& g = t.groups[mode.spec.group];
             bool on = t.active;
+            Original e = b;
 
-            write_float(object, m_off.fov, on ? static_cast<float>(o.fov + g.fov) : o.fov);
+            e.fov = on ? static_cast<float>(b.fov + g.fov) : b.fov;
+            e.hlag_on = b.hlag_on && !t.own_lag;
+            e.vlag_on = b.vlag_on && !t.own_lag;
+            // Aiming and combat ship wider limits; only the -60 / 40 modes take the setting. Judged on the shipped
+            // limits: the setting is absolute, so it stays on top of limits another mod wrote into such a mode.
+            bool game_range = mode.shipped.pitch_min == -60.0f && mode.shipped.pitch_max == 40.0f;
+            e.pitch_min = on && game_range ? static_cast<float>(t.pitch_min) : b.pitch_min;
+            e.pitch_max = on && game_range ? static_cast<float>(t.pitch_max) : b.pitch_max;
+
+            if (!on) return e;
+            for (auto& off : e.offsets) // each field from its own base value, so in place
+            {
+                if (off.x < 0.0) off.x = off.x * g.distance / 100.0;
+                if (off.y != 0.0) // centred modes stay centred
+                {
+                    // A negative offset stops at the centre instead of crossing to the other shoulder.
+                    off.y = std::copysign(std::max(std::abs(off.y) + g.shoulder, 0.0), off.y);
+                    if (t.shoulder_swap) off.y = -off.y;
+                }
+                off.z = off.z + g.height;
+                off.overridden_fov = static_cast<float>(off.overridden_fov + g.fov);
+            }
+            return e;
+        }
+
+        auto write(UObject* object, const Mode& mode, const PositionTuning& t) -> void
+        {
+            auto e = expected(mode, t);
+            write_float(object, m_off.fov, e.fov);
             // The game reads these every frame (tested live, 2026-09-19): off, the follow is the only lag.
-            m_hlag_on->SetPropertyValueInContainer(object, o.hlag_on && !t.own_lag);
-            m_vlag_on->SetPropertyValueInContainer(object, o.vlag_on && !t.own_lag);
-            // Aiming and combat ship wider limits; only the -60 / 40 modes take the setting.
-            bool game_range = o.pitch_min == -60.0f && o.pitch_max == 40.0f;
-            write_float(object, m_off.pitch_min, on && game_range ? static_cast<float>(t.pitch_min) : o.pitch_min);
-            write_float(object, m_off.pitch_max, on && game_range ? static_cast<float>(t.pitch_max) : o.pitch_max);
+            m_hlag_on->SetPropertyValueInContainer(object, e.hlag_on);
+            m_vlag_on->SetPropertyValueInContainer(object, e.vlag_on);
+            write_float(object, m_off.pitch_min, e.pitch_min);
+            write_float(object, m_off.pitch_max, e.pitch_max);
 
             for_each_offset(object, [&](uint8_t key, uint8_t* value) {
-                for (auto& oo : o.offsets)
+                for (auto& off : e.offsets)
                 {
-                    if (oo.key != key) continue;
-                    double target[3]{oo.x, oo.y, oo.z};
-                    float fov = oo.overridden_fov;
-                    if (on)
-                    {
-                        if (oo.x < 0.0) target[0] = oo.x * g.distance / 100.0;
-                        if (oo.y != 0.0) // centred modes stay centred
-                        {
-                            // A negative offset stops at the centre instead of crossing to the other shoulder.
-                            target[1] = std::copysign(std::max(std::abs(oo.y) + g.shoulder, 0.0), oo.y);
-                            if (t.shoulder_swap) target[1] = -target[1];
-                        }
-                        target[2] = oo.z + g.height;
-                        fov = static_cast<float>(oo.overridden_fov + g.fov);
-                    }
+                    if (off.key != key) continue;
+                    double target[3]{off.x, off.y, off.z};
                     memcpy(value + m_off.offset_target, target, sizeof(target));
-                    memcpy(value + m_off.offset_fov, &fov, sizeof(fov));
+                    memcpy(value + m_off.offset_fov, &off.overridden_fov, sizeof(float));
                     break;
                 }
             });
+        }
+
+        // Bitwise: every value the mod wrote went in verbatim, and a NaN must still equal itself.
+        template <typename T>
+        static auto same(T a, T b) -> bool
+        {
+            return std::memcmp(&a, &b, sizeof(T)) == 0;
+        }
+
+        static auto same_keys(const Original& a, const Original& b) -> bool
+        {
+            if (a.offsets.size() != b.offsets.size()) return false;
+            return std::all_of(a.offsets.begin(), a.offsets.end(), [&](auto& off) {
+                return std::any_of(b.offsets.begin(), b.offsets.end(), [&](auto& other) { return other.key == off.key; });
+            });
+        }
+
+        static auto camera_type_label(uint8_t key) -> const wchar_t*
+        {
+            return key == 1 ? L"Default" : key == 2 ? L"Interior" : key == 3 ? L"Habitat" : L"?";
+        }
+
+        // Values another mod wrote into a captured CDO or a live instance become that field of the mode's base, so
+        // the writes after it apply the player's settings on top of them and restore() leaves them. A value is the
+        // mod's own if it is the last write (expected() of the last tuning), the base (an instance copied from the
+        // CDO, or an inactive apply) or the shipped value (a class that reloaded after a map load); anything else
+        // is foreign. Only known live modes are read (LiveMode). Memory reads only, no UObject calls and no object
+        // walk: at the start of apply() and restore(), and for one class in adopt_late(); never per tick. CDOs are
+        // read before instances, and where they carry different foreign values the last one read wins; a value
+        // that reads as the mod's own changes nothing.
+        auto adopt_foreign() -> void
+        {
+            drop_dead_classes();
+            std::vector<std::vector<Original>> seen(m_modes.size());
+            for (size_t i = 0; i < m_modes.size(); ++i)
+            {
+                if (m_modes[i].captured) read_values(m_modes[i].cdo, seen[i].emplace_back());
+            }
+            for_each_live([&](LiveMode& live, Mode& mode) {
+                if (live.known) read_values(live.ref.object, seen[static_cast<size_t>(&mode - m_modes.data())].emplace_back());
+            });
+            for (size_t i = 0; i < m_modes.size(); ++i)
+            {
+                if (!seen[i].empty()) adopt_from(m_modes[i], seen[i]);
+            }
+        }
+
+        auto adopt_from(Mode& mode, const std::vector<Original>& seen) -> void
+        {
+            for (auto& values : seen)
+            {
+                if (same_keys(values, mode.base)) continue;
+                if (!mode.keys_warned)
+                {
+                    Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] {}: CameraOffsets holds {} camera types, not the {} captured: values from other mods not taken\n"),
+                                                    mode.spec.name, values.offsets.size(), mode.base.offsets.size());
+                }
+                mode.keys_warned = true;
+                return;
+            }
+            // Classified against the base as it stood before this check: an instance still holding the last write
+            // made from it is the mod's own even after the CDO's foreign value changed the base.
+            const Original prior = mode.base;
+            const Original written = m_applied ? expected(mode, m_last) : prior;
+            // field: 0-2 the scalars, 3 + 4 * key index + axis the offsets; the out-of-range warning once per field
+            // per check, not once per object holding the value. get: one field of an Original. label: that field
+            // with a value, for the log.
+            uint32_t warned = 0;
+            auto consider = [&](int field, auto value, auto get, auto label) {
+                if (same(value, get(prior)) || same(value, get(written)) || same(value, get(mode.shipped))) return;
+                if (same(value, get(mode.base))) return; // taken from an earlier object in this check
+                auto candidate = mode.base;
+                get(candidate) = value;
+                if (!plausible(candidate, true))
+                {
+                    if (!(warned & (1u << field)))
+                    {
+                        Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] {}: {} written by another mod is out of range, base left at {}\n"),
+                                                        mode.spec.name, label(value), get(mode.base));
+                    }
+                    warned |= 1u << field;
+                    return;
+                }
+                mode.base = std::move(candidate);
+                Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] {}: {} written by another mod (shipped {}), used as its base\n"), mode.spec.name,
+                                               label(value), get(mode.shipped));
+            };
+            auto scalar = [](const wchar_t* name) { return [name](auto v) { return std::format(L"{} {}", name, v); }; };
+            for (auto& values : seen)
+            {
+                consider(0, values.fov, [](auto& o) -> auto& { return o.fov; }, scalar(L"FOV"));
+                consider(1, values.pitch_min, [](auto& o) -> auto& { return o.pitch_min; }, scalar(L"pitch min"));
+                consider(2, values.pitch_max, [](auto& o) -> auto& { return o.pitch_max; }, scalar(L"pitch max"));
+                // Base, shipped and the last write share one key order (expected() copies the base, the base copies
+                // shipped); the object's own map order may differ, so it is matched by key.
+                for (size_t k = 0; k < mode.base.offsets.size(); ++k)
+                {
+                    uint8_t key = mode.base.offsets[k].key;
+                    auto found = std::find_if(values.offsets.begin(), values.offsets.end(), [&](auto& off) { return off.key == key; });
+                    if (found == values.offsets.end()) continue; // same_keys() rules this out
+                    auto offset = [key](const wchar_t* name) {
+                        return [name, key](auto v) { return std::format(L"{} {} on key {} ({})", name, v, key, camera_type_label(key)); };
+                    };
+                    int field = 3 + 4 * static_cast<int>(k); // plausible() allows at most 3 keys: bits 3-14
+                    consider(field, found->x, [k](auto& o) -> auto& { return o.offsets[k].x; }, offset(L"X offset"));
+                    consider(field + 1, found->y, [k](auto& o) -> auto& { return o.offsets[k].y; }, offset(L"Y offset"));
+                    consider(field + 2, found->z, [k](auto& o) -> auto& { return o.offsets[k].z; }, offset(L"Z offset"));
+                    consider(field + 3, found->overridden_fov, [k](auto& o) -> auto& { return o.offsets[k].overridden_fov; }, offset(L"FOV override"));
+                }
+            }
         }
 
         // ECameraModeState; 0xFF if the call wrote nothing.

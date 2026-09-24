@@ -281,13 +281,15 @@ the centre (0.7.4).
   scaled by a `game_lag_scale` setting (removed), which at its default 3 still left the game about half the delay. The map is walked with
   `FScriptMap::GetScriptLayout(1, 1, size, align)` (ECameraType key, value at 0x08). Before the first write
   each captured original must look like a camera (FOV 30-170, 1-3 keys in 1..3, offsets within 2000 cm),
-  or that mode alone is left as shipped (0.7.4; before, one implausible mode switched tuning off
-  everywhere). The first capture logged Base_LongRange as fov 90, lag 3/8, pitch -60/40, key 1 at
+  or that mode alone is left as shipped (0.7.4; before, one implausible mode switched
+  tuning off everywhere). The first capture logged Base_LongRange as fov 90, lag 3/8, pitch -60/40, key 1 at
   (-250, 30, 0): the values measured live.
-- **Originals once, writes from originals.** Each class's CDO is read the first time it is seen and every
-  write is computed from that, so applies cannot compound. A level change drops the CDO and instance
-  pointers (classes may unload) but keeps the originals: a class that stayed loaded still holds the mod's
-  values. At unload the CDOs get the originals back; live instances keep their values until the game pushes
+- **Originals once, writes from a base.** Each class's CDO is read the first time it is seen (its shipped
+  values) and that becomes the mode's base; every write is computed from the base, never from the current
+  value, so applies cannot compound. The base differs from the shipped values only where another mod wrote a
+  field (see "Writes from other mods"). A level change drops the CDO and instance pointers (classes may
+  unload) but keeps shipped values and base: a class that stayed loaded still holds the mod's values. At
+  unload the CDOs get the base back; live instances keep their values until the game pushes
   new modes. `restore()` re-captures before writing, and does nothing unless this session applied. A neutral
   apply was checked live: every value equal to the shipped one.
 - **Where writes go.** Every captured CDO (new instances copy it), then the player camera's live modes, held
@@ -700,6 +702,54 @@ the first time a class is seen". If a Lua mod has written the CDO before Smoothw
 class, the captured baseline is the other mod's value and every percentage applies on top of it. The
 smoothing itself and the lag switch are contested by nobody.
 
+### Writes from other mods (detection, 0.10.x)
+
+Another mod's write is taken as an absolute value that replaces the shipped one for that field, and the
+player's settings apply on top of it: another mod sets `TargetOffset.X` to -300 and the distance is 120%, so
+Smoothwalker writes -360. Not run against the game yet.
+
+- **Two value sets per mode.** `shipped` is the first capture and never changes (for the logs). `base` starts
+  equal to it and is what every write is computed from (`expected()`, the one computation behind `write()`)
+  and what `restore()` writes at unload. The fields watched are `DefaultFieldOfView`, `ViewPitchMin/Max` and,
+  per `CameraOffsets` key, `TargetOffset` X, Y, Z and `OverriddenFieldOfView`. The type blend time and the
+  lag bits are not: Smoothwalker writes those itself (the flip, the lag switch).
+- **Three-way classification, no snapshots.** Each watched value on a captured CDO or a live instance is the
+  mod's own if it equals, bit for bit, the last write (`expected()` of the last tuning), the base, or the
+  shipped value. A class that stayed loaded holds the last write, one that reloaded after a map load holds
+  shipped values, a fresh instance copies its CDO. Anything else is foreign and becomes that field of the
+  base, if the base still passes the plausibility gate (else a warning, once per field per check, and the
+  base stays; for a foreign value the gate also wants `OverriddenFieldOfView` between 0, no override, and 170,
+  which rejects NaN too; a first capture is gated as before). Each change is
+  logged at the default level, for example `Base_LongRange: FOV 110 written by another mod (shipped 90), used
+  as its base`, and offsets name the key (1 Default, 2 Interior, 3 Habitat) and the axis. Values are
+  compared against the base as it stood before the check, CDO first, then instances; where they carry
+  different foreign values the last one read wins and each change is logged, and a value that reads as the
+  mod's own changes nothing. Offsets are matched by key; an object whose key set differs from the captured
+  one gets one warning per session and that mode takes nothing.
+- **Which instances are checked.** Every captured CDO, but only live modes whose values the classification
+  can account for. A mode found by the object scan is not checked until Smoothwalker has written it (an
+  apply, or `adopt_late()`): after a hot reload the scan finds instances still holding the old DLL's last
+  write, and a newly possessed pawn's camera holds an older apply's, neither of which is the current last
+  write, base or shipped value, so both would read as foreign and the player's settings would stack again.
+  A mode taken through the new-object hand-off was built from a CDO that is checked, so it is checked from
+  the start. A rescan (a new camera or world, a hand-off overflow) makes every live mode unchecked again, so a
+  write another mod makes to an instance only, between that rescan and the next apply, is overwritten unseen;
+  writes to the CDO are still caught.
+- **Where it runs.** At the start of every apply, after the scan and before any write; at the start of
+  `restore()`, so an unload leaves other mods' values in place instead of writing the shipped ones over
+  them; and in `adopt_late()`, on that class's CDO and first instance before they are written, so a class
+  captured before a map load and reloaded since keeps another mod's write to it. Memory reads over the
+  captured CDOs and the held live modes, no UObject calls and no object walk; never per tick.
+- **The pitch limits stay the player's.** Whether a mode takes the `pitch_min` / `pitch_max` settings is
+  judged on its shipped limits (-60 / 40), not the base: the settings are absolute, so while tuning is on
+  they still replace limits another mod wrote into such a mode, and the other mod's limits return when
+  tuning is off and at unload.
+- **Limits.** A foreign write that lands before Smoothwalker first captures a class is captured as shipped.
+  Under the model that is still the right base; only the log cannot flag it. A later write of the shipped
+  value (another mod undoing its change) reads as Smoothwalker's own, so the base keeps that mod's earlier
+  value for the session. And if the game itself writes any of these fields at runtime, that write is taken
+  as foreign too; to be checked live.
+
 ### What Smoothwalker has that nobody else does
 
 The final `FMinimalViewInfo` once per frame, the smoothed pivot, the aiming flag, and a proven
@@ -735,9 +785,13 @@ bumped on any incompatible change.
    the owner left the camera and `release("cut")` snaps. Layers are off while owned unless the owner opts
    in. It replaces the `camera_live()` inference with an explicit signal and gives a photo mode or an
    AXIS-style gate a real handshake.
-4. **Mode-value service.** `set_mode_value(group, field, value)`: the baseline capture and the type flip
-   done once, by one owner, so the mods in the table above stop fighting. Pays off only if their authors
-   adopt it; ship it last and document it as the fix for the conflict table.
+4. **Base values.** `base_set{ mode or group, type, distance, side, height, fov }` and `base_clear{ mode, type }`
+   (`type` absent: all three camera types): another mod sets a mode's base, the value that replaces the
+   shipped one, as an absolute number; the player's settings still apply on top. The baseline capture, the
+   writes and the type flip done once, by one owner, so the mods in the table above stop fighting. First come
+   per mode, type and field (`taken` with the holder's name), freed when the mod stops. Pays off only if their
+   authors adopt it; ship it last and document it as the fix for the conflict table. The foreign-write
+   detection above ships first and covers mods that never adopt it.
 
 ### What SmoothCam's API teaches (read 2026-09-22)
 
@@ -1121,7 +1175,8 @@ line says what stopped in its own words ("mod inactive", "smoothing inactive").
 - **Normal**, the default log: one load line (version, on or off, saved slots, presets from the folder),
   `GetCameraView hooked`, `API consumer '{}' registered`, and changes the player made: the toggle, shoulder
   swap, debug overlay key, a saved or loaded preset, a key ignored, settings applied, missing ini keys added,
-  pending settings applied. The `log_stats` report is Normal too, but opt-in.
+  pending settings applied, and a camera value another mod wrote taken as a mode's base. The `log_stats`
+  report is Normal too, but opt-in.
 - **Warning**: something is off or falls back, the mod still runs. A missing property with a fallback, a
   failed write, a skipped preset, banners or the overlay off.
 - **Error**: the mod or the follow cannot work. Camera class defaults missing, slot 214 not overridden, a
