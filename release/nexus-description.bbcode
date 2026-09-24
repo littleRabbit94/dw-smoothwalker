@@ -29,7 +29,7 @@ No mods.txt edit needed. [font=Courier New]UE4SS.log[/font] shows these two line
 [DWSmoothwalker] GetCameraView hooked (slot 214)[/code]
 To uninstall, delete ue4ss\Mods\DWSmoothwalker. Nothing is written to save games.
 
-[b]Updating:[/b] Close the game and extract over the old folder. The archive replaces [font=Courier New]config\smoothwalker.ini[/font], so save your settings to a slot first, or keep a copy of the file and put it back afterwards: keys new to this version are added to it at the next start. Slots and installed presets survive.
+[b]Updating:[/b] To keep your settings on a later update, skip config\smoothwalker.ini when extracting. The mod adds any new settings to your file the next time you start the game. Slots and installed presets survive.
 
 [b][size=4]Features[/size][/b]
 [list]
@@ -40,26 +40,25 @@ To uninstall, delete ue4ss\Mods\DWSmoothwalker. Nothing is written to save games
 [*]A preset is a small ini file with 41 keys, placed in config/presets.[/*]
 [*]A template with every key and its default is included in the optional files.[/*]
 [*]Six in-game save slots that work as profiles: pick one, tune, and every change is saved into it. Export it when you're done.[/*]
-[*]Follow in combat and in traversal (claw ride, anti-grav, shadowstep): how much of the trail, and of the turning smoothing, stays while those cameras are up. Aiming has had this since the first release.[/*]
-[*]Plays along with mods that change the game's camera modes: a distance, FOV or look limit another mod writes is kept, Smoothwalker's settings apply on top, and one log line says which mode and value.[/*]
-[*]A camera API for other UE4SS Lua mods: read the camera, add an offset, rotation or FOV layer, or take the camera over for a while and hand it back. See the mod authors section below.[/*]
-[*]A debug overlay (Debug group on the menu page, or [font=Courier New]debug_key[/font]) that shows the live camera state at the top right of the screen, for tuning presets and for bug reports.[/*]
+[*]Follow in combat and traversal (claw ride, anti-grav, shadowstep): how much of the follow and rotation smoothing stays while those cameras are up. Aiming has had this since the first release.[/*]
+[*]Works with mods that change the game's camera modes: a distance or FOV value set by another mod is kept, Smoothwalker's settings apply on top, and one log line shows which mode and value are in effect.[/*]
+[*]A camera API for other UE4SS Lua mods: read the camera, add an offset, rotation, or FOV layer, or control the camera. See the mod authors section below.[/*]
+[*]A debug overlay (Debug group on the menu page, or [font=Courier New]debug_key[/font]) that shows the live camera state at the top right of the screen.[/*]
 [/list]
 [size=4][b]Known issues[/b][/size]
 [list]
 [*]After loading a preset from the Mod Menu, the open page continues to show the old slider values until you reopen it.[/*]
-[*]The debug overlay is not hidden by photo mode or a hidden HUD. Switch it off for screenshots.[/*]
 [/list]
 
 [size=4][b]Compatibility[/b][/size]
 [list]
-[*]Another mod that replaces the third-person camera update itself would fight it. Run one or the other, unless that mod uses the camera API to take the camera over.[/*]
+[*]Another mod that replaces the third-person camera update would conflict with it. Run one or the other, unless that mod uses the camera API to take the camera over.[/*]
 [*]Mods that only change the game's camera modes (distance, FOV, look limits) work alongside it: Smoothwalker keeps their values and applies your settings on top.[/*]
 [*][url=https://www.nexusmods.com/thebloodofdawnwalker/mods/350]FreeCam - UE4SS[/url] ([font=Courier New]F7[/font]) works alongside it. Leaving the free camera snaps the game camera back to your character.[/*]
 [/list]
 
 [size=4][b]Performance[/b][/size]
-The camera math runs once per frame inside the game's own camera update. Measured cost is a few microseconds, with no measurable frame-time difference and no stutters.
+The camera math runs once per frame inside the game's own camera update. Measured cost is a few microseconds, with no measurable frame-time difference and no stutters. (This hasn't been measured in a while...)
 
 [size=4][b]Presets and keys[/b][/size]
 [spoiler]
@@ -172,11 +171,12 @@ Smoothwalker puts a [font=Courier New]Smoothwalker[/font] table into every UE4SS
 The write calls are game-thread only and answer [font=Courier New]nil, reason[/font] instead of throwing. The full reference and the threading rules are in [url=https://github.com/littleRabbit94/dw-smoothwalker/blob/main/docs/api.md]docs/api.md[/url] on GitHub. The optional file [b]Smoothwalker Example API Mod[/b] (Files tab, also [url=https://github.com/littleRabbit94/dw-smoothwalker/tree/main/release/example-consumer]on GitHub[/url]) is a complete drop-in Lua mod using it: F9 a zoom layer, F10 a dutch angle, F11 a claim with a glide back, and a console command that prints the reads. Copy from it freely.[/spoiler]
 
 [size=4][b]Source[/b][/size]
-Source is on [url=https://github.com/littleRabbit94/dw-smoothwalker]GitHub[/url].
+The source is on [url=https://github.com/littleRabbit94/dw-smoothwalker]GitHub[/url].
 For bug reports, the DWSmoothwalker lines from your [font=Courier New]UE4SS.log[/font], your game build and which UE4SS package you run should be enough.
 
 [size=4][b]Credits[/b][/size]
 Built on [url=https://github.com/UE4SS-RE/RE-UE4SS]UE4SS[/url] by the UE4SS-RE team (MIT).
-Runs on [url=https://www.nexusmods.com/thebloodofdawnwalker/mods/18]Vercadi's[/url] and [url=https://www.nexusmods.com/thebloodofdawnwalker/mods/283]Framecore's[/url] UE4SS packages for this game. Settings page thanks to [url=https://www.nexusmods.com/thebloodofdawnwalker/mods/271]mmarcussa[/url]'s Mod Setting Menu.
+Runs on [url=https://www.nexusmods.com/thebloodofdawnwalker/mods/18]Vercadi's[/url] and [url=https://www.nexusmods.com/thebloodofdawnwalker/mods/283]Framecore's[/url] UE4SS packages for this game.
+Settings page thanks to [url=https://www.nexusmods.com/thebloodofdawnwalker/mods/271]mmarcussa[/url]'s Mod Setting Menu.
 Inspired by [url=https://github.com/mwilsnd/SkyrimSE-SmoothCam]SmoothCam[/url] for Skyrim.
 GPL-3.0-or-later, included in the archive.
