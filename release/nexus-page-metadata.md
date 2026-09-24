@@ -93,9 +93,9 @@ Plain text, no BBCode. `Build-Package.py` reads the first version in this block 
 differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 
 ```
-0.10.1 - Combat FOV fix
+0.10.1 - Field of view fix
 
-- The field of view setting for combat now holds. Before, a changed combat FOV applied until the next time you drew your weapon, then the game's own FOV came back. The same could happen to the exploring FOV on the long-range exploring camera.
+- Field of view settings now hold on every camera the game builds. The game builds a fresh camera each time it switches to one, and some of them came out with the game's own FOV instead of yours: the combat camera on every weapon draw, sprinting in combat, the long-range exploring camera and the anti-grav camera. A change showed until the next switch, then reverted. Distance, height, shoulder and the look limits were not affected.
 - Updating: close the game and extract over the old folder, or skip config/smoothwalker.ini to keep your settings. Only the main file changed; the Example Preset and Example API Mod are the same as in 0.10.0.
 
 0.10.0 - Camera API, combat and traversal follow, debug overlay

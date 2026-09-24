@@ -1405,10 +1405,14 @@ Logging: `log_trace` removed; `log_verbose` added (ini only). The default log ke
 player's own changes, warnings and errors; the rest moved behind `log_verbose`. Lines use the UE4SS log
 levels for color: Error for what stops the mod, Verbose for the gated detail. See "Logging".
 
-### 0.10.1: combat FOV holds
+### 0.10.1: FOV holds on rebuilt modes
 
-`combat_fov` reverted on every weapon draw: a new camera mode copies from its CDO only the fields whose shipped
-value differs from the native parent's, and the push copies `DefaultFieldOfView` into a native field in the same
-frame. New modes are now written in the `StaticConstructObject` callback on the game thread, before the push
-("How writes land"). Affected in practice: the modes shipped at FOV 90 (CombatFromArm and its ranges,
-CombatSprinting, Base_LongRange).
+The FOV settings reverted whenever the game built a fresh mode (`combat_fov` on every weapon draw): a new camera
+mode copies from its CDO only the native-owned fields whose shipped value differs from the first native class's
+CDO (`FindFirstNativeClassInHierarchy`, so BP-on-BP modes such as FocusMode compare against
+`RebelCameraModeTPP` too), and the push copies `DefaultFieldOfView` into a native field in the same frame. New
+modes are now written in the `StaticConstructObject` callback on the game thread, before the push ("How writes
+land"). Affected: the modes shipped at FOV 90, the native default: CombatFromArm and its two ranges,
+CombatSprinting, Base_LongRange (measured), AntiGrav (shipped 90, its native parent's default not read). The
+other tuned fields ship away from the native defaults (offsets, the -60 / 40 look limits) or are only ever
+written to the native value (the lag switch), so they were copied all along.
