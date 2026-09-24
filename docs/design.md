@@ -267,8 +267,10 @@ The shipped values differ widely, so every setting is relative:
 | ClawRide | 100 | 8 / 8 | -89 / 89 | 1: -300 0 0 |
 
 So distance scales X only where X < 0, the shoulder adds outward only where Y is not 0 (centred modes stay
-centred), and the pitch limits apply only to modes shipped at -60 / 40. A negative shoulder offset stops at
-the centre (0.7.4).
+centred), and the pitch limits apply only to the modes that ship at -60 / 40, listed by name in
+`mode_classes()` (`player_pitch`): the five Exploration modes, both Sprint modes, FocusMode and
+Shadowstep_2_Base. The other 14 ship -89 / 89, except AimingOnLadder at -40 / 89 (all 23 CDOs read live,
+2026-09-24). A negative shoulder offset stops at the centre (0.7.4).
 
 - **Layout from reflection, then a plausibility gate.** Offsets are looked up by name: `DefaultFieldOfView`
   0x54, `ViewPitchMin/Max` 0x58/0x5C, lag speeds 0x68/0x6C (`RebelCameraMode`), `CameraOffsets` 0x898 and
@@ -799,9 +801,11 @@ Smoothwalker writes -360. Not run against the game yet.
   captured before a map load and reloaded since keeps another mod's write to it. Memory reads over the
   captured CDOs and the held live modes, no UObject calls and no object walk; never per tick.
 - **The pitch limits stay the player's.** Whether a mode takes the `pitch_min` / `pitch_max` settings is
-  judged on its shipped limits (-60 / 40), not the base: the settings are absolute, so while tuning is on
-  they still replace limits another mod wrote into such a mode, and the other mod's limits return when
-  tuning is off and at unload.
+  a per-mode flag in `mode_classes()` (`player_pitch`, the modes shipped at -60 / 40), not a test on the
+  captured values: the settings are absolute, so while tuning is on they still replace limits another mod
+  wrote into such a mode, and the other mod's limits return when tuning is off and at unload. Judging it on
+  the captured limits would have let a mod that writes limits before the first capture silently take a mode
+  out of the setting.
 - **Limits.** A foreign write that lands before Smoothwalker first captures a class is captured as shipped.
   Under the model that is still the right base; only the log cannot flag it. A later write of the shipped
   value (another mod undoing its change) reads as Smoothwalker's own, so the base keeps that mod's earlier

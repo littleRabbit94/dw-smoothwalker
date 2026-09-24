@@ -86,22 +86,29 @@ namespace dwsc
         Group group;
         const wchar_t* name;         // BP_CameraMode_<name>
         const wchar_t* folder = L""; // under Modes/, with its slash
+        // Takes the pitch_min / pitch_max settings. The modes shipped at -60 / 40 (measured 2026-09-24 over all
+        // 23 CDOs); the rest ship -89 / 89 (AimingOnLadder -40 / 89) and keep their own. A name list rather
+        // than a test on the captured values, so a mod that writes limits before the first capture cannot
+        // change which modes the setting applies to.
+        bool player_pitch = false;
     };
 
     // Finisher and shadowstep attack cameras are scripted shots and stay as shipped.
     inline const std::vector<ModeClassSpec>& mode_classes()
     {
+        constexpr bool pitch = true;
         static const std::vector<ModeClassSpec> specs{
-                {Exploration, L"Base"}, {Exploration, L"Base_LongRange"}, {Exploration, L"Base_CloseRange"},
-                {Exploration, L"Base_CloseRange_Mantle2m"}, {Exploration, L"GapSqueeze"},
-                {Sprint, L"Sprint"}, {Sprint, L"Sprint_VampiricFastTraversal"},
+                {Exploration, L"Base", L"", pitch}, {Exploration, L"Base_LongRange", L"", pitch},
+                {Exploration, L"Base_CloseRange", L"", pitch}, {Exploration, L"Base_CloseRange_Mantle2m", L"", pitch},
+                {Exploration, L"GapSqueeze", L"", pitch},
+                {Sprint, L"Sprint", L"", pitch}, {Sprint, L"Sprint_VampiricFastTraversal", L"", pitch},
                 {Combat, L"CombatNear"}, {Combat, L"CombatFromArm"}, {Combat, L"CombatFromArm_LongRange"},
-                {Combat, L"CombatFromArm_VeryLongRange"}, {Combat, L"CombatFistFightMode"}, {Focus, L"FocusMode"},
+                {Combat, L"CombatFromArm_VeryLongRange"}, {Combat, L"CombatFistFightMode"}, {Focus, L"FocusMode", L"", pitch},
                 {Combat, L"CombatSprinting"},
                 {Aiming, L"Aiming"}, {Aiming, L"AimingOnLadder"}, {Aiming, L"AimingClawRide"}, {Aiming, L"AimingClawRideLedge"},
                 {Aiming, L"AntiGravAiming"},
                 {Traversal, L"AntiGrav"}, {Traversal, L"ClawRide"}, {Traversal, L"ClawRideLedge"},
-                {Traversal, L"Shadowstep_2_Base", L"Shadowstep/"},
+                {Traversal, L"Shadowstep_2_Base", L"Shadowstep/", pitch},
         };
         return specs;
     }
@@ -513,7 +520,7 @@ namespace dwsc
             bool has_shipped = false;
             bool usable = true;
             bool keys_warned = false; // the CameraOffsets key-set warning, once per session
-            Original shipped; // the first capture, never changed: for the logs and the pitch-limit rule
+            Original shipped; // the first capture, never changed: for the logs and adopt_foreign()
             // What writes are computed from: shipped, with each value another mod wrote in its place. type_blend
             // and the lag bits stay as captured: the mod writes those itself (the flip, own_lag).
             Original base;
@@ -883,11 +890,11 @@ namespace dwsc
             e.fov = on ? static_cast<float>(b.fov + g.fov) : b.fov;
             e.hlag_on = b.hlag_on && !t.own_lag;
             e.vlag_on = b.vlag_on && !t.own_lag;
-            // Aiming and combat ship wider limits; only the -60 / 40 modes take the setting. Judged on the shipped
-            // limits: the setting is absolute, so it stays on top of limits another mod wrote into such a mode.
-            bool game_range = mode.shipped.pitch_min == -60.0f && mode.shipped.pitch_max == 40.0f;
-            e.pitch_min = on && game_range ? static_cast<float>(t.pitch_min) : b.pitch_min;
-            e.pitch_max = on && game_range ? static_cast<float>(t.pitch_max) : b.pitch_max;
+            // Aiming and combat ship wider limits; only the modes listed as player_pitch take the setting. The
+            // setting is absolute, so it stays on top of limits another mod wrote into such a mode.
+            bool player_pitch = mode.spec.player_pitch;
+            e.pitch_min = on && player_pitch ? static_cast<float>(t.pitch_min) : b.pitch_min;
+            e.pitch_max = on && player_pitch ? static_cast<float>(t.pitch_max) : b.pitch_max;
 
             if (!on) return e;
             for (auto& off : e.offsets) // each field from its own base value, so in place
