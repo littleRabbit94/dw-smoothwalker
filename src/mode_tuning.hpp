@@ -801,7 +801,7 @@ namespace dwsc
         // A new instance does not copy its whole CDO: a Blueprint class copies only the properties whose CDO value
         // differed from its native parent's when its list was built (UBlueprintGeneratedClass::
         // CustomPropertyListForPostConstruction, UE 5.5.4 BlueprintGeneratedClass.cpp), and the rest keep the native
-        // constructor's. The native modes default to FOV 90, so the modes shipped at 90 (the CombatFromArm ranges,
+        // constructor's. The native modes default to FOV 90, so the 10 modes shipped at 90 (docs/design.md "0.10.1"; among them the CombatFromArm ranges,
         // CombatSprinting, Base_LongRange) were built at 90 whatever the CDO held (measured 2026-09-24: five draws,
         // each CombatFromArm_VeryLongRange born at 90 under a CDO at 110). So every hand-off instance is written,
         // CDO first as in adopt_late(). It must happen in the construction callback (note_new()): the push copies

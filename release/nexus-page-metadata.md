@@ -31,7 +31,7 @@ AI-Generated Content (read 2026-09-16).
 | File name | `Smoothwalker` |
 | Version | `0.10.1` |
 | Category | Main Files |
-| File | `dist/Smoothwalker-0.10.1.zip`, 405,274 bytes, built 2026-09-24 |
+| File | `dist/Smoothwalker-0.10.1.zip`, 405,275 bytes, built 2026-09-24 |
 | Description | `Close the game, then extract into the folder that holds the ue4ss folder (Dawnwalker/Binaries/Win64, the one with Dawnwalker.exe). The archive carries the folder path, so the mod lands in ue4ss/Mods/DWSmoothwalker by itself. Needs UE4SS (mod 18 or mod 283) and Steam build 25232147. No mods.txt edit.` |
 
 Optional file:
@@ -95,7 +95,7 @@ differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 ```
 0.10.1 - Field of view fix
 
-- Field of view settings now hold on every camera the game builds. The game builds a fresh camera each time it switches to one, and some of them came out with the game's own FOV instead of yours: the combat camera on every weapon draw, sprinting in combat, the long-range exploring camera and the anti-grav camera. A change showed until the next switch, then reverted. Distance, height, shoulder and the look limits were not affected.
+- Field of view settings now hold on every camera the game builds. The game builds a fresh camera each time it switches to one, and 10 of the 23 it uses came out with the game's own FOV instead of yours: three of the five exploring cameras, the armed combat cameras (on every weapon draw) and sprinting in combat, aiming on a ladder and in anti-grav, and the anti-grav camera. A change showed until the next switch, then reverted. The sprint and focus FOVs, claw ride, shadowstep, fist fights and every other setting (distance, height, shoulder, look limits) were not affected.
 - Updating: close the game and extract over the old folder, or skip config/smoothwalker.ini to keep your settings. Only the main file changed; the Example Preset and Example API Mod are the same as in 0.10.0.
 
 0.10.0 - Camera API, combat and traversal follow, debug overlay

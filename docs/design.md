@@ -236,7 +236,7 @@ Measured live on the running game.
   instance only the properties on its `CustomPropertyListForPostConstruction`, built by diffing its CDO against
   the native parent's (UE 5.5.4 `BlueprintGeneratedClass.cpp`, `UpdateCustomPropertyListForPostConstruction`);
   the rest keep the native constructor's value. `RebelCameraMode`, `RebelCameraModeTPP` and `CombatCameraMode`
-  default to FOV 90 and pitch -89 / 89, so the modes shipped at FOV 90 (the CombatFromArm ranges,
+  default to FOV 90 and pitch -89 / 89, so the 10 modes shipped at FOV 90 (listed under "0.10.1"; among them the CombatFromArm ranges,
   CombatSprinting, Base_LongRange) never take a CDO FOV write: measured 2026-09-24, five draws each built
   `CombatFromArm_VeryLongRange` at 90 under a CDO at 110, and `combat_fov` reverted on every draw. Sprint (95)
   worked above because 95 is on its list. A write on the next tick is too late: the push copies
@@ -1412,7 +1412,10 @@ mode copies from its CDO only the native-owned fields whose shipped value differ
 CDO (`FindFirstNativeClassInHierarchy`, so BP-on-BP modes such as FocusMode compare against
 `RebelCameraModeTPP` too), and the push copies `DefaultFieldOfView` into a native field in the same frame. New
 modes are now written in the `StaticConstructObject` callback on the game thread, before the push ("How writes
-land"). Affected: the modes shipped at FOV 90, the native default: CombatFromArm and its two ranges,
-CombatSprinting, Base_LongRange (measured), AntiGrav (shipped 90, its native parent's default not read). The
-other tuned fields ship away from the native defaults (offsets, the -60 / 40 look limits) or are only ever
+land"). Affected: the 10 of 23 modes shipped at FOV 90, their first native class's default (all 23 CDOs and
+their native parents read live 2026-09-24, every group FOV at 0, no `bOverrideFOV` set anywhere): Base_LongRange,
+Base_CloseRange, Base_CloseRange_Mantle2m, CombatFromArm and its two ranges, CombatSprinting, AimingOnLadder
+(`RebelSpringCameraMode`), AntiGravAiming and AntiGrav (`DawnwalkerAntiGravCameraMode`). Every native parent
+(`RebelCameraModeTPP`, `CombatCameraMode`, `RebelSpringCameraMode`, `DawnwalkerAntiGravCameraMode`,
+`DawnwalkerClawRideCameraMode`) defaults to 90; the other 13 ship at 80, 95 or 100. The other tuned fields ship away from the native defaults (offsets, the -60 / 40 look limits) or are only ever
 written to the native value (the lag switch), so they were copied all along.
