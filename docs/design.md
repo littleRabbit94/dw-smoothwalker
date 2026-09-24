@@ -1225,8 +1225,6 @@ Switched off, `RemoveFromParent` and the references go; switched on again, a new
 - **Bare `UserWidget` relies on a shipping build.** The panel's class is the abstract native `UUserWidget`,
   which `CreateWidget` accepts only in Shipping and Test builds (`ValidateUserWidgetClass` is compiled out,
   `UserWidget.cpp` 2465-2477 in 5.5.4); proven working in this game's shipping build by the Lua probe.
-- **Not run in game yet.** The widget calls follow the probe; the styling, the slot placement and the text
-  refresh are checked against the 5.5.4 source only.
 
 ## Logging
 
@@ -1385,7 +1383,11 @@ in the Debug group. Hard cuts now carry a reason (`request_cut`, `Snap`), the fo
 its own function (`follow_rate`), and the mode tuner keeps the untracked camera modes it sees for the listing.
 0.10.0 also carries what landed after the 0.9.0 release without a version bump: the camera API (docs/api.md),
 `combat_follow` / `combat_rotation`, `traversal_follow` / `traversal_rotation`, and missing ini keys added at
-startup. Not yet tested in game.
+startup. Later in 0.10.0: writes from other mods are detected and used as the base ("Writes from other mods"),
+the DLL is pinned so Ctrl+R survives UE4SS's deferred hook cleanup ("Unload and hot reload"; 8 reloads, no
+crash), and the look-limit rule is a per-mode flag (`player_pitch`) instead of a test on the captured values,
+after all 23 CDOs were read live on 2026-09-24 (nine at -60 / 40, thirteen at -89 / 89, AimingOnLadder at
+-40 / 89) and the flag set was verified with -80 / 70 written live. The overlay was confirmed on screen the same day (panel at the top right, Smoothwalker ON, switched from the live ini).
 
 Logging: `log_trace` removed; `log_verbose` added (ini only). The default log keeps the load line, the
 player's own changes, warnings and errors; the rest moved behind `log_verbose`. Lines use the UE4SS log

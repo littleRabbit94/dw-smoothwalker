@@ -16,7 +16,7 @@ AI-Generated Content (read 2026-09-16).
 |---|---|
 | Mod name | `Smoothwalker - Third Person Camera` |
 | Summary | `A third-person camera that trails your character while turning stays instant, and eases off when you aim. Distance, height, shoulder and FOV per situation. Shoulder swap on V; presets and on/off in ini or Mod Menu. Needs UE4SS and Steam build 25232147.` |
-| Version | `0.9.0` |
+| Version | `0.10.0` |
 | Category | `Utilities`, beside FreeCam (mod 350) |
 | Tags | `Camera`, `Quality of Life`, `Utilities for Players`, `AI-Generated Content` |
 | Adult content | No |
@@ -29,9 +29,9 @@ AI-Generated Content (read 2026-09-16).
 | Field | Value |
 |---|---|
 | File name | `Smoothwalker` |
-| Version | `0.9.0` |
+| Version | `0.10.0` |
 | Category | Main Files |
-| File | `dist/Smoothwalker-0.9.0.zip`, 193,840 bytes, built 2026-09-21 |
+| File | `dist/Smoothwalker-0.10.0.zip`, 404,556 bytes, built 2026-09-24 |
 | Description | `Close the game, then extract into the folder that holds the ue4ss folder (Dawnwalker/Binaries/Win64, the one with Dawnwalker.exe). The archive carries the folder path, so the mod lands in ue4ss/Mods/DWSmoothwalker by itself. Needs UE4SS (mod 18 or mod 283) and Steam build 25232147. No mods.txt edit.` |
 
 Optional file:
@@ -39,12 +39,12 @@ Optional file:
 | Field | Value |
 |---|---|
 | File name | `Smoothwalker Example Preset` |
-| Version | `0.9.0` |
+| Version | `0.10.0` |
 | Category | Optional Files |
-| File | `dist/Smoothwalker-Example-Preset-0.9.0.zip`, 1,230 bytes, built 2026-09-21 |
+| File | `dist/Smoothwalker-Example-Preset-0.10.0.zip`, 1,371 bytes, built 2026-09-24 |
 | Description | `One preset, Over the Shoulder: a closer camera further out over the shoulder, with a quicker follow to match. I commented every key with its range and default, so it doubles as a template for your own. Extract into Dawnwalker/Binaries/Win64 like the main file; it lands in ue4ss/Mods/DWSmoothwalker/config/presets. Restart the game, then pick it from the Mod Menu or with preset in the ini. Needs the main file.` |
 
-Source: `example-preset/`. The build checks it holds a name and all 36 preset keys, each once, inside
+Source: `example-preset/`. The build checks it holds a name and all 41 preset keys, each once, inside
 the Mod Menu range and on its step.
 
 Contents: `dlls/main.dll` (no PDB), `mod_settings.ini`, `config/smoothwalker.ini`, empty
@@ -79,6 +79,19 @@ Plain text, no BBCode. `Build-Package.py` reads the first version in this block 
 differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 
 ```
+0.10.0 - Camera API, combat and traversal follow, debug overlay
+
+- Camera API for other UE4SS Lua mods: a Smoothwalker table in every mod's Lua state with view, live and enabled reads, one offset/rotation/FOV layer per mod, and claim/release so a mod can take the camera over and hand it back with a cut or a glide. Reference and a drop-in example in docs/api.md on GitHub.
+- Follow in combat and in traversal (claw ride, anti-grav, shadowstep): combat_follow, traversal_follow, combat_rotation and traversal_rotation set how much of the trail and the turning smoothing stays while those cameras are up, easing in and out. All default to 100, which is the old behaviour. In presets and on the menu page.
+- Plays along with mods that change the game's camera modes. A distance, FOV or look limit another mod writes is kept as the base, Smoothwalker's settings apply on top, and UE4SS.log says which mode and value. Checked before every apply, at unload and for classes loaded late. Before, such a value was overwritten.
+- Which camera modes take the look limits (pitch_min, pitch_max) is now fixed by name: the modes the game ships at -60 / 40 (exploring, sprinting, focus, the shadowstep base). Before it was judged on the values read at startup, which another mod could change first.
+- Debug overlay: debug_overlay (Debug group on the menu page) or debug_key shows a panel at the top right with the live follow, the game's camera type and modes, the lag, the last snap and the API owner. Off by default. It shows through photo mode and a hidden HUD; switch it off for screenshots.
+- Ctrl+R (mod reload) no longer crashes the game with Smoothwalker loaded. Tested with 8 reloads in a row.
+- max_lag_h or max_lag_v at 0 switches that axis's trail off entirely.
+- Settings keys added by an update are written into an existing config/smoothwalker.ini at startup, so an old file keeps working.
+- Logging: log_trace is gone; log_verbose (ini only) adds the detail lines. The default log keeps the load line, your own changes, warnings and errors.
+- Updating: close the game and extract over the old folder. The archive replaces config/smoothwalker.ini, so save your look to a slot first, or keep a copy of the file and put it back; slots and installed presets survive.
+
 0.9.0 - Crouch, turning, profiles
 
 - Crouching no longer pops the camera up. The follow tracks the bottom of the capsule, which does not move in a crouch, and the height change is eased at your vertical follow rate, so the dip runs with the game's own timing. The dip still leads the crouch animation when you crouch while stopping; the shipped camera does the same.
