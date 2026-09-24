@@ -114,9 +114,12 @@ namespace
 
     using GetCameraViewFn = void(__fastcall*)(void* self, float delta_time, void* desired_view);
 
+    // Kept across a hot reload on purpose (reset_globals): install_hook reads all three on the reused image.
     GetCameraViewFn g_original = nullptr;
     uintptr_t** g_vtable_entry = nullptr;
+    bool g_hook_left = false; // the last unload found another mod's hook over ours and left the slot alone
     std::atomic<int> g_in_hook{0}; // calls running inside get_camera_view_hook; unload waits for 0
+    int g_starts = 0;              // constructions in this process: one image, pinned (pin_module)
 
     SRWLOCK g_tuning_lock = SRWLOCK_INIT;
     Tuning g_tuning = tuning_of(dwsc::Settings{});
@@ -750,6 +753,70 @@ namespace
         if (!GetFileAttributesExA(path, GetFileExInfoStandard, &data)) return 0;
         return (static_cast<uint64_t>(data.ftLastWriteTime.dwHighDateTime) << 32) | data.ftLastWriteTime.dwLowDateTime;
     }
+
+    // Pins this DLL for the life of the process. A hot reload FreeLibrary's it right after the destructor, but
+    // UnregisterCallback only marks the five Hook callbacks dead: UE4SS destroys their std::function later, on its
+    // callback GC thread (one detour per 3 s pass) or when a reader drops its snapshot. With the image unmapped that
+    // destructor read a freed vtable (AV at UE4SS.dll+0x43B83A, RTTI: the on_unreal_init BeginPlay lambda). Pinned,
+    // FreeLibrary leaves the image mapped and the next LoadLibrary returns it: no new code, and no static
+    // initializer runs again (reset_globals). docs/design.md, "The DLL is pinned".
+    auto pin_module() -> void
+    {
+        HMODULE self{};
+        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+                                reinterpret_cast<LPCWSTR>(&get_camera_view_hook), &self))
+        {
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] could not pin the DLL (error {}): a hot reload may crash in UE4SS\n"), GetLastError());
+        }
+    }
+
+    // Every namespace-scope variable holding per-instance state, back to its static-init value. The image is pinned,
+    // so the next instance after a hot reload starts on it with no static initializer run: whatever is left out here
+    // carries the previous instance's state into it. Any new namespace-scope, class-static or function-local static
+    // that holds state goes here (docs/design.md, "The DLL is pinned"). Kept on purpose: g_original, g_vtable_entry
+    // and g_hook_left (install_hook), g_in_hook (self-balancing, and a call through a hook left in the chain may be
+    // in flight), g_starts, the locks, constants, and the QPC frequency (per boot; the constructor queries it again).
+    // Called last in the destructor: g_player_camera is already null and the in-hook wait is done, so a hook that is
+    // still reached returns after the original and never touches any of this.
+    auto reset_globals() -> void
+    {
+        AcquireSRWLockExclusive(&g_tuning_lock);
+        g_tuning = tuning_of(dwsc::Settings{});
+        ReleaseSRWLockExclusive(&g_tuning_lock);
+        g_enabled.store(true);
+        g_reset.store(true);
+        g_reset_reason.store(static_cast<int>(dwsc::Snap::Startup));
+        g_toggle_generation.store(0);
+        g_position_generation.store(0);
+        g_log_stats.store(false);
+        g_aiming.store(false);
+        g_combat.store(false);
+        g_traversal.store(false);
+        g_player_camera.store(nullptr);
+        g_player_root.store(nullptr);
+        g_translation_offset.store(-1);
+        g_half_height_offset.store(-1);
+        g_frames.store(0);
+        g_clamped.store(0);
+        g_lag_sum.store(0.0);
+        g_view_updates.store(0);
+        g_last_view_qpc.store(0);
+        g_view_seconds.store(0.0);
+        g_calls_timed.store(0);
+        g_ticks_spent.store(0);
+        g_debug_keep_follow.store(NAN);
+        g_debug_keep_turn.store(NAN);
+        g_debug_influence.store(0);
+        g_debug_lag_h.store(NAN);
+        g_debug_lag_v.store(NAN);
+        g_debug_rate_h.store(NAN);
+        g_debug_snap.store(0);
+        g_debug_snap_qpc.store(0);
+        g_debug_glide.store(false);
+        g_follow = Follow{};
+        dwsc::g_log_verbose.store(false);
+        dwapi::reset_state();
+    }
 } // namespace
 
 class DWSmoothwalker : public CppUserModBase
@@ -757,6 +824,11 @@ class DWSmoothwalker : public CppUserModBase
   public:
     DWSmoothwalker() : CppUserModBase()
     {
+        pin_module();
+        if (g_starts++ > 0)
+        {
+            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] hot reload: restarted on the DLL already loaded (pinned); a rebuilt DLL needs the game restarted\n"));
+        }
         ModName = STR("DWSmoothwalker");
         ModVersion = STR("0.10.0");
         dwapi::g_enabled = &g_enabled;
@@ -785,21 +857,29 @@ class DWSmoothwalker : public CppUserModBase
                                        g_enabled.load() ? STR("on") : STR("off"), m_loaded_slots, s(m_loaded_slots), m_loaded_dropins, s(m_loaded_dropins));
     }
 
-    // UE4SS frees the DLL right after this (hot reload). UnregisterCallback waits for running callbacks, so the
-    // game thread is out of m_tuner before restore(); a call already in the hook must return before unload.
+    // UE4SS FreeLibrary's the DLL right after this (hot reload); pinned, the image stays mapped (pin_module).
+    // UnregisterCallback waits for running callbacks, so the game thread is out of m_tuner before restore(); a call
+    // already in the hook must return before the globals are reset.
     ~DWSmoothwalker() override
     {
         dwapi::uninstall_all();
         for (auto id : m_callbacks) Hook::UnregisterCallback(id);
-        if (g_vtable_entry && g_original)
+        // From here a camera update that still reaches the hook returns right after the original.
+        g_player_camera.store(nullptr);
+        g_player_root.store(nullptr);
+        if (m_hooked)
         {
+            g_hook_left = true; // until the restore below succeeds
             DWORD prev{};
             if (VirtualProtect(g_vtable_entry, sizeof(*g_vtable_entry), PAGE_READWRITE, &prev))
             {
                 // Only this mod's own entry is put back: another mod hooked after us would otherwise be unhooked too.
+                // Left in place, the hook stays callable through that mod (the image is pinned) and the next start
+                // keeps g_original (install_hook).
                 if (*g_vtable_entry == reinterpret_cast<uintptr_t*>(&get_camera_view_hook))
                 {
                     *g_vtable_entry = reinterpret_cast<uintptr_t*>(g_original);
+                    g_hook_left = false;
                 }
                 else
                 {
@@ -813,6 +893,7 @@ class DWSmoothwalker : public CppUserModBase
             if (g_in_hook.load() != 0) Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] unload: a camera update is still in the hook\n"));
         }
         m_tuner.restore();
+        reset_globals();
     }
 
     // The Smoothwalker table into every Lua mod's state as it starts (lua_api.hpp). Fires for each Lua mod because
@@ -945,6 +1026,7 @@ class DWSmoothwalker : public CppUserModBase
 
   private:
     std::vector<Hook::GlobalCallbackId> m_callbacks;
+    bool m_hooked = false; // this instance installed the slot 214 hook or kept the previous instance's
     FName m_player_controller_name{};
     // Game thread only, each checked against the object array every engine tick before use.
     dwsc::LiveRef m_controller, m_pawn, m_camera, m_root;
@@ -1813,6 +1895,47 @@ class DWSmoothwalker : public CppUserModBase
         }
 
         auto** entry = &vtable[GET_CAMERA_VIEW_SLOT];
+        auto* hook = reinterpret_cast<uintptr_t*>(&get_camera_view_hook);
+        // A hot reload restarts on the same pinned image, and the last unload may have left the hook in place: it
+        // found another mod's hook over ours (g_hook_left), or that mod has since unhooked and put ours back.
+        // g_original then still holds what we called before. Capturing the slot again while our hook is reached
+        // would store the hook itself, or the other mod's hook that calls it, as the original: endless recursion on
+        // the first camera update. So the previous original is kept, except where the slot provably bypasses us:
+        // it holds g_original itself (a mod hooked below us wrote it back at its unload, then hooked again at the
+        // same address, or never hooked again), and nothing reached from the slot is known to call our hook, so a
+        // fresh capture is taken. A mod below us that captured our hook as its own original (one above us put ours
+        // back first) still loops; so did the code before the pin.
+        const bool bypassed = g_hook_left && *entry != hook && reinterpret_cast<GetCameraViewFn>(*entry) == g_original;
+        if (bypassed) g_hook_left = false;
+        if (!bypassed && (*entry == hook || g_hook_left))
+        {
+            // Unmapped: the mod we called was freed. Keeping it crashes, recapturing may recurse; neither is safe.
+            // Refusing only stops the log from claiming success: a hook still in the chain calls the freed original
+            // anyway. A trampoline outside any module (a hooking library's VirtualAlloc) also reads as unmapped.
+            HMODULE owner{};
+            bool mapped = g_original && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                                           reinterpret_cast<LPCWSTR>(g_original), &owner);
+            if (!mapped || g_original == &get_camera_view_hook || g_vtable_entry != entry)
+            {
+                Output::send<LogLevel::Error>(STR("[DWSmoothwalker] slot {} was left hooked by the last unload and no usable original is known; "
+                                                  "smoothing off, restart the game\n"),
+                                              GET_CAMERA_VIEW_SLOT);
+                return false;
+            }
+            m_hooked = true;
+            if (*entry == hook)
+            {
+                Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] GetCameraView hook kept from before the reload (slot {})\n"), GET_CAMERA_VIEW_SLOT);
+            }
+            else
+            {
+                // Another pointer: whether it still calls ours cannot be seen from here.
+                Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] slot {} holds another mod's hook: assuming it still calls this mod's hook from "
+                                                    "before the reload. If smoothing does not work, restart the game to hook cleanly\n"),
+                                                GET_CAMERA_VIEW_SLOT);
+            }
+            return true;
+        }
         DWORD prev{};
         if (!VirtualProtect(entry, sizeof(*entry), PAGE_READWRITE, &prev))
         {
@@ -1820,9 +1943,10 @@ class DWSmoothwalker : public CppUserModBase
             return false;
         }
         g_original = reinterpret_cast<GetCameraViewFn>(*entry);
-        *entry = reinterpret_cast<uintptr_t*>(&get_camera_view_hook);
+        *entry = hook;
         VirtualProtect(entry, sizeof(*entry), prev, &prev);
         g_vtable_entry = entry;
+        m_hooked = true;
         Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] GetCameraView hooked (slot {})\n"), GET_CAMERA_VIEW_SLOT);
         return true;
     }

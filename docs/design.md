@@ -621,6 +621,64 @@ keeps an in-hook counter; unload restores the vtable, sleeps 50 ms, then waits f
 up to 5 s, and logs if a call is still in the hook. After a mid-game hot reload one controller lookup is
 requested at init.
 
+### The DLL is pinned
+
+**The crash.** Ctrl+R ("Re-installing all mods") destroys the mod object, `FreeLibrary`s `main.dll`,
+`LoadLibrary`s the same path and calls `start_mod` again. The destructor unregisters its five Hook callbacks
+(BeginPlay and EndPlay post, LoadMap pre, StaticConstructObject post, EngineTick post), but in RE-UE4SS
+97b7e501 `UnregisterCallback` only marks the callback dead (`DetourInstance.hpp`, `RemoveCallback`). The
+`std::function` is destroyed later, by the callback GC thread (every 3 s, one detour per pass,
+`CallbackGarbageCollector.hpp`) or when a reader drops its snapshot of the callback list. By then the DLL was
+unmapped, so that destructor read a freed vtable: an access violation at `UE4SS.dll+0x43B83A`, the vtable
+identified by RTTI as the BeginPlay lambda from `on_unreal_init`. UE4SS exports no way to force the GC.
+
+**The fix.** The constructor pins the module (`pin_module`: `GetModuleHandleExW` with
+`GET_MODULE_HANDLE_EX_FLAG_PIN`, from the address of `get_camera_view_hook`). `FreeLibrary` then leaves the
+image mapped and the next `LoadLibrary` of the same path returns it, so the late `std::function` destructors
+find their code. A failed pin logs a warning and the mod runs as before.
+
+**What Ctrl+R means now.** A restart of the mod on the image already loaded: a new mod object, settings and
+presets read again, the hook installed again, discovery from scratch. No new code. A rebuilt DLL needs the
+game closed, and renaming the loaded `main.dll` aside, copying a new one in and pressing Ctrl+R no longer
+loads it (the loader hands back the pinned module). The constructor logs a "restarted on the DLL already
+loaded" line from the second start on.
+
+**Globals.** `DllMain` and static initializers do not run again, so every namespace-scope, class-static and
+function-local static keeps the previous instance's value. The destructor ends with `reset_globals`
+(`dllmain.cpp`, which calls `dwapi::reset_state` in `lua_api.hpp`): every variable holding per-instance state
+goes back to exactly its static-init value, atomics by store, the rest under the lock that guards them. It
+runs after the slot is restored and the in-hook wait, and `g_player_camera` is nulled before the restore, so
+a hook that is still reached returns after the original and touches none of it. Kept on purpose: constants,
+the locks, the QPC frequency, `g_in_hook` (it balances itself, and a call through a hook left in the chain may
+be in flight), `g_starts` (counts starts in the process, for the restart line), and `g_original`,
+`g_vtable_entry` and `g_hook_left`, below. **Any new static that holds state
+goes into `reset_globals` or `reset_state`.**
+
+**Slot 214 on a reused image.** If the last unload found the slot not holding our hook, or could not unprotect
+it, it leaves the slot alone (`g_hook_left`). `install_hook` then reads the slot:
+
+- **Our hook** (a mod hooked over us has since unhooked and put ours back): `g_original` is kept. Capturing
+  would store the hook itself as the original, an endless recursion on the first camera update.
+- **`g_original` itself**: the slot bypasses us. A mod hooked below us wrote the real original back at its
+  unload and then hooked again at the same address (or the slot went back to what we called). Nothing reached
+  from the slot is known to call our hook, so it captures fresh and clears `g_hook_left`. (If a mod above us
+  had put ours back first, the one below captured our hook as its original and the chain loops; the kept path
+  and the code before the pin loop the same way.) Before this case existed the kept path
+  took it, reported success, and smoothing was silently off for the session.
+- **Any other pointer**: whether it still calls our hook cannot be seen. `g_original` is kept on the
+  assumption that it does (capturing would recurse if so), with a warning that a game restart hooks cleanly
+  if smoothing does not work. A mod below us that reloaded at a different address lands here and leaves
+  smoothing off.
+
+The kept paths refuse (logged as an error) if `g_original` is null, is our hook, no longer lies in a loaded
+module (the mod we called was freed: keeping it crashes, recapturing may recurse), or `g_vtable_entry` is not
+this slot. A refusal only stops the log claiming success: a hook left in the chain still calls the freed
+original. A trampoline a hooking library allocated outside any module also reads as unloaded and is refused. The unload guard
+is unchanged: the slot is written back only while it holds `get_camera_view_hook`.
+
+Known and unfixed, pre-existing: a mod hooked below us that leaves the slot alone at its unload and is then
+freed leaves `g_original` pointing at freed code, and the next camera update crashes. No known mod does this.
+
 ## Performance
 
 Measured 2026-09-16, 0.6.1, rc6, build 25232147. Two measurements, because the cost is far below

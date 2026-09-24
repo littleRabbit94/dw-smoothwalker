@@ -709,4 +709,35 @@ namespace dwapi
         }
         for (auto* L : states) uninstall(L);
     }
+
+    // Every variable above back to its static-init value, for the next instance on the same pinned image
+    // (dllmain.cpp, reset_globals). After uninstall_all, so every table left in a Lua state holds stubs, and after
+    // the hook stopped following the player, so it no longer reaches publish or apply_layers. A state that reaches
+    // on_lua_start again gets a fresh table of the same, still mapped, functions. Kept: the locks, the constants,
+    // g_enabled / g_reset / g_reset_reason (they point at dllmain's globals, reset there) and qpc_frequency().
+    inline auto reset_state() -> void
+    {
+        {
+            std::lock_guard guard(g_mutex);
+            g_states.clear();
+            for (auto& owner : g_slot_owner) owner.clear();
+            g_mod_version.clear();
+            g_owner_state = nullptr;
+            g_owner_mod.clear();
+            g_owner_keep_layers.store(false);
+            g_owner_expires.store(0);
+            g_release_generation.store(0);
+            g_owner_slot.store(-1);
+        }
+        AcquireSRWLockExclusive(&g_layers_lock);
+        for (auto& layer : g_layers) layer = Layer{};
+        g_layer_generation = 0;
+        ReleaseSRWLockExclusive(&g_layers_lock);
+        for (auto& state : g_layer_state) state = LayerState{};
+        g_layers_any.store(false);
+        g_blending.store(false);
+        g_seq.store(0);
+        g_snapshot = Snapshot{};
+        g_game_thread.store(0);
+    }
 } // namespace dwapi
