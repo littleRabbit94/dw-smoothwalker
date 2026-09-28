@@ -3,6 +3,9 @@
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
 #include "config.hpp"
+#include "core/frame.hpp"
+#include "core/wall.hpp"
+#include "follow/follow.hpp"
 #include "mode_tuning.hpp"
 #include "smoothing.hpp"
 
@@ -75,41 +78,47 @@ namespace
         dwapi::publish(g, s, pivot ? p : nullptr);
     }
 
+    // The core's own numbers: cuts and the crossfade. The follow's are dwsw::FollowTuning (follow/follow.hpp).
     // Numbers only, so the hook's copy allocates nothing on a worker thread.
     struct Tuning
     {
-        double follow_rate_h, follow_rate_v;
-        int curve_h, curve_v;
-        double catchup_distance, min_rate_scale, max_lag_h, max_lag_v;
-        bool soft_leash, rotation_smoothing, wall_clamp;
-        double rotation_rate, reset_distance, reset_gap;
+        double reset_distance, reset_gap;
         double transition;   // position_transition: the crossfade after a change
-        double aiming_keep;  // aiming_follow as a share: the trail and turning smoothing kept while aiming
-        double combat_follow_keep;   // combat_follow as a share: the trail kept while a combat camera is up
-        double combat_rotation_keep; // combat_rotation as a share: the turning smoothing kept while a combat camera is up
-        double traversal_follow_keep;   // traversal_follow as a share: the trail kept while a traversal camera is up
-        double traversal_rotation_keep; // traversal_rotation as a share: the turning smoothing kept while a traversal camera is up
         uint64_t generation; // bumped by a publish that changed a value
     };
 
     auto tuning_of(const dwsc::Settings& s) -> Tuning
     {
-        return {s.follow_rate_h, s.follow_rate_v, s.curve_h, s.curve_v, s.catchup_distance, s.min_rate_scale, s.max_lag_h, s.max_lag_v,
-                s.soft_leash, s.rotation_smoothing, s.wall_clamp, s.rotation_rate, s.reset_distance, s.reset_gap, s.position_transition,
-                s.aiming_follow / 100.0, s.combat_follow / 100.0, s.combat_rotation / 100.0, s.traversal_follow / 100.0,
-                s.traversal_rotation / 100.0, 0};
+        return {s.reset_distance, s.reset_gap, s.position_transition, 0};
     }
 
     // Every field but generation.
     auto same_values(const Tuning& a, const Tuning& b) -> bool
     {
-        return a.follow_rate_h == b.follow_rate_h && a.follow_rate_v == b.follow_rate_v && a.curve_h == b.curve_h && a.curve_v == b.curve_v &&
-               a.catchup_distance == b.catchup_distance && a.min_rate_scale == b.min_rate_scale && a.max_lag_h == b.max_lag_h &&
-               a.max_lag_v == b.max_lag_v && a.soft_leash == b.soft_leash && a.rotation_smoothing == b.rotation_smoothing &&
-               a.wall_clamp == b.wall_clamp && a.rotation_rate == b.rotation_rate && a.reset_distance == b.reset_distance &&
-               a.reset_gap == b.reset_gap && a.transition == b.transition && a.aiming_keep == b.aiming_keep &&
-               a.combat_follow_keep == b.combat_follow_keep && a.combat_rotation_keep == b.combat_rotation_keep &&
-               a.traversal_follow_keep == b.traversal_follow_keep && a.traversal_rotation_keep == b.traversal_rotation_keep;
+        return a.reset_distance == b.reset_distance && a.reset_gap == b.reset_gap && a.transition == b.transition;
+    }
+
+    auto follow_tuning_of(const dwsc::Settings& s) -> dwsw::FollowTuning
+    {
+        dwsw::FollowTuning t;
+        t.follow_rate_h = s.follow_rate_h;
+        t.follow_rate_v = s.follow_rate_v;
+        t.curve_h = s.curve_h;
+        t.curve_v = s.curve_v;
+        t.catchup_distance = s.catchup_distance;
+        t.min_rate_scale = s.min_rate_scale;
+        t.max_lag_h = s.max_lag_h;
+        t.max_lag_v = s.max_lag_v;
+        t.soft_leash = s.soft_leash;
+        t.rotation_smoothing = s.rotation_smoothing;
+        t.wall_clamp = s.wall_clamp;
+        t.rotation_rate = s.rotation_rate;
+        t.aiming_keep = s.aiming_follow / 100.0;
+        t.combat_follow_keep = s.combat_follow / 100.0;
+        t.combat_rotation_keep = s.combat_rotation / 100.0;
+        t.traversal_follow_keep = s.traversal_follow / 100.0;
+        t.traversal_rotation_keep = s.traversal_rotation / 100.0;
+        return t;
     }
 
     using GetCameraViewFn = void(__fastcall*)(void* self, float delta_time, void* desired_view);
@@ -121,8 +130,10 @@ namespace
     std::atomic<int> g_in_hook{0}; // calls running inside get_camera_view_hook; unload waits for 0
     int g_starts = 0;              // constructions in this process: one image, pinned (pin_module)
 
-    SRWLOCK g_tuning_lock = SRWLOCK_INIT;
+    SRWLOCK g_tuning_lock = SRWLOCK_INIT; // g_tuning, g_follow_tuning, g_follow_generation
     Tuning g_tuning = tuning_of(dwsc::Settings{});
+    dwsw::FollowTuning g_follow_tuning = follow_tuning_of(dwsc::Settings{});
+    uint64_t g_follow_generation = 0; // bumped by a publish that changed a follow value
 
     // Published by the game thread, read by the hook. Pointers are only compared or read under SEH.
     std::atomic<bool> g_enabled{true};
@@ -198,28 +209,12 @@ namespace
         }
     }
 
-    // Hook state without a lock: only the player's camera reaches it, and its calls arrive in sequence.
-    struct Follow
+    // Hook state without a lock: only the player's camera reaches it, and its calls arrive in sequence. The core's
+    // part of each update (cuts, ownership, the crossfade); the follow keeps its own (dwsw::Follow, g_smoother).
+    struct ViewState
     {
-        bool valid = false;
-        dwsc::Vec3 pivot_smoothed{}; // x, y: the capsule centre; z: the capsule bottom (feet), see update_view
-        // A crouch or stand: the game eases its camera height over about a third of a second, and the game's own
-        // vertical lag (off while the mod is on) used to delay that further. The change is lagged here through the
-        // vertical follow: crouch_drop is the game's height change so far, feet-relative (root motion cancels),
-        // crouch_smoothed trails it, and the difference holds the camera. An episode starts on a half-height
-        // change; crouch_drop stops updating 0.6 s in (the game has settled) so a later pitch change cannot leak.
-        double half_last = NAN;
-        double crouch_base = NAN; // camera Z above the feet at the change; NAN: no episode
-        double crouch_drop = 0.0;
-        double crouch_smoothed = 0.0;
-        double crouch_elapsed = 0.0;
+        bool valid = false; // false: the processor starts again from the capsule on the next update (a restart)
         dwsc::Vec3 pivot_last{};
-        dwsc::Quat rotation_smoothed{};
-        double nominal_distance = 0.0;
-        double aim = 0.0;          // 0 to 1, eased toward g_aiming: how far the follow is handed to the player's aim
-        double combat = 0.0;       // 0 to 1, eased toward g_combat: how far the follow is handed to the combat camera
-        double traversal = 0.0;    // 0 to 1, eased toward g_traversal: how far the follow is handed to the traversal camera
-        double nominal_hold = 0.0; // s left in which nominal_distance tracks the game: a position write is gliding
         LARGE_INTEGER last_call{};
 
         // Last view handed to the game, relative to the game's own view that frame. The arm is rebuilt from the
@@ -234,45 +229,32 @@ namespace
         dwsc::Vec3 from_offset{};
         dwsc::Quat from_rotation{};
         float from_fov = NAN;
-        uint64_t seen_tuning = 0, seen_toggle = 0, seen_position = 0, seen_release = 0;
+        uint64_t seen_tuning = 0, seen_processor = 0, seen_toggle = 0, seen_position = 0, seen_release = 0;
         bool was_owned = false; // another mod owned the camera on the last update: the falling edge is a cut
         dwsc::Snap invalid_reason = dwsc::Snap::Startup; // why valid went false, for the debug overlay's last snap
         bool blend_glide = false;                         // the running crossfade came from a release("glide")
     };
-    Follow g_follow;
+    ViewState g_view;
     LARGE_INTEGER g_qpc_frequency{};
+
+    // The follow as the core's one processor (core/frame.hpp). It reads its own settings, so a later split into
+    // two DLLs moves this adapter to the follow's side unchanged.
+    dwsw::Follow g_smoother; // hook thread only
+
+    auto follow_frame(void*, const dwcam::FrameIn& in, dwcam::FrameOut& out) -> void
+    {
+        AcquireSRWLockShared(&g_tuning_lock);
+        const dwsw::FollowTuning t = g_follow_tuning;
+        out.generation = g_follow_generation;
+        ReleaseSRWLockShared(&g_tuning_lock);
+        g_smoother.frame(t, in, out);
+    }
+
+    const dwcam::Processor g_processor{nullptr, &follow_frame};
 
     auto seconds_between(LARGE_INTEGER a, LARGE_INTEGER b) -> double
     {
         return static_cast<double>(b.QuadPart - a.QuadPart) / static_cast<double>(g_qpc_frequency.QuadPart);
-    }
-
-    // Soft: the internal lag may run to 3x the limit and the shown lag eases into it, so the limit has no edge.
-    auto leash(double lag, double limit, bool soft) -> double
-    {
-        if (limit <= 0.0) return 0.0;
-        return soft ? limit * std::tanh(lag / limit) : std::min(lag, limit);
-    }
-
-    // How much of the wall clamp applies: 0 at 0.85 of the usual distance, 1 at 0.65 and closer. Eased because the
-    // game's own modes (aiming, close combat) cross 0.85 too, and a hard threshold dropped the whole lag in one frame.
-    auto wall_weight(double game_distance, double nominal_distance) -> double
-    {
-        if (!(nominal_distance > 0.0)) return 0.0;
-        double x = std::clamp((0.85 - game_distance / nominal_distance) / 0.20, 0.0, 1.0);
-        return x * x * (3.0 - 2.0 * x);
-    }
-
-    // Pulls result toward the game's distance from the pivot by weight; true if it moved.
-    auto clamp_to_wall(dwsc::Vec3& result, const dwsc::Vec3& pivot, double game_distance, double weight) -> bool
-    {
-        if (weight <= 0.0) return false;
-        dwsc::Vec3 out = result - pivot;
-        double out_distance = dwsc::length(out);
-        if (!(out_distance > game_distance) || out_distance <= 0.0) return false;
-        double limit = out_distance + (game_distance - out_distance) * weight;
-        result = pivot + out * (limit / out_distance);
-        return true;
     }
 
     auto finite(const dwsc::Vec3& v) -> bool
@@ -293,14 +275,17 @@ namespace
 
     auto lose_view() -> void
     {
-        g_follow.valid = false;
-        g_follow.invalid_reason = dwsc::Snap::ViewLost;
-        g_follow.out_valid = false;
-        g_follow.blending = false;
+        g_view.valid = false;
+        g_view.invalid_reason = dwsc::Snap::ViewLost;
+        g_view.out_valid = false;
+        g_view.blending = false;
         dwapi::g_blending.store(false, std::memory_order_relaxed);
         publish_debug_idle();
     }
 
+    // The core's pipeline, once per player-camera update: read the game's view and the pivot, work out cuts and
+    // ownership, let the processor (the follow) move the camera, crossfade any change, apply other mods' layers,
+    // write the view back and publish it (docs/design.md, "Core and processors").
     auto update_view(void* desired_view, float delta_time, bool enabled) -> void
     {
         // Ownership is sampled once, first, and that one sample is used for the whole update. A release runs on the
@@ -315,7 +300,7 @@ namespace
         const bool owner_keeps_layers = owned && dwapi::g_owner_keep_layers.load(std::memory_order_relaxed);
         // The release generation, sampled here because the falling edge below needs it; `changed` uses this sample.
         const auto release = dwapi::g_release_generation.load(std::memory_order_relaxed);
-        const bool release_changed = release != g_follow.seen_release;
+        const bool release_changed = release != g_view.seen_release;
         // The camera stops being owned. A release("cut") has already set g_reset, and a release("glide") has bumped
         // the generation just read, which starts the crossfade from out_*, the game's view as the owner left it. A
         // lease running out, an uninstall or an install re-key say nothing, and writing the follow offset that piled
@@ -323,12 +308,12 @@ namespace
         // and sets g_reset: those edges restart the follow from the capsule here, which is what a cut does. A glide
         // is left alone, because resetting would throw away the warm follow it is meant to ease back into and the
         // crossfade would run from nothing to nothing.
-        if (g_follow.was_owned && !owned && !release_changed)
+        if (g_view.was_owned && !owned && !release_changed)
         {
-            g_follow.valid = false;
-            g_follow.invalid_reason = dwsc::Snap::ClaimEnded;
+            g_view.valid = false;
+            g_view.invalid_reason = dwsc::Snap::ClaimEnded;
         }
-        g_follow.was_owned = owned;
+        g_view.was_owned = owned;
 
         AcquireSRWLockShared(&g_tuning_lock);
         const Tuning t = g_tuning;
@@ -359,217 +344,101 @@ namespace
         }
         dwsc::Quat rotation = dwsc::from_rotator(view.rotation[0], view.rotation[1], view.rotation[2]);
 
-        // A crouch drops the capsule centre by the half-height change in one frame (54 cm here) while the game
-        // eases its own camera height down over several. Lagging the centre made the arm jump by that delta
-        // and the camera pop up. The bottom of the capsule does not move in a crouch, so the vertical follow
-        // tracks it: the game's eased height passes through and only real vertical travel is lagged. A missing
-        // or implausible half height falls back to the centre.
+        // The capsule's half height, for a processor that tracks the feet (the follow, "Pivot" in docs/design.md).
+        // NAN when missing or implausible.
         float half_height = NAN;
         auto half_offset = g_half_height_offset.load(std::memory_order_relaxed);
         if (half_offset >= 0 && !guarded_read(static_cast<uint8_t*>(root) + half_offset, &half_height, sizeof(half_height))) half_height = NAN;
         if (!std::isfinite(half_height) || half_height < 0.0f || half_height > 1000.0f) half_height = NAN;
-        double feet_z = std::isfinite(half_height) ? pivot.z - half_height : pivot.z;
 
         // Settings, the toggle and mode writes crossfade; a hard cut (player or world change, a gap, a teleport) snaps.
         auto toggle = g_toggle_generation.load(std::memory_order_relaxed);
         auto position = g_position_generation.load(std::memory_order_relaxed);
+        const bool mode_write = position != g_view.seen_position;
         // A release("glide") lands here too, through the `release_changed` sampled at the top of this update: the
         // fade then starts from the game's view, because out_* tracked it while the camera was owned (lua_api.hpp).
-        bool changed = t.generation != g_follow.seen_tuning || toggle != g_follow.seen_toggle ||
-                       position != g_follow.seen_position || release_changed;
-        // A shorter distance gliding in is not a wall. No wall clamp until it has landed.
-        if (position != g_follow.seen_position) g_follow.nominal_hold = t.transition + 0.3;
-        g_follow.seen_tuning = t.generation;
-        g_follow.seen_toggle = toggle;
-        g_follow.seen_position = position;
-        g_follow.seen_release = release;
+        // The processor's own settings join below, with the generation it reports for this frame.
+        bool changed = t.generation != g_view.seen_tuning || toggle != g_view.seen_toggle || mode_write || release_changed;
+        g_view.seen_tuning = t.generation;
+        g_view.seen_toggle = toggle;
+        g_view.seen_position = position;
+        g_view.seen_release = release;
         const bool reset = g_reset.exchange(false, std::memory_order_relaxed);
-        const bool gap = seconds_between(g_follow.last_call, now) > t.reset_gap;
-        const bool jump = !(dwsc::length(pivot - g_follow.pivot_last) <= t.reset_distance);
+        const bool gap = seconds_between(g_view.last_call, now) > t.reset_gap;
+        const bool jump = !(dwsc::length(pivot - g_view.pivot_last) <= t.reset_distance);
         bool cut = reset || gap || jump;
-        g_follow.last_call = now;
-        g_follow.pivot_last = pivot;
+        g_view.last_call = now;
+        g_view.pivot_last = pivot;
 
         // The world delta, so slow motion slows the follow and the crossfade with the game. A pause is not
         // held: the camera stops updating under one, and the first update after it is a cut (reset_gap).
         double dt = std::clamp(static_cast<double>(delta_time), 0.0, 0.1);
 
-        dwsc::Vec3 result = camera;
-        dwsc::Quat result_rotation = rotation;
+        bool restart = false;
         if (!enabled)
         {
-            g_follow.valid = false; // switched back on, the follow restarts from the capsule
-            g_follow.invalid_reason = dwsc::Snap::Toggle;
+            g_view.valid = false; // switched back on, the follow restarts from the capsule
+            g_view.invalid_reason = dwsc::Snap::Toggle;
             g_debug_keep_follow.store(NAN, std::memory_order_relaxed);
             g_debug_keep_turn.store(NAN, std::memory_order_relaxed);
             g_debug_rate_h.store(NAN, std::memory_order_relaxed);
         }
-        else if (cut || !g_follow.valid)
+        else if (cut || !g_view.valid)
         {
             // Why, for the debug overlay: switched back on beats a cut still pending from while it was off; then
             // whoever asked for the cut; then why the follow was dropped; then the hook's own gap and teleport checks.
-            auto why = !g_follow.valid && g_follow.invalid_reason == dwsc::Snap::Toggle ? dwsc::Snap::Toggle
-                       : reset                                                        ? static_cast<dwsc::Snap>(g_reset_reason.load(std::memory_order_relaxed))
-                       : !g_follow.valid                                              ? g_follow.invalid_reason
-                       : gap                                                          ? dwsc::Snap::Gap
-                                                                                      : dwsc::Snap::Teleport;
+            auto why = !g_view.valid && g_view.invalid_reason == dwsc::Snap::Toggle ? dwsc::Snap::Toggle
+                       : reset                                                    ? static_cast<dwsc::Snap>(g_reset_reason.load(std::memory_order_relaxed))
+                       : !g_view.valid                                            ? g_view.invalid_reason
+                       : gap                                                      ? dwsc::Snap::Gap
+                                                                                  : dwsc::Snap::Teleport;
             g_debug_snap_qpc.store(now.QuadPart, std::memory_order_relaxed);
             g_debug_snap.store(static_cast<int>(why), std::memory_order_relaxed);
-            g_follow.valid = true;
-            g_follow.aim = g_aiming.load(std::memory_order_relaxed) ? 1.0 : 0.0;
-            g_follow.combat = g_combat.load(std::memory_order_relaxed) ? 1.0 : 0.0;
-            g_follow.traversal = g_traversal.load(std::memory_order_relaxed) ? 1.0 : 0.0;
-            g_follow.pivot_smoothed = dwsc::Vec3{pivot.x, pivot.y, feet_z};
-            g_follow.rotation_smoothed = rotation;
-            g_follow.half_last = static_cast<double>(half_height);
-            g_follow.crouch_base = NAN;
-            g_follow.crouch_drop = g_follow.crouch_smoothed = 0.0;
-            g_follow.nominal_distance = dwsc::length(camera - pivot);
+            g_view.valid = true;
+            restart = true;
         }
-        else
+
+        dwcam::FrameIn in{};
+        in.enabled = enabled;
+        in.restart = restart;
+        in.mode_write = mode_write;
+        in.transition = t.transition;
+        in.dt = dt;
+        in.pivot = pivot;
+        in.half_height = static_cast<double>(half_height);
+        in.camera = camera;
+        in.rotation = rotation;
+        in.aiming = g_aiming.load(std::memory_order_relaxed);
+        in.combat = g_combat.load(std::memory_order_relaxed);
+        in.traversal = g_traversal.load(std::memory_order_relaxed);
+        dwcam::FrameOut moved{};
+        g_processor.frame(g_processor.user, in, moved);
+        if (moved.generation != g_view.seen_processor) changed = true;
+        g_view.seen_processor = moved.generation;
+
+        dwsc::Vec3 result = camera;
+        dwsc::Quat result_rotation = rotation;
+        if (enabled)
         {
-            dwsc::Vec3& ps = g_follow.pivot_smoothed;
-            double inner_h = t.soft_leash ? 3.0 * t.max_lag_h : t.max_lag_h;
-            double inner_v = t.soft_leash ? 3.0 * t.max_lag_v : t.max_lag_v;
-
-            double lag_hx = pivot.x - ps.x, lag_hy = pivot.y - ps.y;
-            double lag_h = std::sqrt(lag_hx * lag_hx + lag_hy * lag_hy);
-            double a_h = dwsc::follow_alpha(t.follow_rate_h, t.curve_h, lag_h, t.catchup_distance, t.min_rate_scale, dt);
-            g_debug_rate_h.store(dwsc::follow_rate(t.follow_rate_h, t.curve_h, lag_h, t.catchup_distance, t.min_rate_scale), std::memory_order_relaxed);
-            ps.x += lag_hx * a_h;
-            ps.y += lag_hy * a_h;
-            lag_hx = pivot.x - ps.x;
-            lag_hy = pivot.y - ps.y;
-            lag_h = std::sqrt(lag_hx * lag_hx + lag_hy * lag_hy);
-            if (lag_h > inner_h && lag_h > 0.0)
+            result = moved.location;
+            if (moved.rotated)
             {
-                double k = inner_h / lag_h;
-                ps.x = pivot.x - lag_hx * k;
-                ps.y = pivot.y - lag_hy * k;
-                lag_hx *= k;
-                lag_hy *= k;
-                lag_h = inner_h;
+                result_rotation = moved.rotation;
+                dwsc::to_rotator(result_rotation, view.rotation[0], view.rotation[1], view.rotation[2]);
             }
-
-            double lag_v = feet_z - ps.z;
-            double a_v = dwsc::follow_alpha(t.follow_rate_v, t.curve_v, std::abs(lag_v), t.catchup_distance, t.min_rate_scale, dt);
-            ps.z += lag_v * a_v;
-            lag_v = feet_z - ps.z;
-            if (std::abs(lag_v) > inner_v)
-            {
-                lag_v = std::copysign(inner_v, lag_v);
-                ps.z = feet_z - lag_v;
-            }
-
-            // A trail behind the crosshair reads as input lag. Only what is shown is scaled, and eased: the smoothed
-            // pivot and rotation run on underneath, so the trail returns without an edge.
-            double aim_target = g_aiming.load(std::memory_order_relaxed) ? 1.0 : 0.0;
-            g_follow.aim += (aim_target - g_follow.aim) * (1.0 - std::exp(-8.0 * dt));
-            double combat_target = g_combat.load(std::memory_order_relaxed) ? 1.0 : 0.0;
-            g_follow.combat += (combat_target - g_follow.combat) * (1.0 - std::exp(-8.0 * dt));
-            double traversal_target = g_traversal.load(std::memory_order_relaxed) ? 1.0 : 0.0;
-            g_follow.traversal += (traversal_target - g_follow.traversal) * (1.0 - std::exp(-8.0 * dt));
-
-            // Traversal hands the shown trail and turning to traversal_follow/traversal_rotation as it comes up;
-            // combat takes over from wherever traversal left it, and aiming from wherever combat left it, smoothly.
-            // Aiming wins over traversal: AimingClawRide and AntiGravAiming stack on top of ClawRide and AntiGrav.
-            auto lerp = [](double a, double b, double f) { return a + (b - a) * f; };
-            double aiming_keep = std::clamp(t.aiming_keep, 0.0, 1.0);
-            double combat_follow_keep = std::clamp(t.combat_follow_keep, 0.0, 1.0);
-            double combat_rotation_keep = std::clamp(t.combat_rotation_keep, 0.0, 1.0);
-            double traversal_follow_keep = std::clamp(t.traversal_follow_keep, 0.0, 1.0);
-            double traversal_rotation_keep = std::clamp(t.traversal_rotation_keep, 0.0, 1.0);
-            double keep_pos = lerp(lerp(lerp(1.0, traversal_follow_keep, g_follow.traversal), combat_follow_keep, g_follow.combat), aiming_keep, g_follow.aim);
-            double keep_rot = lerp(lerp(lerp(1.0, traversal_rotation_keep, g_follow.traversal), combat_rotation_keep, g_follow.combat), aiming_keep, g_follow.aim);
-            g_debug_keep_follow.store(keep_pos, std::memory_order_relaxed);
-            g_debug_keep_turn.store(keep_rot, std::memory_order_relaxed);
-            {
-                // The weight each keep carries in the chain above: aiming's, combat's under it, traversal's under
-                // both, and the rest (none). They sum to 1; the largest names the influence.
-                double w_aim = g_follow.aim;
-                double w_combat = g_follow.combat * (1.0 - g_follow.aim);
-                double w_traversal = g_follow.traversal * (1.0 - g_follow.combat) * (1.0 - g_follow.aim);
-                double weights[4]{1.0 - w_aim - w_combat - w_traversal, w_traversal, w_combat, w_aim}; // in dwsc::Influence order
-                int influence = static_cast<int>(std::max_element(std::begin(weights), std::end(weights)) - std::begin(weights));
-                g_debug_influence.store(influence, std::memory_order_relaxed);
-            }
-
-            double shown_h = leash(lag_h, t.max_lag_h, t.soft_leash) * keep_pos;
-            double scale_h = lag_h > 0.0 ? shown_h / lag_h : 0.0;
-            double shown_v = std::copysign(leash(std::abs(lag_v), t.max_lag_v, t.soft_leash), lag_v) * keep_pos;
-
-            // The crouch hold (see Follow). Folding the running hold into a new episode keeps the output continuous
-            // when a stand follows a crouch before it has settled.
-            double rel = camera.z - feet_z;
-            if (std::isfinite(half_height) && std::isfinite(g_follow.half_last) && static_cast<double>(half_height) != g_follow.half_last)
-            {
-                double running = g_follow.crouch_drop - g_follow.crouch_smoothed;
-                g_follow.crouch_base = rel;
-                g_follow.crouch_drop = 0.0;
-                g_follow.crouch_smoothed = -running;
-                g_follow.crouch_elapsed = 0.0;
-            }
-            if (std::isfinite(half_height)) g_follow.half_last = static_cast<double>(half_height);
-            double hold = 0.0;
-            if (std::isfinite(g_follow.crouch_base))
-            {
-                g_follow.crouch_elapsed += dt;
-                if (g_follow.crouch_elapsed <= 0.6) g_follow.crouch_drop = g_follow.crouch_base - rel;
-                double gap = g_follow.crouch_drop - g_follow.crouch_smoothed;
-                double a_c = dwsc::follow_alpha(t.follow_rate_v, t.curve_v, std::abs(gap), t.catchup_distance, t.min_rate_scale, dt);
-                g_follow.crouch_smoothed += gap * a_c;
-                hold = g_follow.crouch_drop - g_follow.crouch_smoothed;
-                if (g_follow.crouch_elapsed > 0.6 && std::abs(hold) < 0.1) g_follow.crouch_base = NAN;
-            }
-            double shown_hold = std::copysign(leash(std::abs(hold), t.max_lag_v, t.soft_leash), hold) * keep_pos;
-            dwsc::Vec3 shown_pivot{pivot.x - lag_hx * scale_h, pivot.y - lag_hy * scale_h, pivot.z - shown_v + shown_hold};
-
-            // The arm swings with the smoothed rotation so the camera still orbits the pivot.
-            dwsc::Vec3 arm = camera - pivot;
-            if (t.rotation_smoothing)
-            {
-                double a_r = 1.0 - std::exp(-std::max(t.rotation_rate, 0.0) * dt);
-                g_follow.rotation_smoothed = dwsc::slerp(g_follow.rotation_smoothed, rotation, a_r);
-                // A trail past 180 degrees would catch up the short way round, which is backwards: at a turning
-                // follow speed of 1 a 360 spin reversed the camera halfway (Nexus bug report, 2026-09-21). The
-                // trail is capped at 90 degrees, pulled in along the same arc, so the catch-up always runs the
-                // way the view turned. A single-frame turn past 180 degrees stays ambiguous, as for any smoothing.
-                constexpr double MAX_TRAIL = 0.5 * 3.14159265358979323846;
-                double trail = dwsc::angle_between(g_follow.rotation_smoothed, rotation);
-                if (trail > MAX_TRAIL) g_follow.rotation_smoothed = dwsc::slerp(rotation, g_follow.rotation_smoothed, MAX_TRAIL / trail);
-                dwsc::Quat shown = keep_rot < 1.0 ? dwsc::slerp(g_follow.rotation_smoothed, rotation, 1.0 - keep_rot) : g_follow.rotation_smoothed;
-                dwsc::Quat delta = dwsc::multiply(shown, dwsc::conjugate(rotation));
-                arm = dwsc::rotate(delta, arm);
-                dwsc::to_rotator(shown, view.rotation[0], view.rotation[1], view.rotation[2]);
-                result_rotation = shown;
-            }
-            else
-            {
-                g_follow.rotation_smoothed = rotation;
-            }
-
-            result = shown_pivot + arm;
-
-            // The game has already pulled its camera in front of walls. While it sits closer than usual, the
-            // smoothed camera may not be farther out than the game's.
-            double game_distance = dwsc::length(arm);
-            double settle = 1.0 - std::exp(-1.0 * dt);
-            g_follow.nominal_distance = std::max(game_distance, g_follow.nominal_distance + (game_distance - g_follow.nominal_distance) * settle);
-            if (g_follow.nominal_hold > 0.0)
-            {
-                g_follow.nominal_hold -= dt;
-                g_follow.nominal_distance = game_distance;
-            }
-            if (t.wall_clamp && clamp_to_wall(result, pivot, game_distance, wall_weight(game_distance, g_follow.nominal_distance)))
-            {
-                g_clamped.fetch_add(1, std::memory_order_relaxed);
-            }
-
-            if (g_log_stats.load(std::memory_order_relaxed))
-            {
-                g_frames.fetch_add(1, std::memory_order_relaxed);
-                g_lag_sum.store(g_lag_sum.load(std::memory_order_relaxed) + dwsc::length(pivot - shown_pivot), std::memory_order_relaxed);
-            }
+        }
+        if (moved.feed)
+        {
+            g_debug_keep_follow.store(moved.keep_follow, std::memory_order_relaxed);
+            g_debug_keep_turn.store(moved.keep_turn, std::memory_order_relaxed);
+            g_debug_rate_h.store(moved.rate_h, std::memory_order_relaxed);
+            g_debug_influence.store(moved.influence, std::memory_order_relaxed);
+        }
+        if (moved.clamped) g_clamped.fetch_add(1, std::memory_order_relaxed);
+        if (moved.stats && g_log_stats.load(std::memory_order_relaxed))
+        {
+            g_frames.fetch_add(1, std::memory_order_relaxed);
+            g_lag_sum.store(g_lag_sum.load(std::memory_order_relaxed) + moved.shown_lag, std::memory_order_relaxed);
         }
 
         // Another mod owns the camera (lua_api.hpp, "authority"; `owned` was sampled at the top of this update).
@@ -588,44 +457,44 @@ namespace
         bool fov_ok = std::isfinite(view.fov) && view.fov > 1.0f && view.fov < 179.0f;
         if (cut || owned)
         {
-            g_follow.blending = false;
+            g_view.blending = false;
         }
         else if (t.transition <= 0.0)
         {
-            g_follow.blending = false; // set to 0 mid-fade: the user's choice is no fade
+            g_view.blending = false; // set to 0 mid-fade: the user's choice is no fade
         }
-        else if (changed && g_follow.out_valid)
+        else if (changed && g_view.out_valid)
         {
-            g_follow.blending = true;
-            g_follow.blend_glide = release_changed;
-            g_follow.blend_elapsed = 0.0;
-            g_follow.blend_duration = t.transition;
-            g_follow.from_offset = g_follow.out_offset;
-            g_follow.from_rotation = g_follow.out_rotation;
-            g_follow.from_fov = g_follow.out_fov;
+            g_view.blending = true;
+            g_view.blend_glide = release_changed;
+            g_view.blend_elapsed = 0.0;
+            g_view.blend_duration = t.transition;
+            g_view.from_offset = g_view.out_offset;
+            g_view.from_rotation = g_view.out_rotation;
+            g_view.from_fov = g_view.out_fov;
         }
-        bool blended = g_follow.blending;
+        bool blended = g_view.blending;
         if (blended)
         {
-            g_follow.blend_elapsed += dt;
-            double s = std::min(g_follow.blend_elapsed / g_follow.blend_duration, 1.0);
+            g_view.blend_elapsed += dt;
+            double s = std::min(g_view.blend_elapsed / g_view.blend_duration, 1.0);
             double w = s * s * (3.0 - 2.0 * s);
             dwsc::Vec3 game_arm = camera - pivot;
             dwsc::Quat target = dwsc::multiply(result_rotation, dwsc::conjugate(rotation));
-            dwsc::Quat d = dwsc::slerp(g_follow.from_rotation, target, w);
+            dwsc::Quat d = dwsc::slerp(g_view.from_rotation, target, w);
             dwsc::Vec3 lag = pivot + dwsc::rotate(target, game_arm) - result;
-            result = pivot - (g_follow.from_offset + (lag - g_follow.from_offset) * w) + dwsc::rotate(d, game_arm);
+            result = pivot - (g_view.from_offset + (lag - g_view.from_offset) * w) + dwsc::rotate(d, game_arm);
             result_rotation = dwsc::multiply(d, rotation);
             dwsc::to_rotator(result_rotation, view.rotation[0], view.rotation[1], view.rotation[2]);
-            if (fov_ok && std::isfinite(g_follow.from_fov)) view.fov = g_follow.from_fov + static_cast<float>((view.fov - g_follow.from_fov) * w);
-            if (s >= 1.0) g_follow.blending = false;
+            if (fov_ok && std::isfinite(g_view.from_fov)) view.fov = g_view.from_fov + static_cast<float>((view.fov - g_view.from_fov) * w);
+            if (s >= 1.0) g_view.blending = false;
 
             // The faded part of the lag was never clamped: keep it in front of a wall the game pulled in for.
             double game_distance = dwsc::length(game_arm);
             // The toggle-off fade too: it ends at the game's view, so clamping to the game's distance never moves the endpoint.
-            if ((!enabled || g_follow.valid) && t.wall_clamp)
+            if ((!enabled || g_view.valid) && moved.wall_clamp)
             {
-                clamp_to_wall(result, pivot, game_distance, wall_weight(game_distance, g_follow.nominal_distance));
+                dwcam::clamp_to_wall(result, pivot, game_distance, dwcam::wall_weight(game_distance, moved.nominal_distance));
             }
         }
 
@@ -653,15 +522,15 @@ namespace
                 return;
             }
         }
-        g_follow.out_rotation = dwsc::multiply(result_rotation, dwsc::conjugate(rotation));
-        g_follow.out_offset = pivot + dwsc::rotate(g_follow.out_rotation, camera - pivot) - result;
+        g_view.out_rotation = dwsc::multiply(result_rotation, dwsc::conjugate(rotation));
+        g_view.out_offset = pivot + dwsc::rotate(g_view.out_rotation, camera - pivot) - result;
         // Owned: the game's FOV, not a layer's, so the glide back starts from the view the owner left on screen.
-        g_follow.out_fov = fov_ok ? (owned ? game_view.fov : view.fov) : NAN;
-        g_follow.out_valid = true;
-        dwapi::g_blending.store(g_follow.blending, std::memory_order_relaxed);
-        g_debug_glide.store(g_follow.blending && g_follow.blend_glide, std::memory_order_relaxed);
-        g_debug_lag_h.store(std::hypot(g_follow.out_offset.x, g_follow.out_offset.y), std::memory_order_relaxed);
-        g_debug_lag_v.store(std::abs(g_follow.out_offset.z), std::memory_order_relaxed);
+        g_view.out_fov = fov_ok ? (owned ? game_view.fov : view.fov) : NAN;
+        g_view.out_valid = true;
+        dwapi::g_blending.store(g_view.blending, std::memory_order_relaxed);
+        g_debug_glide.store(g_view.blending && g_view.blend_glide, std::memory_order_relaxed);
+        g_debug_lag_h.store(std::hypot(g_view.out_offset.x, g_view.out_offset.y), std::memory_order_relaxed);
+        g_debug_lag_v.store(std::abs(g_view.out_offset.z), std::memory_order_relaxed);
         publish_api_view(game_view, wrote ? view : game_view, &pivot);
     }
 
@@ -687,12 +556,12 @@ namespace
         g_last_view_qpc.store(stamp.QuadPart, std::memory_order_relaxed);
         bool enabled = g_enabled.load(std::memory_order_relaxed);
         // Off and settled: the game's view untouched. The next toggle starts from a fresh output.
-        if (!enabled && !g_follow.blending && g_toggle_generation.load(std::memory_order_relaxed) == g_follow.seen_toggle &&
+        if (!enabled && !g_view.blending && g_toggle_generation.load(std::memory_order_relaxed) == g_view.seen_toggle &&
             !dwapi::g_layers_any.load(std::memory_order_relaxed))
         {
-            g_follow.valid = false;
-            g_follow.invalid_reason = dwsc::Snap::Toggle;
-            g_follow.out_valid = false;
+            g_view.valid = false;
+            g_view.invalid_reason = dwsc::Snap::Toggle;
+            g_view.out_valid = false;
             dwapi::g_blending.store(false, std::memory_order_relaxed);
             publish_debug_idle();
             ViewHead view{};
@@ -782,6 +651,8 @@ namespace
     {
         AcquireSRWLockExclusive(&g_tuning_lock);
         g_tuning = tuning_of(dwsc::Settings{});
+        g_follow_tuning = follow_tuning_of(dwsc::Settings{});
+        g_follow_generation = 0;
         ReleaseSRWLockExclusive(&g_tuning_lock);
         g_enabled.store(true);
         g_reset.store(true);
@@ -813,7 +684,8 @@ namespace
         g_debug_snap.store(0);
         g_debug_snap_qpc.store(0);
         g_debug_glide.store(false);
-        g_follow = Follow{};
+        g_view = ViewState{};
+        g_smoother = dwsw::Follow{};
         dwsc::g_log_verbose.store(false);
         dwapi::reset_state();
     }
@@ -1255,11 +1127,17 @@ class DWSmoothwalker : public CppUserModBase
         // No g_reset: the hook crossfades on the new generation instead of snapping the lag away mid-motion.
         // Only a changed value starts one: a shoulder swap and the switches change none, and a fade holds part of the old lag.
         auto tuning = tuning_of(m_settings);
+        auto follow = follow_tuning_of(m_settings);
         AcquireSRWLockExclusive(&g_tuning_lock);
         if (!same_values(tuning, g_tuning))
         {
             tuning.generation = ++m_tuning_generation;
             g_tuning = tuning;
+        }
+        if (!dwsw::same_values(follow, g_follow_tuning))
+        {
+            g_follow_tuning = follow;
+            ++g_follow_generation;
         }
         ReleaseSRWLockExclusive(&g_tuning_lock);
         g_log_stats.store(m_settings.log_stats);
@@ -1857,9 +1735,9 @@ class DWSmoothwalker : public CppUserModBase
         p.camera_type = m_tuner.camera_type_name(camera);
         p.modes = m_tuner.list_modes(camera, p.modes_stale);
         AcquireSRWLockShared(&g_tuning_lock);
-        p.max_lag_h = g_tuning.max_lag_h;
-        p.max_lag_v = g_tuning.max_lag_v;
-        p.rotation_smoothing = g_tuning.rotation_smoothing;
+        p.max_lag_h = g_follow_tuning.max_lag_h;
+        p.max_lag_v = g_follow_tuning.max_lag_v;
+        p.rotation_smoothing = g_follow_tuning.rotation_smoothing;
         ReleaseSRWLockShared(&g_tuning_lock);
         p.keep_follow = g_debug_keep_follow.load(std::memory_order_relaxed);
         p.keep_turn = g_debug_keep_turn.load(std::memory_order_relaxed);

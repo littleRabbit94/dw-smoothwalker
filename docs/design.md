@@ -177,6 +177,38 @@ the camera stops updating under one (0 calls/s), so the first update after it ex
 A publish bumps the tuning generation only when a hook value changed: N and the switches change none, and a
 fade they started held part of the old lag for the transition time.
 
+### Core and processors
+
+The first step toward a camera core that other camera mods can depend on without taking the follow (a photo
+mode needs `claim` / `release`, not smoothing). Still one DLL; the seam is inside the hook.
+
+- **Core** (`dllmain.cpp`, `update_view`): ownership, reading the view and the pivot, the capsule half height,
+  cuts (`reset_gap`, `reset_distance`, `g_reset` and its reason), the crossfade, layers, the write and the API
+  snapshot. Its state is `ViewState` (`g_view`), its settings `Tuning` (`reset_distance`, `reset_gap`,
+  `position_transition`).
+- **Processor contract** (`core/frame.hpp`): once per update that reaches the pipeline, on the hook thread, the
+  core hands a `FrameIn` (switch, restart, mode write, dt, pivot, half height, the game's camera and rotation,
+  the aiming / combat / traversal flags) and takes back a `FrameOut` (location, rotation, whether it rotated,
+  the wall-clamp inputs for the crossfade, the overlay feed, the `log_stats` numbers, and the settings
+  generation). Numbers only, standard layout, so a C ABI between two DLLs can carry it later. The processor is
+  called with the mod off too, for its bookkeeping (a mode write still starts its wall-clamp hold). The
+  generation comes back with the frame it was read for: asked for separately, a publish between the two reads
+  would show the new settings for one frame before their crossfade started.
+- **Follow** (`follow/follow.hpp`, `dwsw::Follow`): everything under "Pivot", "Follow" and "Walls". No Windows,
+  Unreal or UE4SS types. Its settings are `dwsw::FollowTuning`, published under the same SRW lock with their own
+  generation (`g_follow_generation`); `debug_panel` reads the lag limits and rotation smoothing from there.
+- **Shared** (`core/wall.hpp`): `wall_weight` and `clamp_to_wall`, used by the follow on its result and by the
+  crossfade on the faded part of the lag.
+
+**No behaviour change, checked 2026-09-28.** The old and new hook regions (from `namespace` to the end of
+`get_camera_view_hook`) were compiled side by side on Linux with shims for the Windows calls, the QPC clock
+and the API state, and fed the same random sessions: motion, jumps, teleports, pauses, crouches, implausible
+half heights, NaN views, the O switch, settings changes (all follow keys, `position_transition` 0 included),
+mode writes, cuts with every reason, claims with and without a lease ending by glide, cut or silence, layers
+with and without `keep_layers`, `log_stats`. 8 sessions of 300,000 frames: the written view, the API snapshot,
+every overlay atomic and the stats counters identical to the bit. Planted changes in the follow (the hold's
+0.3 s, rotation not written) failed within the first run. Not run in game.
+
 ## Camera modes and position tuning
 
 ### The gameplay camera
@@ -354,8 +386,8 @@ Shadowstep_2_Base. The other 14 ship -89 / 89, except AimingOnLadder at -40 / 89
 ### The settings file
 
 - **Live settings without Lua** (0.5.0). `on_update` (UE4SS thread) checks `smoothwalker.ini`'s write time every
-  250 ms. The hook copies a numbers-only `Tuning` struct under a shared SRW lock, so nothing allocates on the
-  worker thread. `toggle_key` and `preset_key` stay startup-only. UE4SS runs key callbacks on the same
+  250 ms. The hook copies numbers-only structs (`Tuning` for the core, `dwsw::FollowTuning` for the follow; see "Core and
+  processors") under a shared SRW lock, so nothing allocates on the worker thread. `toggle_key` and `preset_key` stay startup-only. UE4SS runs key callbacks on the same
   thread as `on_update` (`UE4SSProgram.cpp`, `process_event` then `fire_update`).
 - **Robust reads** (0.7.4). Non-finite ini values (`std::stod` takes `nan`/`inf`) are ignored, and a
   non-finite pivot, view or result skips the frame. The Mod Menu's rename leaves the ini briefly absent: a
@@ -986,7 +1018,7 @@ is thread-agnostic.
 
 In the hook, while the camera is owned: the follow math runs exactly as it always does, so the pivot smoothing,
 the rotation smoothing, the crouch hold and the nominal distance stay warm, and then the view is put back to
-byte-exactly what the game built and nothing is written. `g_follow.out_offset`, `out_rotation` and `out_fov`
+byte-exactly what the game built and nothing is written. `g_view.out_offset`, `out_rotation` and `out_fov`
 therefore record a zero offset, an identity rotation and the game's FOV every update, which is what a later
 glide starts from. No crossfade of Smoothwalker's own runs while owned (the `cut || owned` arm), so a settings
 or mode write landing mid-claim is consumed silently rather than fighting the owner. Layers
@@ -995,12 +1027,12 @@ layered view is written and `view().shown` is that layered view, otherwise `show
 
 `release("cut")` sets `g_reset`, the same flag a teleport or a player swap sets, so the next update snaps the
 follow to the capsule. `release("glide")` bumps `g_release_generation`, a new atomic folded into the hook's
-`changed` alongside `t.generation`, `g_toggle_generation` and `g_position_generation` (with a `seen_release`
-field on `g_follow`): the next update sees `changed && g_follow.out_valid` and starts the existing crossfade
+`changed` alongside `t.generation`, the follow's generation, `g_toggle_generation` and `g_position_generation` (with a
+`seen_release` field on `g_view`): the next update sees `changed && g_view.out_valid` and starts the existing crossfade
 from `from_offset`/`from_rotation`/`from_fov` copied from `out_*`, which is the game's view the owner left on
 screen, easing to the follow result over `position_transition`. With `position_transition` at 0 that arm is
 skipped and the glide degrades to a cut; that is the user's own setting and is left as is. `must_keep` reads
-`g_blending`, published by the hook at the end of every update from `g_follow.blending`, and is only trusted
+`g_blending`, published by the hook at the end of every update from `g_view.blending`, and is only trusted
 while the snapshot is live (under 250 ms old), so a pause or a cutscene mid-fade cannot pin a claim out forever.
 `g_blending` is published at the end of the update that starts a crossfade, so a claim arriving during that one
 update passes rather than answering `must_keep`; the stranded fade is then discarded by the `cut || owned` arm on
@@ -1009,7 +1041,7 @@ the next update and the owner has the screen, which is the point of the claim.
 `ttl` is a lease, like the one on a layer: past it the hook stops treating the claim as ownership and the game
 thread drops the identity the next time `claim` or `release` looks (`owner()` stays a pure read and simply
 reports `nil` on an expired lease), which is a `release("cut")`. The hook makes that cut itself: a falling edge of
-ownership (`was_owned` on `g_follow`) that the release generation does not explain sets `g_follow.valid = false`
+ownership (`was_owned` on `g_view`) that the release generation does not explain sets `g_view.valid = false`
 in the same update, so the follow restarts from the capsule instead of writing the offset that piled up while
 owned. That covers the lease, an `uninstall` and an `install` re-key. A `release("glide")` is the one edge left
 alone: it bumped that generation, so the warm follow its crossfade eases back into is kept. An
@@ -1419,3 +1451,10 @@ Base_CloseRange, Base_CloseRange_Mantle2m, CombatFromArm and its two ranges, Com
 (`RebelCameraModeTPP`, `CombatCameraMode`, `RebelSpringCameraMode`, `DawnwalkerAntiGravCameraMode`,
 `DawnwalkerClawRideCameraMode`) defaults to 90; the other 13 ship at 80, 95 or 100. The other tuned fields ship away from the native defaults (offsets, the -60 / 40 look limits) or are only ever
 written to the native value (the lag switch), so they were copied all along.
+
+### Unreleased: the follow behind the core's processor contract
+
+Stage 1 of splitting Smoothwalker into a camera core and the follow as one optional processor. No behaviour
+change: the follow moved out of `update_view` into `follow/follow.hpp` behind `core/frame.hpp`, its settings
+into their own struct and generation, and the wall helpers into `core/wall.hpp`. See "Core and processors" for
+the seam and how it was checked. Next: presets split into camera presets and smoothing profiles, then two DLLs.
