@@ -207,7 +207,73 @@ half heights, NaN views, the O switch, settings changes (all follow keys, `posit
 mode writes, cuts with every reason, claims with and without a lease ending by glide, cut or silence, layers
 with and without `keep_layers`, `log_stats`. 8 sessions of 300,000 frames: the written view, the API snapshot,
 every overlay atomic and the stats counters identical to the bit. Planted changes in the follow (the hold's
-0.3 s, rotation not written) failed within the first run. Not run in game.
+0.3 s, rotation not written) failed within the first run. Built with MSVC and played 2026-09-28: follow, the toggle key,
+presets and slots, Mod Menu apply, shoulder swap, the overlay and two DWFreeCam claim / glide cycles, no
+difference seen and no errors in the log.
+
+### Plan: DWCameraCore as its own mod (chosen 2026-09-28)
+
+**Why a second mod.** The two fights this API was built for are handled inside one DLL: a free camera against the
+follow (`claim` / `release`, api_version 4) and the mode writes against other camera mods ("Writes from other
+mods"). One DLL cannot give a free camera or a path recorder per-frame control (a FOV ramp needs slot 214)
+without Smoothwalker installed, nor one owner for slot 214 instead of two DLLs chaining on it. Weighed: one DLL
+with the recorder on `claim{ keep_layers = true }` and a FOV layer; a FOV-only hook in DWFreeCam; two DLLs; four
+mods (core, presets, follow, free camera). Chosen: two DLLs. Smoothwalker keeps presets, mode writes and the
+follow, so an existing player adds one requirement and keeps `smoothwalker.ini` and the Mod Menu page as they are.
+
+| DWCameraCore | DWSmoothwalker |
+|---|---|
+| Slot 214 hook and its pin, player and camera discovery, the view update count and world seconds | The follow, a processor of the core |
+| Cuts (gap, teleport, player swap, API cut), the crossfade, layers | `mode_tuning.hpp`: mode classification (aiming, combat, traversal), the writes, the flip, the lag switch, other mods' writes |
+| `claim` / `release` / `owner`, `view()` / `live()`, the Lua injection, the processor list | Presets and slots, `smoothwalker.ini`, the Mod Menu page, keys, banners, the debug overlay |
+
+Alone, the core is the game: the hook takes today's "off and settled" path (no processor, no layer), writes
+nothing, and nothing writes a camera mode.
+
+**The contract after stage 1.**
+
+- `FrameIn` loses `aiming`, `combat`, `traversal` and `mode_write`: the tuner that produces them and the follow
+  that reads them are both Smoothwalker's, so they stay inside it.
+- The processor owns what used to be the core's switches: it reports its own on/off and a toggle generation in
+  `FrameOut` beside `generation`, and the transition time (`position_transition`). The core crossfades on any of
+  its generations. Alone, the core never writes, so a release has nothing to glide.
+- `reset_distance` and `reset_gap` stay in `smoothwalker.ini`; Smoothwalker pushes them to the core when it
+  registers and on every publish. The core ships today's defaults.
+- The core hands Smoothwalker, read-only: the player camera (game thread), `g_view_updates` and
+  `g_view_seconds`, which the flip's stages and its blend-time restore run on.
+
+**Two DLLs.**
+
+- The core exports one C function, `dwcc_get_api(uint32_t version)`, returning a table of function pointers with
+  a size and version at its head. `FrameIn` / `FrameOut` get a size field; processor calls take pointers, not
+  C++ references.
+- Every UE4SS C++ mod is `dlls/main.dll`, so Smoothwalker finds the core by walking loaded modules for that
+  export. Start order between the two is not guaranteed: Smoothwalker retries on `on_unreal_init` and each
+  `on_update`; with no core once a world has loaded, it logs once and shows a banner naming the requirement.
+- Both DLLs pin themselves ("The DLL is pinned"), so a processor pointer the core holds never points at unmapped
+  code. Smoothwalker unregisters in its destructor; Ctrl+R restarts both, in either order.
+- Lua: the core injects `CameraCore`. While Smoothwalker is loaded it keeps a `Smoothwalker` table at
+  api_version 4 that forwards to the core, for at least one release, so DWFreeCam 1.5 and `example-consumer`
+  keep working.
+
+**Stages.**
+
+1. Done: the follow behind `core/frame.hpp`.
+2. The boundary inside one DLL: everything core-side behind an in-process table shaped like the export, and the
+   Smoothwalker side calls nothing else. Check: the stage 1 harness (hook identical to the bit) and the in-game
+   list.
+3. Two DLLs from this repo: a second CMake target, the export, discovery, pinning. Check: core alone equals the
+   game (hook output bytes equal the game's view, mode values read back shipped through the bridge); core plus
+   Smoothwalker on the in-game list; Ctrl+R; both start orders; Smoothwalker without the core shows the banner.
+4. Release: `dw-cameracore` split out of this repo with its history; DWFreeCam moves to `CameraCore` (the claim
+   no longer needs Smoothwalker); both pages, Smoothwalker's listing the requirement; licensing and history
+   checks before the new repo goes public.
+
+**Open.** The core's Nexus name and version; whether it has an ini at all (`log_verbose` only); whether
+`CameraCore.api_version` starts at 1 or continues at 5. Two checks are owed whatever the plan: "Writes from other
+mods" against a real mod (Farther and Centered Camera, 236, is the simplest), and whether slot 214 is on the
+render path during photo mode (`docs/live-levers.md` in dawnwalker-toolkit, 2026-09-22, says yes; "Two
+surfaces" above says the photo camera never reaches the hook). The recorder's FOV depends on the answer.
 
 ## Camera modes and position tuning
 
@@ -1457,4 +1523,5 @@ written to the native value (the lag switch), so they were copied all along.
 Stage 1 of splitting Smoothwalker into a camera core and the follow as one optional processor. No behaviour
 change: the follow moved out of `update_view` into `follow/follow.hpp` behind `core/frame.hpp`, its settings
 into their own struct and generation, and the wall helpers into `core/wall.hpp`. See "Core and processors" for
-the seam and how it was checked. Next: presets split into camera presets and smoothing profiles, then two DLLs.
+the seam and how it was checked. Next: the core as its own mod, DWCameraCore ("Plan: DWCameraCore as its own
+mod").
