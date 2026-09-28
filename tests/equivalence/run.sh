@@ -2,21 +2,30 @@
 # The stage 2 equivalence check (README.md): builds the baseline hook (commit 47f6645) and the working tree's split
 # build side by side and runs seeded sessions through both, in parallel. Exit 0 only if every session matches.
 #
-#   tests/equivalence/run.sh [--mutate core|follow|processor] [sessions] [frames]
+#   tests/equivalence/run.sh [--mutate core|follow|processor] [--no-baseline-fixes] [sessions] [frames]
 #
-# Needs g++ (C++23), git, tar and awk. From Windows: wsl -d archlinux -- sh tests/equivalence/run.sh
+# The baseline gets the patches in baseline-fixes/ (the intended changes since 47f6645) unless --no-baseline-fixes:
+# that run must FAIL at the first event a fix changes. EQ_REKEY_CHANCE=p raises the per-event re-key chance (default
+# 0.00001) so a verification run reaches re-keys that hold a layer.
+#
+# Needs g++ (C++23), git, tar, awk and patch. From Windows: wsl -d archlinux -- sh tests/equivalence/run.sh
 set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 BASELINE=47f6645
 MUTATE=""
-if [ "${1:-}" = "--mutate" ]; then
-    MUTATE=$2
-    shift 2
-fi
+FIXES=1
+while :; do
+    case "${1:-}" in
+        --mutate) MUTATE=$2; shift 2 ;;
+        --no-baseline-fixes) FIXES=0; shift ;;
+        *) break ;;
+    esac
+done
 SESSIONS=${1:-8}
 FRAMES=${2:-300000}
+REKEY=${EQ_REKEY_CHANCE:-}
 CXX=${CXX:-g++}
 BUILD="$HERE/build"
 
@@ -25,6 +34,17 @@ mkdir -p "$BUILD/base" "$BUILD/new" "$BUILD/log"
 
 # The baseline: 47f6645's sources, and its dllmain.cpp's hook region, from `namespace` to the end of camera_live.
 git -C "$ROOT" archive "$BASELINE" src | tar -x -C "$BUILD/base"
+BASE_DEFS="-DEQ_BASELINE"
+if [ "$FIXES" -eq 1 ]; then
+    for p in "$HERE"/baseline-fixes/*.patch; do
+        [ -f "$p" ] || continue
+        patch -p1 -s -d "$BUILD/base" < "$p" || { echo "baseline fix does not apply: $p"; exit 1; }
+        echo "baseline fix applied: $(basename "$p")"
+    done
+    BASE_DEFS="$BASE_DEFS -DEQ_BASELINE_FIXED"
+else
+    echo "baseline fixes NOT applied: expect a mismatch where a fixed behaviour differs"
+fi
 awk '
     { sub(/\r$/, "") }
     !started && $0 == "namespace" { started = 1 }
@@ -52,17 +72,17 @@ case "$MUTATE" in
 esac
 
 FLAGS="-std=c++23 -O2 -Wall -Wextra -Wno-unused-function -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -I$HERE -I$HERE/shim -I$BUILD"
-$CXX $FLAGS -I"$BUILD/base/src" -Ddwapi=base_dwapi -Ddwsc=base_dwsc -Ddwsw=base_dwsw -Ddwcam=base_dwcam -c "$HERE/base_driver.cpp" -o "$BUILD/base.o" &
+$CXX $FLAGS -I"$BUILD/base/src" $BASE_DEFS -Ddwapi=base_dwapi -Ddwsc=base_dwsc -Ddwsw=base_dwsw -Ddwcam=base_dwcam -c "$HERE/base_driver.cpp" -o "$BUILD/base.o" &
 $CXX $FLAGS -I"$BUILD/new/src" -Ddwapi=new_dwapi -Ddwsc=new_dwsc -Ddwsw=new_dwsw -Ddwcam=new_dwcam -c "$HERE/new_driver.cpp" -o "$BUILD/new.o" &
 $CXX $FLAGS -c "$HERE/main.cpp" -o "$BUILD/main.o" &
 wait
 [ -f "$BUILD/base.o" ] && [ -f "$BUILD/new.o" ] && [ -f "$BUILD/main.o" ] || { echo "build failed"; exit 1; }
 $CXX -o "$BUILD/equivalence" "$BUILD/base.o" "$BUILD/new.o" "$BUILD/main.o"
 
-echo "baseline $BASELINE vs working tree${MUTATE:+ (mutation: $MUTATE)}: $SESSIONS sessions x $FRAMES frames"
+echo "baseline $BASELINE$([ "$FIXES" -eq 1 ] && echo " + fixes") vs working tree${MUTATE:+ (mutation: $MUTATE)}: $SESSIONS sessions x $FRAMES frames${REKEY:+, re-key chance $REKEY}"
 i=1
 while [ "$i" -le "$SESSIONS" ]; do
-    "$BUILD/equivalence" "$i" "$FRAMES" > "$BUILD/log/session-$i.txt" 2>&1 &
+    "$BUILD/equivalence" "$i" "$FRAMES" $REKEY >"$BUILD/log/session-$i.txt" 2>&1 &
     i=$((i + 1))
 done
 wait

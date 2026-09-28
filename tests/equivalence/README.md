@@ -11,6 +11,8 @@ From the repo root, in WSL (or any Linux with g++ 13+, git, tar, awk):
 wsl -d archlinux -- sh tests/equivalence/run.sh                  # 8 sessions x 300,000 frames
 wsl -d archlinux -- sh tests/equivalence/run.sh 2 20000          # sessions, frames
 wsl -d archlinux -- sh tests/equivalence/run.sh --mutate core    # plant a mutation: must FAIL
+wsl -d archlinux -- sh tests/equivalence/run.sh --no-baseline-fixes   # leave the baseline unpatched: must FAIL
+EQ_REKEY_CHANCE=0.0005 sh tests/equivalence/run.sh 8 300000      # more re-keys per session (default 0.00001)
 ```
 
 Exit 0 and `PASS` only if every session matched. Mutations (`core`, `follow`, `processor`) are applied to a copy of
@@ -20,7 +22,7 @@ Exit 0 and `PASS` only if every session matched. Mutations (`core`, `follow`, `p
 ## What it compares
 
 - **Baseline:** `47f6645`'s headers and its `dllmain.cpp` from `namespace` to the end of `camera_live`, extracted by
-  `run.sh` and compiled unchanged (`base_driver.cpp`).
+  `run.sh`, patched with `baseline-fixes/*.patch` (below), and compiled (`base_driver.cpp`).
 - **Split:** the working tree's `core/pipeline.hpp` and `sw/processor.hpp`, joined only through the core's table
   (`new_driver.cpp`).
 - Both link into one program (namespaces renamed `base_*` / `new_*` on the command line) and get the same events in
@@ -38,12 +40,30 @@ Exit 0 and `PASS` only if every session matched. Mutations (`core`, `follow`, `p
   two NaNs returns follows operand order, which the compiler may swap). The clocks must match too: the fake
   `QueryPerformanceCounter` advances one tick per call, so both builds must make the same calls in the same order.
 
+## Intended changes since 47f6645
+
+A change to the mod that the baseline cannot agree with is not a harness failure to wave through: it goes in as a
+patch on the extracted baseline, so baseline and working tree again agree bit for bit and the harness keeps its
+teeth for everything else. `run.sh` applies `baseline-fixes/*.patch` (in name order, `patch -p1` from the baseline's
+`src` parent) right after `git archive`. `--no-baseline-fixes` skips them and defines nothing extra: that run must
+FAIL, which shows the harness sees the change. A patch's leading text says what it changes and why. Where the
+harness's own operation code (`api_ops.inc`) mirrors baseline bookkeeping, it calls the function the patch adds when
+`EQ_BASELINE_FIXED` is defined (`run.sh` does that only with the patches applied) and keeps the 47f6645 copy otherwise.
+
+| Patch | Changes | Why |
+|---|---|---|
+| `0001-rekey-frees-layer-slot.patch` | `lua_api.hpp`: `install` moves its locked bookkeeping into `install_locked`, which frees the layer slot the consumer held (`clear_slot`, then `g_slot_owner[slot].clear()`, as `uninstall` does) before replacing the consumer | 47f6645 replaced the consumer on a re-key (a hot reload or a script error at load, no `on_lua_stop`) and left its slot taken: the old layer kept applying and repeated re-keys used up the 8 slots. The re-key event now differs by design: `api.layers_any` set, `api.layer_generation` and `layer.generation` bumped by the fade-out, but only when the consumer held a layer |
+
+Without the patch, each of the 8 default 8 x 300,000 sessions fails at a re-key event (frame 4,485 to 146,294; a
+session has 2 to 8 re-keys, and the first one whose consumer held a layer is the mismatch).
+
 ## Files
 
 | File | Contents |
 |---|---|
-| `run.sh` | Extracts the baseline, copies the tree (and plants a mutation), builds, runs the sessions in parallel |
-| `main.cpp` | Session generator, lockstep driver, comparison, coverage counts |
+| `run.sh` | Extracts the baseline, applies the baseline fixes, copies the tree (and plants a mutation), builds, runs the sessions in parallel |
+| `baseline-fixes/` | Patches for the intended changes since 47f6645 (above) |
+| `main.cpp` | Session generator, lockstep driver, comparison, coverage counts; optional third argument (`EQ_REKEY_CHANCE` in `run.sh`) is the re-key chance |
 | `harness.hpp` | The driver interface, settings, records |
 | `base_driver.cpp`, `new_driver.cpp` | Each build behind that interface; UE4SS-bound feeding code is quoted from the mod |
 | `api_ops.inc` | The Lua API's game-thread operations without Lua, over either build's state |

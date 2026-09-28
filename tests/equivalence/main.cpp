@@ -75,6 +75,8 @@ namespace
             place_player(true);
         }
 
+        auto set_rekey_chance(double p) -> void { m_rekey_chance = p; }
+
         auto run(uint64_t frames) -> bool
         {
             for (m_frame = 0; m_frame < frames; ++m_frame)
@@ -132,6 +134,7 @@ namespace
         int m_camera_gone = 0, m_root_gone = 0, m_offset_gone = 0;
         bool m_half_offset_missing = false;
         bool m_installed[2]{true, true};
+        double m_rekey_chance = 0.00001; // per consumer and event; the optional third argument raises it
         alignas(16) uint8_t m_root[0x800];
         uint8_t m_camera_object = 0, m_other_object = 0;
         static constexpr int32_t TRANSLATION = 0x200, HALF = 0x1F0;
@@ -412,9 +415,9 @@ namespace
                     if (!both("uninstall", [&](Variant& v, Record&) { v.uninstall(c); })) return false;
                     continue;
                 }
-                // Rare: a re-key without on_lua_stop keeps the consumer's layer slot taken (lua_api.hpp, install), and
-                // the eight slots would run out within a session.
-                if (chance(0.00001))
+                // Rare: a re-key without on_lua_stop. It frees the layer slot the consumer held (lua_api.hpp,
+                // install_locked); 47f6645 leaked it, so the baseline carries baseline-fixes/0001 to agree.
+                if (chance(m_rekey_chance))
                 {
                     ++m_counters.rekeys;
                     if (!both("install(re-key)", [&](Variant& v, Record&) { v.install(c); })) return false;
@@ -599,12 +602,13 @@ int main(int argc, char** argv)
 {
     if (argc < 3)
     {
-        std::fprintf(stderr, "usage: %s <seed> <frames>\n", argv[0]);
+        std::fprintf(stderr, "usage: %s <seed> <frames> [rekey_chance]\n", argv[0]);
         return 2;
     }
     uint64_t seed = std::strtoull(argv[1], nullptr, 10);
     uint64_t frames = std::strtoull(argv[2], nullptr, 10);
     Session session(seed);
+    if (argc > 3) session.set_rekey_chance(std::strtod(argv[3], nullptr));
     if (!session.run(frames))
     {
         std::printf("seed %" PRIu64 ": FAILED\n", seed);

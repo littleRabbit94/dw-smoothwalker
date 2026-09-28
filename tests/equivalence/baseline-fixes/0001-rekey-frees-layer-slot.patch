@@ -1,0 +1,46 @@
+Intended change since 47f6645: a re-key (install on a state that already has a consumer) frees the consumer's layer slot.
+
+47f6645 replaced the consumer with `g_states[main] = Consumer{...}` and never released a layer slot it held:
+g_slot_owner[slot] stayed set, the old layer kept applying, and repeated re-keys used up the 8 slots. The fix is
+the same release an uninstall does, in a new install_locked (which the harness's api_ops.inc calls, EQ_BASELINE_FIXED).
+Mirrors src/core/lua_api.hpp; see tests/equivalence/README.md, "Intended changes since 47f6645".
+
+--- a/src/lua_api.hpp
++++ b/src/lua_api.hpp
+@@ -628,18 +628,30 @@
+     inline constexpr const char* FUNCTION_NAMES[] = {"register", "view",  "live",  "enabled", "layer_set",
+                                                      "layer_clear", "layers", "claim", "release", "owner"};
+ 
++    // Under g_mutex. The bookkeeping of a consumer's (re)start on `main`; returns the mod version to publish.
++    inline auto install_locked(lua_State* main, std::string mod, std::string mod_version) -> std::string
++    {
++        // A Lua mod restarted without an on_lua_stop (a hot reload, a script error at load) comes back on the
++        // same state: whatever it claimed before is not its claim any more, so the camera goes back to nobody,
++        // and the layer slot it held is freed too (its layer fades out), as an uninstall does.
++        if (g_owner_state == main) release_locked(false);
++        if (auto it = g_states.find(main); it != g_states.end() && it->second.slot >= 0)
++        {
++            clear_slot(it->second.slot);
++            g_slot_owner[it->second.slot].clear();
++        }
++        g_mod_version = std::move(mod_version);
++        g_states[main] = Consumer{std::move(mod), false, -1};
++        return g_mod_version;
++    }
++
+     inline auto install(lua_State* L, std::string mod, std::string mod_version) -> void
+     {
+         lua_State* main = main_state(L);
+         std::string version;
+         {
+             std::lock_guard guard(g_mutex);
+-            // A Lua mod restarted without an on_lua_stop (a hot reload, a script error at load) comes back on the
+-            // same state: whatever it claimed before is not its claim any more, so the camera goes back to nobody.
+-            if (g_owner_state == main) release_locked(false);
+-            g_mod_version = std::move(mod_version);
+-            g_states[main] = Consumer{std::move(mod), false, -1};
+-            version = g_mod_version;
++            version = install_locked(main, std::move(mod), std::move(mod_version));
+         }
+         lua_createtable(L, 0, 13);
+         lua_pushinteger(L, API_VERSION); lua_setfield(L, -2, "api_version");
