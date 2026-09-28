@@ -80,7 +80,7 @@ parsed for feature gating, use `api_version` for that.
 ### Layers
 
 One layer per mod, eight slots total, first come first served: the first `layer_set` a mod calls claims a
-slot for the life of the mod (until `on_lua_stop` or unload), and every later `layer_set` from that mod
+slot for the life of the mod (until `on_lua_stop`, a restart of the mod's Lua state, or unload), and every later `layer_set` from that mod
 replaces the same slot's contents rather than taking a new one. `layer_clear` fades the slot to nothing but
 does not give it back to the pool.
 

@@ -1132,7 +1132,8 @@ of the O switch: a layer is another mod's feature, so `enabled = 0` stays the cl
 work while the other mod keeps its effect. The off-and-settled early return in the hook is skipped while any
 layer is live or fading (`g_layers_any`, set by a `layer_set` or clear, cleared by the hook once every slot is
 idle). FOV is clamped to 5..170 after the sum. Non-finite results are dropped to 0.
-A stopping consumer (`on_lua_stop`) has its layer faded out and its slot freed.
+A stopping consumer (`on_lua_stop`) has its layer faded out and its slot freed; so does one re-keyed by `install`
+without an `on_lua_stop` (a hot reload or a script error at load), which until the fix under "Unreleased" kept the slot taken.
 
 **Tested live 2026-09-22** from UEBridge's state, LongRange mode at FOV 95 (Cinematic):
 
@@ -1624,3 +1625,5 @@ callbacks; Smoothwalker reaches the core only through the C table `dwcc_get_api`
 aiming, combat and traversal flags and the mode write, the processor reports its own switch, toggle generation and
 transition, and the cut thresholds are pushed to the core on every publish. The equivalence harness is committed
 under `tests/equivalence/`. See "Core and processors".
+
+Fix: an `install` re-key (a Lua mod restarting on its old state without `on_lua_stop`) now frees the layer slot it held, as an uninstall does; before, the slot and its layer stayed and repeated restarts used up the eight slots. The equivalence harness applies `tests/equivalence/baseline-fixes/0001` to its baseline for that one difference.
