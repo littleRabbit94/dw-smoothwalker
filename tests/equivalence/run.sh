@@ -26,6 +26,7 @@ mkdir -p "$BUILD/base" "$BUILD/new" "$BUILD/log"
 # The baseline: 47f6645's sources, and its dllmain.cpp's hook region, from `namespace` to the end of camera_live.
 git -C "$ROOT" archive "$BASELINE" src | tar -x -C "$BUILD/base"
 awk '
+    { sub(/\r$/, "") }
     !started && $0 == "namespace" { started = 1 }
     started { print }
     started && /^    auto camera_live\(\) -> bool$/ { in_live = 1 }
