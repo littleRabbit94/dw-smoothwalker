@@ -43,7 +43,11 @@ will not open while a `ConfigKey` is missing from it.
 | Path | Contents |
 |---|---|
 | `CMakeLists.txt` | Superbuild: RE-UE4SS from `DW_RE_UE4SS_SOURCE_DIR`, then the `DWSmoothwalker` target |
-| `src/` | The DLL source: `dllmain.cpp` (the camera core: hook, cuts, crossfade, layers, settings, player discovery), `core/frame.hpp` (the core's contract with a view processor), `core/wall.hpp`, `follow/follow.hpp` (the follow, the core's one processor), `config.hpp` (settings and presets), `mode_tuning.hpp` (camera position in the game's modes, aiming, combat and traversal state), `smoothing.hpp` (math) |
+| `src/` | The DLL source, two components that will be two DLLs (docs/design.md, "Core and processors"): `dllmain.cpp` (the one mod class, owning both) |
+| `src/core/` | The camera core: `core.cpp` (hook install, player discovery, Lua injection), `pipeline.hpp` (the hook: cuts, crossfade, layers, the write), `api.hpp` (the C table Smoothwalker uses), `frame.hpp` (the contract with a view processor), `lua_api.hpp` (the Lua API), `wall.hpp` |
+| `src/sw/` | Smoothwalker: `smoothwalker.cpp` (settings, presets, keys, banners, the overlay's data), `processor.hpp` (the follow as the core's processor), `follow/follow.hpp` (the follow), `config.hpp` (settings and presets), `mode_tuning.hpp` (camera position in the game's modes, aiming, combat and traversal state), `debug_overlay.hpp` |
+| `src/smoothing.hpp`, `src/live_ref.hpp` | Shared by both sides: math, `LiveRef` |
+| `tests/equivalence/` | Never shipped: checks the hook against an earlier commit byte for byte (`run.sh`, README) |
 | `mod/` | Exactly what ships under `ue4ss/Mods/DWSmoothwalker/`: `enabled.txt`, `LICENSE`, `mod_settings.ini` (Mod Menu page), `config/smoothwalker.ini`; `dlls/` is build output |
 | `release/` | `Build-Package.py`, the Nexus page description and metadata, `example-preset/`, `example-consumer/` (a drop-in Lua mod using the camera API) |
 | `docs/design.md` | How the mod works, the game's camera, measurements and version history |
