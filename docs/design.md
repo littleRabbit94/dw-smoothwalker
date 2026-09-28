@@ -269,8 +269,14 @@ nothing, and nothing writes a camera mode.
    no longer needs Smoothwalker); both pages, Smoothwalker's listing the requirement; licensing and history
    checks before the new repo goes public.
 
-**Open.** The core's Nexus name and version; whether it has an ini at all (`log_verbose` only); whether
-`CameraCore.api_version` starts at 1 or continues at 5. Two checks are owed whatever the plan: "Writes from other
+**Decided 2026-09-28.** Nexus name "Dawnwalker Camera Core" (folder `DWCameraCore`, repo `dw-cameracore`, Lua
+`CameraCore`). `CameraCore.api_version` starts at 1; the forwarding `Smoothwalker` table stays at 4. The core
+gets `config/cameracore.ini` with diagnostics only and no Mod Menu page: `log_verbose` (discovery, offsets,
+hook install), `log_stats` (hook cost and calls per second, its half of today's line) and `log_api` (every
+register, claim, release, layer and lease expiry with the consumer's name, for mod authors). Cut thresholds stay
+in `smoothwalker.ini`. Nothing is pushed until stage 4 is done.
+
+**Open.** Two checks are owed whatever the plan: "Writes from other
 mods" against a real mod (Farther and Centered Camera, 236, is the simplest), and whether slot 214 is on the
 render path during photo mode (`docs/live-levers.md` in dawnwalker-toolkit, 2026-09-22, says yes; "Two
 surfaces" above says the photo camera never reaches the hook). The recorder's FOV depends on the answer.
