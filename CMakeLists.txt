@@ -12,7 +12,12 @@ endif()
 
 add_subdirectory("${DW_RE_UE4SS_SOURCE_DIR}" RE-UE4SS)
 
-add_library(DWSmoothwalker SHARED "${CMAKE_CURRENT_SOURCE_DIR}/src/dllmain.cpp")
+# The camera core (src/core) and Smoothwalker (src/sw) as separate translation units: Smoothwalker reaches the core
+# only through core/api.hpp, and dllmain.cpp owns both (docs/design.md, "Core and processors").
+add_library(DWSmoothwalker SHARED
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/dllmain.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/core.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/sw/smoothwalker.cpp")
 target_link_libraries(DWSmoothwalker PUBLIC UE4SS)
 # Record the PDB by file name rather than absolute path. The name is literal because the Visual Studio
 # generator escapes the percent signs in %_PDB%.

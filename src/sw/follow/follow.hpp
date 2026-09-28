@@ -1,7 +1,8 @@
-// The follow: Smoothwalker's view processor (core/frame.hpp). A smoothed pivot trails the capsule, the camera
-// becomes smoothed pivot + (game camera - pivot), so orbiting stays instant and only following lags. Optional
-// rotation smoothing, the crouch hold, the aiming / combat / traversal shares and the wall clamp live here too.
-// docs/design.md, "Follow", "Pivot" and "Walls". Numbers only: runs on the hook thread, no Unreal or UE4SS types.
+// The follow: the math behind Smoothwalker's view processor (sw/processor.hpp, core/frame.hpp). A smoothed pivot
+// trails the capsule, the camera becomes smoothed pivot + (game camera - pivot), so orbiting stays instant and only
+// following lags. Optional rotation smoothing, the crouch hold, the aiming / combat / traversal shares and the wall
+// clamp live here too. docs/design.md, "Follow", "Pivot" and "Walls". Numbers only: runs on the hook thread, no
+// Unreal or UE4SS types.
 #pragma once
 
 #include "../../core/frame.hpp"
@@ -27,6 +28,7 @@ namespace dwsw
         double combat_rotation_keep = 1.0;    // combat_rotation as a share: the turning smoothing kept while a combat camera is up
         double traversal_follow_keep = 1.0;   // traversal_follow as a share: the trail kept while a traversal camera is up
         double traversal_rotation_keep = 1.0; // traversal_rotation as a share: the turning smoothing kept while a traversal camera is up
+        double transition = 0.0;              // s, position_transition: the core's crossfade, and a mode write's wall-clamp hold
     };
 
     inline auto same_values(const FollowTuning& a, const FollowTuning& b) -> bool
@@ -36,8 +38,25 @@ namespace dwsw
                a.max_lag_v == b.max_lag_v && a.soft_leash == b.soft_leash && a.rotation_smoothing == b.rotation_smoothing &&
                a.wall_clamp == b.wall_clamp && a.rotation_rate == b.rotation_rate && a.aiming_keep == b.aiming_keep &&
                a.combat_follow_keep == b.combat_follow_keep && a.combat_rotation_keep == b.combat_rotation_keep &&
-               a.traversal_follow_keep == b.traversal_follow_keep && a.traversal_rotation_keep == b.traversal_rotation_keep;
+               a.traversal_follow_keep == b.traversal_follow_keep && a.traversal_rotation_keep == b.traversal_rotation_keep &&
+               a.transition == b.transition;
     }
+
+    // What the follow reads besides the core's frame, all Smoothwalker's: a camera-mode write landed since the last
+    // frame (its distance glides in over the transition), and which camera-mode groups are blending in or active.
+    struct FollowInputs
+    {
+        bool mode_write = false;
+        bool aiming = false, combat = false, traversal = false;
+    };
+
+    // The log_stats numbers of one frame.
+    struct FollowReport
+    {
+        bool stats = false;     // a following frame: shown_lag counts
+        bool clamped = false;   // the wall clamp moved the result
+        double shown_lag = 0.0; // cm between the pivot and the shown pivot
+    };
 
     // Soft: the internal lag may run to 3x the limit and the shown lag eases into it, so the limit has no edge.
     inline auto leash(double lag, double limit, bool soft) -> double
@@ -50,20 +69,20 @@ namespace dwsw
     class Follow
     {
       public:
-        auto frame(const FollowTuning& t, const dwcam::FrameIn& in, dwcam::FrameOut& out) -> void
+        auto frame(const FollowTuning& t, const FollowInputs& sw, const dwcam::FrameIn& in, dwcam::FrameOut& out, FollowReport& report) -> void
         {
             out.location = in.camera;
             out.rotation = in.rotation;
             out.rotated = false;
             out.feed = false;
-            out.stats = false;
-            out.clamped = false;
+            report.stats = false;
+            report.clamped = false;
 
             // A shorter distance gliding in is not a wall. No wall clamp until it has landed.
-            if (in.mode_write) m_nominal_hold = in.transition + 0.3;
+            if (sw.mode_write) m_nominal_hold = t.transition + 0.3;
 
-            if (in.enabled && in.restart) start(in);
-            else if (in.enabled) step(t, in, out);
+            if (in.enabled && in.restart) start(sw, in);
+            else if (in.enabled) step(t, sw, in, out, report);
 
             out.wall_clamp = t.wall_clamp;
             out.nominal_distance = m_nominal_distance;
@@ -96,11 +115,11 @@ namespace dwsw
         static auto feet_z(const dwcam::FrameIn& in) -> double { return std::isfinite(in.half_height) ? in.pivot.z - in.half_height : in.pivot.z; }
 
         // From the capsule, showing the game's view.
-        auto start(const dwcam::FrameIn& in) -> void
+        auto start(const FollowInputs& sw, const dwcam::FrameIn& in) -> void
         {
-            m_aim = in.aiming ? 1.0 : 0.0;
-            m_combat = in.combat ? 1.0 : 0.0;
-            m_traversal = in.traversal ? 1.0 : 0.0;
+            m_aim = sw.aiming ? 1.0 : 0.0;
+            m_combat = sw.combat ? 1.0 : 0.0;
+            m_traversal = sw.traversal ? 1.0 : 0.0;
             m_pivot_smoothed = dwsc::Vec3{in.pivot.x, in.pivot.y, feet_z(in)};
             m_rotation_smoothed = in.rotation;
             m_half_last = in.half_height;
@@ -109,7 +128,7 @@ namespace dwsw
             m_nominal_distance = dwsc::length(in.camera - in.pivot);
         }
 
-        auto step(const FollowTuning& t, const dwcam::FrameIn& in, dwcam::FrameOut& out) -> void
+        auto step(const FollowTuning& t, const FollowInputs& sw, const dwcam::FrameIn& in, dwcam::FrameOut& out, FollowReport& report) -> void
         {
             const dwsc::Vec3 pivot = in.pivot;
             const dwsc::Vec3 camera = in.camera;
@@ -153,11 +172,11 @@ namespace dwsw
 
             // A trail behind the crosshair reads as input lag. Only what is shown is scaled, and eased: the smoothed
             // pivot and rotation run on underneath, so the trail returns without an edge.
-            double aim_target = in.aiming ? 1.0 : 0.0;
+            double aim_target = sw.aiming ? 1.0 : 0.0;
             m_aim += (aim_target - m_aim) * (1.0 - std::exp(-8.0 * dt));
-            double combat_target = in.combat ? 1.0 : 0.0;
+            double combat_target = sw.combat ? 1.0 : 0.0;
             m_combat += (combat_target - m_combat) * (1.0 - std::exp(-8.0 * dt));
-            double traversal_target = in.traversal ? 1.0 : 0.0;
+            double traversal_target = sw.traversal ? 1.0 : 0.0;
             m_traversal += (traversal_target - m_traversal) * (1.0 - std::exp(-8.0 * dt));
 
             // Traversal hands the shown trail and turning to traversal_follow/traversal_rotation as it comes up;
@@ -252,12 +271,12 @@ namespace dwsw
             }
             if (t.wall_clamp && dwcam::clamp_to_wall(result, pivot, game_distance, dwcam::wall_weight(game_distance, m_nominal_distance)))
             {
-                out.clamped = true;
+                report.clamped = true;
             }
             out.location = result;
 
-            out.stats = true;
-            out.shown_lag = dwsc::length(pivot - shown_pivot);
+            report.stats = true;
+            report.shown_lag = dwsc::length(pivot - shown_pivot);
         }
     };
 } // namespace dwsw

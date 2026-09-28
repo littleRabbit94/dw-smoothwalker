@@ -1,13 +1,11 @@
 // Debug overlay (debug_overlay, debug_key): a UMG text panel at the top right of the screen with the live follow,
 // the player's camera modes, the last hard cut and the camera API claim (docs/design.md, "Debug overlay").
 // Built, refreshed and removed on the game thread only, from the engine tick. The GetCameraView hook never touches
-// it: it publishes numbers (dllmain.cpp, g_debug_*) that the refresh reads.
-//
-// Included from dllmain.cpp after lua_api.hpp.
+// it: the core publishes numbers that the refresh reads through its table (Api::read_debug, Api::camera_owner;
+// sw/smoothwalker.cpp, debug_panel).
 #pragma once
 
 #include "config.hpp"
-#include "../core/lua_api.hpp"
 #include "mode_tuning.hpp"
 #include "../smoothing.hpp"
 
@@ -41,24 +39,6 @@ namespace dwsc
         double lease = NAN; // s left on the owner's lease; NAN: no lease
         bool glide = false; // the hook is crossfading back after a release("glide")
     };
-
-    // Read-only, the way Smoothwalker.owner() reads it: under dwapi::g_mutex, and an expired lease reads as nobody.
-    // The drop itself stays with claim and release. glide is the caller's (a hook atomic).
-    inline auto api_status() -> ApiStatus
-    {
-        ApiStatus s;
-        std::string mod;
-        int64_t expires = 0;
-        {
-            std::lock_guard guard(dwapi::g_mutex);
-            expires = dwapi::g_owner_expires.load(std::memory_order_relaxed);
-            if (dwapi::g_owner_state && (expires == 0 || dwapi::qpc_now() < expires)) mod = dwapi::g_owner_mod;
-        }
-        if (mod.empty()) return s;
-        s.owner = to_wide(mod);
-        if (expires != 0) s.lease = std::max(0.0, static_cast<double>(expires - dwapi::qpc_now()) / dwapi::qpc_frequency());
-        return s;
-    }
 
     // What the panel shows, gathered on the game thread at a refresh. NAN: not known (the follow is off, or has not
     // run on this camera yet).

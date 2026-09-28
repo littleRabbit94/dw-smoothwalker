@@ -10,7 +10,7 @@
 // take a ttl lease, so a consumer that crashes mid-claim cannot hold the camera forever. claim() and release()
 // are game thread only; owner() reads under g_mutex and is thread-agnostic.
 //
-// Included from dllmain.cpp after the UE4SS headers: needs the Windows types they bring in.
+// The core's (core/pipeline.hpp includes it): needs the Windows types included before it.
 #pragma once
 
 #include "../smoothing.hpp"
@@ -52,9 +52,9 @@ namespace dwapi
     // One writer (the hook, one player-camera update at a time), any number of readers.
     inline std::atomic<uint64_t> g_seq{0};
     inline Snapshot g_snapshot{};
-    inline std::atomic<bool>* g_enabled = nullptr; // the mod's live switch, set by dllmain
-    inline std::atomic<bool>* g_reset = nullptr;   // the hook's hard-cut flag, set by dllmain: release("cut")
-    inline std::atomic<int>* g_reset_reason = nullptr; // why g_reset was set (dwsc::Snap), set by dllmain; the debug overlay shows it
+    inline bool (*g_enabled)() = nullptr;          // the processor's live switch (Processor::state), set by the core; any thread
+    inline std::atomic<bool>* g_reset = nullptr;   // the hook's hard-cut flag, set by the core: release("cut")
+    inline std::atomic<int>* g_reset_reason = nullptr; // why g_reset was set (dwsc::Snap), set by the core; the debug overlay shows it
     inline std::atomic<uint32_t> g_game_thread{0};  // captured on the engine tick
 
     // ---------------------------------------------------------------------------------------------- authority
@@ -346,10 +346,11 @@ namespace dwapi
         return 2;
     }
 
-    // Smoothwalker.enabled() -> bool: the mod's live switch (O, the ini, the Mod Menu).
+    // Smoothwalker.enabled() -> bool: the processor's live switch (Smoothwalker's O, the ini, the Mod Menu); false
+    // with no processor registered.
     inline auto l_enabled(lua_State* L) -> int
     {
-        lua_pushboolean(L, g_enabled && g_enabled->load(std::memory_order_relaxed) ? 1 : 0);
+        lua_pushboolean(L, g_enabled && g_enabled() ? 1 : 0);
         return 1;
     }
 
@@ -711,10 +712,11 @@ namespace dwapi
     }
 
     // Every variable above back to its static-init value, for the next instance on the same pinned image
-    // (dllmain.cpp, reset_globals). After uninstall_all, so every table left in a Lua state holds stubs, and after
+    // (core/core.cpp, reset_globals). After uninstall_all, so every table left in a Lua state holds stubs, and after
     // the hook stopped following the player, so it no longer reaches publish or apply_layers. A state that reaches
     // on_lua_start again gets a fresh table of the same, still mapped, functions. Kept: the locks, the constants,
-    // g_enabled / g_reset / g_reset_reason (they point at dllmain's globals, reset there) and qpc_frequency().
+    // g_enabled / g_reset / g_reset_reason (they point at the core's function and globals, reset there) and
+    // qpc_frequency().
     inline auto reset_state() -> void
     {
         {
