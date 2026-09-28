@@ -1296,7 +1296,11 @@ source at `97b7e501`, and the public source of Combat Camera - Configurable 3.1.
   `ApplyCameraModifiers` (camera shakes; the only modifier classes reflected in this game are
   `CinematicCameraShake` and a Perlin shake pattern) and `SetActorLocationAndRotation`. `DoUpdateCamera`
   lerps FOV between view targets during a blend. Nothing else rewrites `POV.FOV` or `POV.Rotation.Roll`;
-  `LockedFOV` (the `fov` console command) only changes what `GetFOVAngle()` returns. So a hook-side FOV
+  `LockedFOV` (the `fov` console command, `APlayerController::FOV`) only changes what `GetFOVAngle()` returns,
+  but that is what renders: `ULocalPlayer::GetViewPoint` takes the cached view and then sets its FOV from
+  `GetFOVAngle()` (`LocalPlayer.cpp:685`), so a set `LockedFOV` overrides every FOV upstream, the hook's and
+  the shakes' included, for any view target (corrected 2026-09-28; the photo-mode mods 361 and 595 zoom
+  through it). So, with `LockedFOV` unset, a hook-side FOV
   or roll write reaches the render unless `RebelPlayerCameraManager` overrides these natively, which
   reflection cannot show (it has no reflected functions). **Measured with a probe build the same day:**
   `probe_fov = 20`, `probe_roll = 10` (two file-only keys, off by default, added to the view after the
