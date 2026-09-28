@@ -4,9 +4,9 @@
 // docs/design.md, "Follow", "Pivot" and "Walls". Numbers only: runs on the hook thread, no Unreal or UE4SS types.
 #pragma once
 
-#include "../core/frame.hpp"
-#include "../core/wall.hpp"
-#include "../smoothing.hpp"
+#include "../../core/frame.hpp"
+#include "../../core/wall.hpp"
+#include "../../smoothing.hpp"
 
 #include <algorithm>
 #include <cmath>

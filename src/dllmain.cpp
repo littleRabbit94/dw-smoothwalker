@@ -2,11 +2,11 @@
 // slot 214). Design and measurements: docs/design.md.
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
-#include "config.hpp"
+#include "sw/config.hpp"
 #include "core/frame.hpp"
 #include "core/wall.hpp"
-#include "follow/follow.hpp"
-#include "mode_tuning.hpp"
+#include "sw/follow/follow.hpp"
+#include "sw/mode_tuning.hpp"
 #include "smoothing.hpp"
 
 #include <atomic>
@@ -43,8 +43,8 @@
 #include <Unreal/UObjectGlobals.hpp>
 #include <Unreal/UnrealInitializer.hpp>
 
-#include "lua_api.hpp"
-#include "debug_overlay.hpp"
+#include "core/lua_api.hpp"
+#include "sw/debug_overlay.hpp"
 
 using namespace RC;
 using namespace RC::Unreal;

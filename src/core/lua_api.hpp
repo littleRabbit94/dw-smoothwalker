@@ -13,7 +13,7 @@
 // Included from dllmain.cpp after the UE4SS headers: needs the Windows types they bring in.
 #pragma once
 
-#include "smoothing.hpp"
+#include "../smoothing.hpp"
 
 #include <algorithm>
 #include <atomic>

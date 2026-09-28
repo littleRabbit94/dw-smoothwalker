@@ -7,9 +7,9 @@
 #pragma once
 
 #include "config.hpp"
-#include "lua_api.hpp"
+#include "../core/lua_api.hpp"
 #include "mode_tuning.hpp"
-#include "smoothing.hpp"
+#include "../smoothing.hpp"
 
 #include <algorithm>
 #include <chrono>
