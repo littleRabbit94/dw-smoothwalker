@@ -187,9 +187,9 @@ internal structure, not a packaging line: shipping the core as a second DLL is d
 
 | Side | Files | Owns |
 |---|---|---|
-| Core | `camera/core.cpp` (the component), `camera/pipeline.hpp` (the hook side and `CoreApi`), `camera/lua_api.hpp`, `camera/api.hpp`, `camera/frame.hpp` (with `Snap`) | Slot 214 and its pin, player and camera discovery, `g_view_updates` / `g_view_seconds`, cuts, the crossfade, layers, the write and the API snapshot, `claim` / `release` / `owner`, `view()` / `live()`, the Lua injection, the processor and listener slots |
+| Core | `camera/core.hpp` / `core.cpp` (the component), `camera/hook.hpp` / `hook.cpp` (slot 214 and the image-level statics), `camera/pipeline.hpp` / `pipeline.cpp` (the hook side and `CoreApi`), `camera/authority.hpp` / `authority.cpp` (the API's state), `camera/lua_api.hpp`, `camera/api.hpp`, `camera/frame.hpp` (with `Snap`), `camera/snapshot.hpp`, `camera/clock.hpp`, `camera/guarded.hpp` / `guarded.cpp` | Slot 214 and its pin, the `Pipeline` and the `Authority` (the Core's own instances, with `CoreApi` over both), player and camera discovery, `g_view_updates` / `g_view_seconds`, cuts, the crossfade, layers, the write and the API snapshot, `claim` / `release` / `owner`, `view()` / `live()`, the Lua injection, the processor and listener slots |
 | Smoothwalker | `smoothwalker/smoothwalker.cpp` (the component), `smoothwalker/follow/processor.hpp`, `smoothwalker/follow/follow.hpp` (with `Influence`), `smoothwalker/follow/curves.hpp`, `smoothwalker/modes/mode_tuner.hpp`, `smoothwalker/settings/settings.hpp`, `smoothwalker/ui/debug_overlay.hpp` | The follow as a processor, mode classification and writes, the flip, the lag switch, other mods' writes, presets and slots, `smoothwalker.ini`, keys, banners, the debug overlay |
-| Shared, header-only, no state | `common/math.hpp`, `camera/wall.hpp`, `common/live_ref.hpp` | Math, the wall clamp, `LiveRef` |
+| Shared, header-only | `common/math.hpp`, `camera/wall.hpp`, `common/live_ref.hpp`, `common/active_slot.hpp`, `common/log.hpp` | Math, the wall clamp, `LiveRef`, `ActiveSlot` (a pointer other threads call through and the count of calls in flight through it) with `wait_for_zero`, the verbose flag `dw::g_verbose` (the one static of the shared files, written at every construction) |
 
 Core files include no Smoothwalker header; Smoothwalker's include only `camera/api.hpp` (and through it
 `camera/frame.hpp`) and the shared headers. The two sides are separate translation units, so the compiler holds the line.
@@ -198,7 +198,7 @@ Namespaces follow the folders under the root `dw`: `common/` is `dw` itself, `ca
 
 **The interface** (`camera/api.hpp`, namespace `dw::camera`). Plain C++ inside the one DLL. `CameraCore` is an
 abstract class the core implements once, as `CoreApi` in `camera/pipeline.hpp`: no state of its own, its methods
-work on the core's globals. `Core::api()` hands it out and `mod.cpp` passes the reference to `Smoothwalker`. The
+work on the Core's own `Pipeline` and `Authority`. `Core::api()` hands it out and `mod.cpp` passes the reference to `Smoothwalker`. The
 other way, `Processor` and `Listener` are abstract classes a registrant implements and registers by reference:
 `FollowProcessor` derives from `Processor`, and `Smoothwalker::Impl` implements `Listener` through a nested member
 (`Hooks`), so `Impl` itself stays non-virtual. All three have protected, non-virtual destructors, because nothing is
@@ -231,16 +231,17 @@ above, bodies moved unchanged; the equivalence harness stayed identical to the b
 
 Smoothwalker makes no cut request of its own: every cut (world, player, pawn, API) comes from the core.
 
-**A wait that times out.** `Smoothwalker::shutdown` runs both waits (the second is not skipped by the first
-failing). If either returns false, a camera call is still running inside the follow or the listener, which live in
-`Smoothwalker::Impl` (`FollowProcessor` is a member), so `~Smoothwalker` releases the `Impl` instead of
-destroying it: it is leaked, and one Warning line says so. The core cleared both slots before it started waiting,
-so no new call can reach it, and no global holds a pointer to it, so the next instance after a Ctrl+R never
-reuses or frees it. `reset_globals` still resets every global to its static-init value except
-`g_in_processor` and `g_in_listener`, which the stuck call still holds; a later unload therefore waits on that
-count too and leaks its own `Impl` the same way while the call is stuck. The unhook wait for `g_in_hook` (~5.05 s)
-does not gate the release: a hook call that is not counted in the processor never touches the `Impl`, and one that
-is, is covered by the processor wait.
+**A wait that times out.** The unload has three drains, each up to 5 s: the Lua functions' `ActiveSlot<Authority>`
+(`stop_lua`), the hook's `ActiveSlot<Pipeline>` (`unhook`), and Smoothwalker's two waits (`Smoothwalker::shutdown`
+runs both, the second is not skipped by the first failing). All of them always run. If any returns false, a call is
+still running inside a component, and each reaches the other (the core calls the follow and the listener,
+Smoothwalker holds the core's interface), so `~DWSmoothwalker` (`mod.cpp`) releases both `unique_ptr`s instead of
+destroying either: both are leaked, and one Warning names every drain that timed out, `unload: still running after
+5 s: <list>; both components left allocated`. The core cleared its slots before it started waiting, so no new call
+can reach either, and no static points at them, so the next instance after a Ctrl+R builds its own and never
+reuses or frees them. The counts of the two slots are image-level, so a hook or Lua call that is still stuck keeps
+their count raised and a later unload times out on it and leaks its own components the same way; the processor and
+listener counts belong to the leaked Pipeline and do not carry over.
 
 **Processor contract** (`camera/frame.hpp`). Once per update that reaches the pipeline, on the hook thread, the core
 hands a `FrameIn` (the processor's switch as sampled for this update, restart, dt, pivot, half height, the
@@ -262,7 +263,7 @@ switch and toggle generation first. `Processor::state` answers both: two relaxed
 no lock, no allocation. The hook samples the slot and calls it once per player-camera update, right after the
 self check, and uses that one sample for the whole update (before the split the toggle generation was read twice,
 at the check and again in `update_view`). No processor reads as off with toggle generation 0: the core alone takes
-this path unless a layer is set. A caller counts itself in (`g_in_processor`, sequentially consistent) before it
+this path unless a layer is set. A caller counts itself in (`Pipeline::m_in_processor`, sequentially consistent) before it
 loads the slot, so `unregister_processor` (clear, then wait for 0) never returns while the hook or Lua's
 `enabled()` is inside the old processor.
 
@@ -763,10 +764,14 @@ level loads. 0.8.0 covers every profile:
 ## Unload and hot reload
 
 Since 0.7.4. `UnregisterCallback` waits for running callbacks (`RemoveCallback` ->
-`WaitForExecutorsToFinish`). Order at unload: unregister callbacks, restore the vtable and wait, then
-`restore()`. A `GetCameraView` call inside the hook could otherwise return into the freed DLL, so the hook
-keeps an in-hook counter; unload restores the vtable, sleeps 50 ms, then waits for the counter to reach zero,
-up to 5 s, and logs if a call is still in the hook. After a mid-game hot reload one controller lookup is
+`WaitForExecutorsToFinish`). Order at unload (`~DWSmoothwalker`, `mod.cpp`): `stop_lua`, Smoothwalker's
+`unregister_callbacks`, the core's `unregister_callbacks`, `unhook`, Smoothwalker's `shutdown` (modes restored,
+processor and listener unregistered). A `GetCameraView` call inside the hook could otherwise return into the freed
+DLL, so the hook reaches the Pipeline through `ActiveSlot<Pipeline> g_pipeline` (`camera/hook.cpp`), which counts
+the calls in flight: `unhook` nulls the player camera, restores the vtable slot if it still holds this mod's hook,
+sleeps 50 ms, then clears the slot and waits for the count to reach zero, up to 5 s. The Lua functions count the
+same way through `ActiveSlot<Authority> lua::g_api`, drained in `stop_lua`. A drain that times out leaks both
+components and logs one Warning ("A wait that times out"). After a mid-game hot reload one controller lookup is
 requested at init.
 
 ### The DLL is pinned
@@ -792,20 +797,25 @@ loads it (the loader hands back the pinned module). The constructor logs a "rest
 loaded" line from the second start on.
 
 **Globals.** `DllMain` and static initializers do not run again, so every namespace-scope, class-static and
-function-local static keeps the previous instance's value. The mod's destructor ends with `Core::reset_globals`
-(`camera/core.cpp`, which calls `dw::camera::lua::reset_state` in `camera/lua_api.hpp`): every variable holding per-instance state
-goes back to exactly its static-init value, atomics by store, the rest under the lock that guards them. It
-runs after the slot is restored and the in-hook wait, and `g_player_camera` is nulled before the restore, so
-a hook that is still reached returns after the original and touches none of it. Just before it,
-`Smoothwalker::shutdown` (`smoothwalker/smoothwalker.cpp`) restores the modes, leaves the core's processor and listener
-slots and resets `dw::smoothwalker::settings::g_log_verbose`, the one namespace-scope global of that side: the rest of Smoothwalker's
-state (the follow's settings, switch, flags and counters in `FollowProcessor`) lives in its component and is built
-anew with it. Added with the split and reset there: `g_player_controller`, `g_player_known`, `g_hook_timing`, the
-core's `g_log_verbose`, `g_processor`, `g_listener`. Kept on purpose: constants, the locks, the QPC frequency,
-`g_in_hook`, `g_in_processor` and `g_in_listener` (they balance themselves, and a call through a hook left in the
-chain may be in flight), `g_starts` (counts starts in the process, for the restart line), and `g_original`,
-`g_vtable_entry` and `g_hook_left`, below. **Any new static that holds state goes into `Core::reset_globals`,
-`Smoothwalker::shutdown` or `reset_state`.**
+function-local static keeps the previous instance's value. The rule: no static holds per-instance state. The mod
+object owns the `Core` and the `Smoothwalker`, and the `Core` owns the `Pipeline`, the `Authority` and the `CoreApi`;
+Ctrl+R destroys the mod object and builds a new one, so every member starts from its in-class initializer and
+nothing is reset by hand. A new per-instance field goes into the `Pipeline`, the `Authority` or the `Core` (or into
+`Smoothwalker::Impl`), never into a static. The statics that remain are the list in the header comment of
+`camera/hook.cpp`, each kept on purpose:
+
+- `g_original`, `g_vtable_entry`, `g_hook_left`: the pinned image's relation to the vtable, read by `hook_slot` on the
+  reused image (below). `g_starts`: constructions in the process, for the restart line.
+- `g_pipeline` (`ActiveSlot<Pipeline>`, `camera/hook.cpp`) and `lua::g_api` (`ActiveSlot<Authority>`,
+  `camera/lua_api.hpp`): the slots the hook and the Lua closures reach the live instance through. Empty between
+  instances; their in-flight counts balance themselves, and a call through a hook left in the chain, or a function
+  value kept past the unload, may be in flight.
+- `dw::g_verbose` (`common/log.hpp`), written by Smoothwalker's settings at every construction, before the first
+  verbose line, so each instance starts from its own ini; the QPC frequency (constant per boot); constant tables.
+
+`Core::unhook` nulls the player camera before the slot is restored, so a hook that is still reached returns after the
+original and touches nothing; `Smoothwalker::shutdown` restores the modes and leaves the core's processor and
+listener slots.
 
 **Slot 214 on a reused image.** If the last unload found the slot not holding our hook, or could not unprotect
 it, it leaves the slot alone (`g_hook_left`). `install_hook` then reads the slot:
@@ -978,7 +988,7 @@ became the captured values and the log stayed silent (see "Limits"). A later cha
 The final `FMinimalViewInfo` once per frame, the smoothed pivot, the aiming flag, and a proven
 game-thread-to-worker handoff (`Tuning` under an SRW lock, the atomics). It is the one mod at the point
 where the view is produced. A per-frame FOV or roll change that composes with the game's own view is not
-reachable from Lua (dawnwalker-toolkit `docs/mods.md`, "Driving the camera from a mod", 2026-09-22:
+reachable from Lua (dawnwalker-toolkit `docs/camera.md`, "Driving the camera from a mod", 2026-09-22:
 `DefaultFieldOfView` needs a two-callback type flip and `CapturedCameraComponent.FieldOfView` is dead), so anything
 continuous other mods want on the gameplay camera comes through this hook. Lua does have one absolute FOV:
 `PlayerController:FOV` (`LockedFOV`) replaces every FOV, the game's sprint and parry kicks included, on any view
@@ -1074,7 +1084,10 @@ the owner opts in, as SmoothCam pauses its interpolators unless asked.
 
 `src/camera/lua_api.hpp`. `on_lua_start` puts a global `Smoothwalker` table into each Lua mod's state; `on_lua_stop` and
 the destructor replace every function in it with a pure-Lua stub answering `nil, "unloaded"` and set
-`api_version` to 0, so a `local SW = Smoothwalker` held by a consumer never points into an unloaded DLL.
+`api_version` to 0, so a `local SW = Smoothwalker` held by a consumer never points into an unloaded DLL. A function
+value captured before the unload (`local claim = Smoothwalker.claim`) answers the same: the functions reach the
+Authority through `ActiveSlot<Authority> lua::g_api`, and with it empty they return `nil, "unloaded"` (unreachable
+under UE4SS's order, which uninstalls Lua mods before it destroys C++ mods).
 Consumers are keyed by their main `lua_State*` (from `LUA_RIDX_MAINTHREAD`), never by a string they pass.
 
 | Call | Returns |
@@ -1432,17 +1445,17 @@ line says what stopped in its own words ("mod inactive", "smoothing inactive").
   pending settings applied, and a camera value another mod wrote taken as a mode's base. The `log_stats`
   report is Normal too, but opt-in.
 - **Warning**: something is off or falls back, the mod still runs. A missing property with a fallback, a
-  failed write, a skipped preset, banners or the overlay off, and at unload `a camera call did not finish, the
-  component was left allocated` (a core call stalled past the 5 s waits; the follow is left allocated on purpose).
+  failed write, a skipped preset, banners or the overlay off, and at unload `unload: still running after 5 s: <list>;
+  both components left allocated` (a Lua, hook or follow call stalled past the 5 s waits; the list names each).
 - **Error**: the mod or the follow cannot work. Camera class defaults missing, slot 214 not overridden, a
   failed `VirtualProtect`, `RelativeLocation` or the `ComponentToWorld` translation not found, the UE4SS
   `EngineTick` hook off.
 - **Verbose**, only with `log_verbose = 1` (ini only): player discovery, the controller found, not found yet
   and gone lines, `following`, the translation offset, `Mod Menu open`, the presets-folder lines, the camera
   mode layout, `Base_LongRange`, `camera position applied` with its duration, a mode loaded late, the debug
-  overlay shown, and combat and traversal camera on and off. The flag is `dw::smoothwalker::settings::g_log_verbose`
-  (`smoothwalker/settings/settings.hpp`), published with the other settings and pushed to the core's own copy (`CameraCore::set_diagnostics`),
-  which gates the core's discovery, offset and hook lines. At startup it is read from `smoothwalker.ini` before
+  overlay shown, and combat and traversal camera on and off. The flag is `dw::g_verbose`
+  (`common/log.hpp`), one atomic for both components, written by Smoothwalker's settings at every construction and publish
+  (and by `CameraCore::set_diagnostics`, `DIAG_VERBOSE`, from the same publish); it gates the core's discovery, offset and hook lines too. At startup it is read from `smoothwalker.ini` before
   `load_presets_locked()`, which runs ahead of the full settings load and logs presets-folder lines.
 
 The diagnostic switches are `log_stats` (Mod Menu page: per-frame hook cost, mean lag and wall clamp share
