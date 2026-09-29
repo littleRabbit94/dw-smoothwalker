@@ -1,4 +1,4 @@
-// DWCameraCore's side of DWSmoothwalker's DLL (docs/design.md, "Core and processors"): installs the GetCameraView
+// The camera core's side of the DLL (docs/design.md, "Core and processors"): installs the GetCameraView
 // hook on vtable slot 214 (core/pipeline.hpp), finds the player, its pawn and its camera, injects the Lua API
 // (core/lua_api.hpp) and hands out the C table (core/api.hpp). Includes no Smoothwalker header.
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.

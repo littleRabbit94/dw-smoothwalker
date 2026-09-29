@@ -2,7 +2,7 @@
 // owns the hook, the player, cuts, the crossfade, layers and the API; a processor (Smoothwalker's follow,
 // sw/processor.hpp) gets the game's view of the player's camera and hands back where to put it. Numbers only, no
 // Unreal or UE4SS types: a processor runs on the task-graph workers that call GetCameraView and never calls into
-// UObjects. Standard layout with a size at the head, so the C table between two DLLs (core/api.hpp) carries it.
+// UObjects. Standard layout with a size at the head, so the C table (core/api.hpp) carries it.
 #pragma once
 
 #include "../smoothing.hpp"

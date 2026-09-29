@@ -1,7 +1,7 @@
 // The camera core as a component of the one UE4SS mod (dllmain.cpp): the slot 214 hook and its pin, player and
 // camera discovery, the Lua injection, and the C table the Smoothwalker side uses (core/api.hpp, dwcc_get_api).
-// It registers its own UE4SS callbacks, as it will as its own DLL (docs/design.md, "Plan: DWCameraCore as its own
-// mod"). Everything else of it is in core.cpp and core/pipeline.hpp.
+// It registers its own UE4SS callbacks, apart from Smoothwalker's (docs/design.md, "Core and processors").
+// Everything else of it is in core.cpp and core/pipeline.hpp.
 #pragma once
 
 #include "api.hpp"

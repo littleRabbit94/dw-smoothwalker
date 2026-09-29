@@ -1,7 +1,7 @@
 // Smoothwalker as a component of the one UE4SS mod (dllmain.cpp): the follow (a processor of the camera core),
 // camera position in the game's modes, presets and slots, smoothwalker.ini, keys, banners and the debug overlay. It
-// reaches the core only through the C table (core/api.hpp) and registers its own UE4SS callbacks, as it will as its
-// own DLL (docs/design.md, "Plan: DWCameraCore as its own mod"). Everything else of it is in smoothwalker.cpp.
+// reaches the core only through the C table (core/api.hpp) and registers its own UE4SS callbacks, apart from the
+// core's (docs/design.md, "Core and processors"). Everything else of it is in smoothwalker.cpp.
 #pragma once
 
 #include "../core/api.hpp"

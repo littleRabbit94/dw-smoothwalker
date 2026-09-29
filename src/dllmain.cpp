@@ -1,7 +1,7 @@
 // DWSmoothwalker: lags the character pivot the game's camera view is built around (GetCameraView, vtable
 // slot 214). Design and measurements: docs/design.md.
 //
-// One UE4SS mod made of two components that will be two DLLs (docs/design.md, "Plan: DWCameraCore as its own mod"):
+// One UE4SS mod, one DLL, made of two components (docs/design.md, "Core and processors"):
 // the camera core (core/core.hpp: the hook, the player, cuts, the crossfade, layers, the Lua API) and Smoothwalker
 // (sw/smoothwalker.hpp: the follow, camera position, presets, settings, keys, banners, the overlay), which reaches
 // the core only through its C table (core/api.hpp). This file is the glue: it owns both, forwards UE4SS's calls,
