@@ -179,11 +179,11 @@ fade they started held part of the old lag for the transition time.
 
 ### Core and processors
 
-A camera core that other camera mods can depend on without taking the follow (a photo mode needs `claim` /
-`release`, not smoothing). Stage 2 of the plan below: the boundary between DWCameraCore and DWSmoothwalker is drawn
-inside the one DLL. Two components under one `CppUserModBase` (`dllmain.cpp`, which owns both, forwards UE4SS's
-calls and orders the unload), each registering its own UE4SS callbacks; Smoothwalker reaches the core only through
-a C table. Stage 3 makes them two DLLs.
+A camera core that a camera mod can use without the follow (a photo mode needs `claim` / `release`, not smoothing),
+kept apart from Smoothwalker inside the one DLL (stage 2, 2026-09-28). The mod is one DLL: two components under one
+`CppUserModBase` (`dllmain.cpp`, which owns both, forwards UE4SS's calls and orders the unload), each registering its
+own UE4SS callbacks; Smoothwalker reaches the core only through a C table. The boundary is internal structure, not a
+packaging line: shipping the core as a second DLL is deferred indefinitely ("Deferred").
 
 | Side | Files | Owns |
 |---|---|---|
@@ -196,8 +196,8 @@ Core files include no Smoothwalker header; Smoothwalker's include only `core/api
 
 **The table** (`core/api.hpp`). `dwcc_get_api(uint32_t version)` returns a `dwcam::Api`: `size` and `version`
 (`API_VERSION` 1) at its head, then plain C function pointers; the table only ever grows at the end. Across it:
-pointers, fixed-width numbers and standard-layout structs, no C++ references, std types or exceptions. The same
-function is exported as it is in stage 3; today it is an ordinary `extern "C"` function.
+pointers, fixed-width numbers and standard-layout structs, no C++ references, std types or exceptions.
+`dwcc_get_api` is an ordinary `extern "C"` function inside the DLL, not a DLL export.
 
 | Entry | Thread | What |
 |---|---|---|
@@ -253,8 +253,8 @@ loads the slot, so `unregister_processor` (clear, then wait for 0) never returns
 
 **Game-thread order.** Smoothwalker's per-tick work (banners, `apply_position`, the overlay) ran in the middle of the
 engine tick, after the controller check and before the pawn check, and a world change or a new pawn reset its tuner
-at the same moment. Two engine-tick callbacks in two DLLs would run in load order, so a new camera would reach
-`apply_position` a tick early or a world change a tick late. So the core calls a `Listener` at those exact points:
+at the same moment. Separate engine-tick callbacks for the two components would run in registration order, so a new
+camera would reach `apply_position` a tick early or a world change a tick late. So the core calls a `Listener` at those exact points:
 `world_changed` (inside `forget_world`, LoadMap and the tick's world check), `tick` (after `discover_controller`),
 `camera_changed` (after a new camera is published). Smoothwalker registers its own `StaticConstructObject` callback
 for camera modes pushed on the player camera; the core's own one only hands over the controller.
@@ -294,85 +294,6 @@ and 860 to 935 injected faults. Three planted changes, applied to a copy by `run
 crossfade eased linearly (core, first difference at frame 35 to 1,018), the follow's wall-clamp hold at 0.35 s
 (frame 15,402 to 113,952), mode writes not folded into the processor's generation (frame 114 to 1,341). Built with
 MSVC: the 4 known C4996 warnings, no others. Not yet played.
-
-### Plan: DWCameraCore as its own mod (chosen 2026-09-28, deferred the same day)
-
-**Deferred after stage 2.** The free camera was the reason for a second mod, and it turned out not to need one:
-slot 214 is never called while the photo camera holds the view, and FOV and roll reach the photo camera from Lua
-(`PlayerController:FOV`, control rotation), measured 2026-09-28 ("After the hook: camera modifiers and
-`LockedFOV`"). So stage 2 stays as Smoothwalker's internal structure and Smoothwalker ships as one mod. Stages 3 and
-4 wait for a mod that needs continuous per-frame control of the gameplay camera and should ship without
-Smoothwalker; until then such a mod uses Smoothwalker's layers (they apply with smoothing off too). Before stage 3:
-`api_camera_owner` builds a `std::string` and locks a mutex, so an exception could cross the table; make the table
-functions `noexcept` and catch inside.
-
-**Why a second mod.** The two fights this API was built for are handled inside one DLL: a free camera against the
-follow (`claim` / `release`, api_version 4) and the mode writes against other camera mods ("Writes from other
-mods"). One DLL cannot give a free camera or a path recorder per-frame control (a FOV ramp needs slot 214)
-without Smoothwalker installed, nor one owner for slot 214 instead of two DLLs chaining on it. Weighed: one DLL
-with the recorder on `claim{ keep_layers = true }` and a FOV layer; a FOV-only hook in DWFreeCam; two DLLs; four
-mods (core, presets, follow, free camera). Chosen: two DLLs. Smoothwalker keeps presets, mode writes and the
-follow, so an existing player adds one requirement and keeps `smoothwalker.ini` and the Mod Menu page as they are.
-
-| DWCameraCore | DWSmoothwalker |
-|---|---|
-| Slot 214 hook and its pin, player and camera discovery, the view update count and world seconds | The follow, a processor of the core |
-| Cuts (gap, teleport, player swap, API cut), the crossfade, layers | `mode_tuning.hpp`: mode classification (aiming, combat, traversal), the writes, the flip, the lag switch, other mods' writes |
-| `claim` / `release` / `owner`, `view()` / `live()`, the Lua injection, the processor list | Presets and slots, `smoothwalker.ini`, the Mod Menu page, keys, banners, the debug overlay |
-
-Alone, the core is the game: the hook takes today's "off and settled" path (no processor, no layer), writes
-nothing, and nothing writes a camera mode.
-
-**The contract after stage 1.**
-
-- `FrameIn` loses `aiming`, `combat`, `traversal` and `mode_write`: the tuner that produces them and the follow
-  that reads them are both Smoothwalker's, so they stay inside it.
-- The processor owns what used to be the core's switches: it reports its own on/off and a toggle generation in
-  `FrameOut` beside `generation`, and the transition time (`position_transition`). The core crossfades on any of
-  its generations. Alone, the core never writes, so a release has nothing to glide.
-- `reset_distance` and `reset_gap` stay in `smoothwalker.ini`; Smoothwalker pushes them to the core when it
-  registers and on every publish. The core ships today's defaults.
-- The core hands Smoothwalker, read-only: the player camera (game thread), `g_view_updates` and
-  `g_view_seconds`, which the flip's stages and its blend-time restore run on.
-
-**Two DLLs.**
-
-- The core exports one C function, `dwcc_get_api(uint32_t version)`, returning a table of function pointers with
-  a size and version at its head. `FrameIn` / `FrameOut` get a size field; processor calls take pointers, not
-  C++ references.
-- Every UE4SS C++ mod is `dlls/main.dll`, so Smoothwalker finds the core by walking loaded modules for that
-  export. Start order between the two is not guaranteed: Smoothwalker retries on `on_unreal_init` and each
-  `on_update`; with no core once a world has loaded, it logs once and shows a banner naming the requirement.
-- Both DLLs pin themselves ("The DLL is pinned"), so a processor pointer the core holds never points at unmapped
-  code. Smoothwalker unregisters in its destructor; Ctrl+R restarts both, in either order.
-- Lua: the core injects `CameraCore`. While Smoothwalker is loaded it keeps a `Smoothwalker` table at
-  api_version 4 that forwards to the core, for at least one release, so DWFreeCam 1.5 and `example-consumer`
-  keep working.
-
-**Stages.**
-
-1. Done: the follow behind `core/frame.hpp`.
-2. Done 2026-09-28: the boundary inside one DLL ("Core and processors"): the core behind `dwcc_get_api`'s table,
-   Smoothwalker a component that calls nothing else. Checked with the rebuilt harness (`tests/equivalence/`, 8 x
-   300,000 frames identical, three planted changes caught), an adversarial review (14 checks, none failed) and an
-   MSVC build, then played through the in-game list, three DWFreeCam claim / glide cycles included.
-3. Two DLLs from this repo: a second CMake target, the export, discovery, pinning. Check: core alone equals the
-   game (hook output bytes equal the game's view, mode values read back shipped through the bridge); core plus
-   Smoothwalker on the in-game list; Ctrl+R; both start orders; Smoothwalker without the core shows the banner.
-4. Release: `dw-cameracore` split out of this repo with its history; DWFreeCam moves to `CameraCore` (the claim
-   no longer needs Smoothwalker); both pages, Smoothwalker's listing the requirement; licensing and history
-   checks before the new repo goes public.
-
-**Decided 2026-09-28.** Nexus name "Dawnwalker Camera Core" (folder `DWCameraCore`, repo `dw-cameracore`, Lua
-`CameraCore`). `CameraCore.api_version` starts at 1; the forwarding `Smoothwalker` table stays at 4. The core
-gets `config/cameracore.ini` with diagnostics only and no Mod Menu page: `log_verbose` (discovery, offsets,
-hook install), `log_stats` (hook cost and calls per second, its half of today's line) and `log_api` (every
-register, claim, release, layer and lease expiry with the consumer's name, for mod authors). Cut thresholds stay
-in `smoothwalker.ini`. Nothing is pushed until stage 4 is done.
-
-**Both open checks answered 2026-09-28.** "Writes from other mods" ran against Farther and Centered Camera (236)
-and held. Slot 214 is not on the render path in photo mode ("After the hook: camera modifiers and `LockedFOV`"), so
-the recorder's FOV goes through `PlayerController:FOV`, not the hook.
 
 ## Camera modes and position tuning
 
@@ -1530,6 +1451,91 @@ every 5 s), `log_verbose` (ini only) and `debug_overlay` with `debug_key` (see "
 - **The debug overlay** freezes across a hot reload, shows through photo mode and a hidden HUD, and lines up
   only roughly in Roboto; see "Debug overlay".
 
+## Deferred
+
+The split into two DLLs (DWCameraCore and DWSmoothwalker, stages 3 and 4 below) is deferred indefinitely. The mod
+ships as one DLL with the core / Smoothwalker boundary as its internal structure ("Core and processors"); revisit only
+if a gameplay-camera mod should ship without Smoothwalker.
+
+### DWCameraCore as its own mod (chosen 2026-09-28, deferred the same day)
+
+**Deferred after stage 2.** The free camera was the reason for a second mod, and it turned out not to need one:
+slot 214 is never called while the photo camera holds the view, and FOV and roll reach the photo camera from Lua
+(`PlayerController:FOV`, control rotation), measured 2026-09-28 ("After the hook: camera modifiers and
+`LockedFOV`"). So stage 2 stays as Smoothwalker's internal structure and Smoothwalker ships as one mod. Stages 3 and
+4 wait for a mod that needs continuous per-frame control of the gameplay camera and should ship without
+Smoothwalker; until then such a mod uses Smoothwalker's layers (they apply with smoothing off too). Before stage 3:
+`api_camera_owner` builds a `std::string` and locks a mutex, so an exception could cross the table; make the table
+functions `noexcept` and catch inside.
+
+**Why a second mod.** The two fights this API was built for are handled inside one DLL: a free camera against the
+follow (`claim` / `release`, api_version 4) and the mode writes against other camera mods ("Writes from other
+mods"). One DLL cannot give a free camera or a path recorder per-frame control (a FOV ramp needs slot 214)
+without Smoothwalker installed, nor one owner for slot 214 instead of two DLLs chaining on it. Weighed: one DLL
+with the recorder on `claim{ keep_layers = true }` and a FOV layer; a FOV-only hook in DWFreeCam; two DLLs; four
+mods (core, presets, follow, free camera). Chosen: two DLLs. Smoothwalker keeps presets, mode writes and the
+follow, so an existing player adds one requirement and keeps `smoothwalker.ini` and the Mod Menu page as they are.
+
+| DWCameraCore | DWSmoothwalker |
+|---|---|
+| Slot 214 hook and its pin, player and camera discovery, the view update count and world seconds | The follow, a processor of the core |
+| Cuts (gap, teleport, player swap, API cut), the crossfade, layers | `mode_tuning.hpp`: mode classification (aiming, combat, traversal), the writes, the flip, the lag switch, other mods' writes |
+| `claim` / `release` / `owner`, `view()` / `live()`, the Lua injection, the processor list | Presets and slots, `smoothwalker.ini`, the Mod Menu page, keys, banners, the debug overlay |
+
+Alone, the core is the game: the hook takes today's "off and settled" path (no processor, no layer), writes
+nothing, and nothing writes a camera mode.
+
+**The contract after stage 1.**
+
+- `FrameIn` loses `aiming`, `combat`, `traversal` and `mode_write`: the tuner that produces them and the follow
+  that reads them are both Smoothwalker's, so they stay inside it.
+- The processor owns what used to be the core's switches: it reports its own on/off and a toggle generation in
+  `FrameOut` beside `generation`, and the transition time (`position_transition`). The core crossfades on any of
+  its generations. Alone, the core never writes, so a release has nothing to glide.
+- `reset_distance` and `reset_gap` stay in `smoothwalker.ini`; Smoothwalker pushes them to the core when it
+  registers and on every publish. The core ships today's defaults.
+- The core hands Smoothwalker, read-only: the player camera (game thread), `g_view_updates` and
+  `g_view_seconds`, which the flip's stages and its blend-time restore run on.
+
+**Two DLLs.**
+
+- The core exports one C function, `dwcc_get_api(uint32_t version)`, returning a table of function pointers with
+  a size and version at its head. `FrameIn` / `FrameOut` get a size field; processor calls take pointers, not
+  C++ references.
+- Every UE4SS C++ mod is `dlls/main.dll`, so Smoothwalker finds the core by walking loaded modules for that
+  export. Start order between the two is not guaranteed: Smoothwalker retries on `on_unreal_init` and each
+  `on_update`; with no core once a world has loaded, it logs once and shows a banner naming the requirement.
+- Both DLLs pin themselves ("The DLL is pinned"), so a processor pointer the core holds never points at unmapped
+  code. Smoothwalker unregisters in its destructor; Ctrl+R restarts both, in either order.
+- Lua: the core injects `CameraCore`. While Smoothwalker is loaded it keeps a `Smoothwalker` table at
+  api_version 4 that forwards to the core, for at least one release, so DWFreeCam 1.5 and `example-consumer`
+  keep working.
+
+**Stages.**
+
+1. Done: the follow behind `core/frame.hpp`.
+2. Done 2026-09-28: the boundary inside one DLL ("Core and processors"): the core behind `dwcc_get_api`'s table,
+   Smoothwalker a component that calls nothing else. Checked with the rebuilt harness (`tests/equivalence/`, 8 x
+   300,000 frames identical, three planted changes caught), an adversarial review (14 checks, none failed) and an
+   MSVC build, then played through the in-game list, three DWFreeCam claim / glide cycles included.
+3. Two DLLs from this repo: a second CMake target, the export, discovery, pinning. Check: core alone equals the
+   game (hook output bytes equal the game's view, mode values read back shipped through the bridge); core plus
+   Smoothwalker on the in-game list; Ctrl+R; both start orders; Smoothwalker without the core shows the banner.
+4. Release: `dw-cameracore` split out of this repo with its history; DWFreeCam moves to `CameraCore` (the claim
+   no longer needs Smoothwalker); both pages, Smoothwalker's listing the requirement; licensing and history
+   checks before the new repo goes public.
+
+**Decided 2026-09-28.** Nexus name "Dawnwalker Camera Core" (folder `DWCameraCore`, repo `dw-cameracore`, Lua
+`CameraCore`). `CameraCore.api_version` starts at 1; the forwarding `Smoothwalker` table stays at 4. The core
+gets `config/cameracore.ini` with diagnostics only and no Mod Menu page: `log_verbose` (discovery, offsets,
+hook install), `log_stats` (hook cost and calls per second, its half of today's line) and `log_api` (every
+register, claim, release, layer and lease expiry with the consumer's name, for mod authors). Cut thresholds stay
+in `smoothwalker.ini`. Nothing is pushed until stage 4 is done.
+
+**Both open checks answered 2026-09-28.** "Writes from other mods" ran against Farther and Centered Camera (236)
+and held. Slot 214 is not on the render path in photo mode ("After the hook: camera modifiers and `LockedFOV`"), so
+the recorder's FOV goes through `PlayerController:FOV`, not the hook.
+
 ## Version history
 
 ### 0.4.0: C++ follow camera on GetCameraView
@@ -1672,8 +1678,8 @@ written to the native value (the lag switch), so they were copied all along.
 Stage 1 of splitting Smoothwalker into a camera core and the follow as one optional processor. No behaviour
 change: the follow moved out of `update_view` into `follow/follow.hpp` behind `core/frame.hpp`, its settings
 into their own struct and generation, and the wall helpers into `core/wall.hpp`. See "Core and processors" for
-the seam and how it was checked. The split into its own mod, DWCameraCore, was planned and then deferred ("Plan:
-DWCameraCore as its own mod"); Smoothwalker stays one mod.
+the seam and how it was checked. Shipping the core as its own mod, DWCameraCore, was planned and then deferred
+indefinitely ("Deferred"); the mod stays one DLL.
 
 Stage 2, the same day, again with no behaviour change: the boundary drawn inside the one DLL. The core
 (`src/core/`) and Smoothwalker (`src/sw/`) are separate translation units and components, each with its own UE4SS

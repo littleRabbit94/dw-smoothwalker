@@ -43,8 +43,8 @@ will not open while a `ConfigKey` is missing from it.
 | Path | Contents |
 |---|---|
 | `CMakeLists.txt` | Superbuild: RE-UE4SS from `DW_RE_UE4SS_SOURCE_DIR`, then the `DWSmoothwalker` target |
-| `src/` | The DLL source, two components that will be two DLLs (docs/design.md, "Core and processors"): `dllmain.cpp` (the one mod class, owning both) |
-| `src/core/` | The camera core: `core.cpp` (hook install, player discovery, Lua injection), `pipeline.hpp` (the hook: cuts, crossfade, layers, the write), `api.hpp` (the C table Smoothwalker uses), `frame.hpp` (the contract with a view processor), `lua_api.hpp` (the Lua API), `wall.hpp` |
+| `src/` | The DLL source: one mod, one DLL, made of two components, the camera core and Smoothwalker (docs/design.md, "Core and processors"): `dllmain.cpp` (the one mod class, owning both) |
+| `src/core/` | The camera core: `core.cpp` (hook install, player discovery, Lua injection), `pipeline.hpp` (the hook: cuts, crossfade, layers, the write), `api.hpp` (the C table Smoothwalker uses, internal to the DLL), `frame.hpp` (the contract with a view processor), `lua_api.hpp` (the Lua API), `wall.hpp` |
 | `src/sw/` | Smoothwalker: `smoothwalker.cpp` (settings, presets, keys, banners, the overlay's data), `processor.hpp` (the follow as the core's processor), `follow/follow.hpp` (the follow), `config.hpp` (settings and presets), `mode_tuning.hpp` (camera position in the game's modes, aiming, combat and traversal state), `debug_overlay.hpp` |
 | `src/smoothing.hpp`, `src/live_ref.hpp` | Shared by both sides: math, `LiveRef` |
 | `tests/equivalence/` | Never shipped: checks the hook against an earlier commit byte for byte (`run.sh`, README) |
