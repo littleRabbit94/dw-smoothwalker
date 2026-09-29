@@ -9,7 +9,7 @@
 
 #include <cstdint>
 
-namespace dwcam
+namespace dw::camera
 {
     // Filled by the core for one player-camera update. Whatever else a processor reads (its own settings, mode
     // writes, the aiming / combat / traversal flags) is its own.
@@ -19,18 +19,18 @@ namespace dwcam
         bool enabled;        // the processor's own switch as the core sampled it for this update (Processor::state)
         bool restart;        // a hard cut or the first frame after one: start again from the capsule, show the game's view
         double dt;           // s, world delta, clamped to 0..0.1
-        dwsc::Vec3 pivot;    // capsule centre, world space
+        dw::Vec3 pivot;      // capsule centre, world space
         double half_height;  // capsule half height; NAN when unknown or implausible
-        dwsc::Vec3 camera;   // the game's camera location this frame
-        dwsc::Quat rotation; // the game's camera rotation this frame
+        dw::Vec3 camera;     // the game's camera location this frame
+        dw::Quat rotation; // the game's camera rotation this frame
     };
 
     // Filled by the processor. The core value-initializes it before the call, so `size` is set.
     struct FrameOut
     {
         uint32_t size = sizeof(FrameOut);
-        dwsc::Vec3 location;  // where the camera goes; the game's camera unless the processor moved it
-        dwsc::Quat rotation;  // its rotation; the game's unless `rotated`
+        dw::Vec3 location;    // where the camera goes; the game's camera unless the processor moved it
+        dw::Quat rotation;    // its rotation; the game's unless `rotated`
         bool rotated = false; // rotation differs from the game's and is written to the view
 
         // Bumped whenever something the processor shows changes without a cut (a setting, a camera-mode write): the
@@ -46,6 +46,6 @@ namespace dwcam
         // The debug overlay's feed, valid only while `feed`; the core keeps it and hands it back (Api::read_debug).
         bool feed = false;
         double keep_follow = 0.0, keep_turn = 0.0, rate_h = 0.0;
-        int32_t influence = 0; // dwsc::Influence
+        int32_t influence = 0; // dw::Influence
     };
-} // namespace dwcam
+} // namespace dw::camera

@@ -29,12 +29,12 @@
 using namespace RC;
 using namespace RC::Unreal;
 
-extern "C" const dwcam::Api* dwcc_get_api(uint32_t version)
+extern "C" const dw::camera::Api* dwcc_get_api(uint32_t version)
 {
-    return dwcam::get_api(version);
+    return dw::camera::get_api(version);
 }
 
-namespace dwcam
+namespace dw::camera
 {
 namespace
 {
@@ -69,7 +69,7 @@ struct Core::Impl
     FName m_player_controller_name{};
     // Game thread only, each checked against the object array every engine tick before use. m_controller is
     // mirrored in g_player_controller and g_player_known for the table (hold_controller).
-    dwsc::LiveRef m_controller, m_pawn, m_camera, m_root;
+    dw::LiveRef m_controller, m_pawn, m_camera, m_root;
     int32_t m_pawn_offset = -1; // AController::Pawn, same class every map
     bool m_offset_retry = false; // find_translation_offset failed for m_pawn; game thread only
     std::chrono::steady_clock::time_point m_next_offset_scan{};
@@ -78,13 +78,13 @@ struct Core::Impl
     std::chrono::steady_clock::time_point m_next_find{};
     std::chrono::seconds m_find_interval{2}; // FindFirstOf fallback: 2 s, doubling to 60 s while nothing is found
     std::mutex m_new_controller_mutex;          // m_new_controller: written by the new-object callback on any thread
-    dwsc::LiveRef m_new_controller;
+    dw::LiveRef m_new_controller;
     std::atomic<bool> m_new_controller_pending{false};
     int32_t m_viewport_offset = -1, m_world_offset = -1; // UEngine::GameViewport, UGameViewportClient::World; -2 absent
     UObject* m_world = nullptr;                 // compared only, never followed
     bool m_world_seen = false;
 
-    auto hold_controller(dwsc::LiveRef controller) -> void
+    auto hold_controller(dw::LiveRef controller) -> void
     {
         m_controller = controller;
         g_player_controller.store(controller.object);
@@ -165,7 +165,7 @@ struct Core::Impl
         return true;
     }
 
-    auto forget_player(dwsc::Snap why = dwsc::Snap::Player) -> void
+    auto forget_player(dw::Snap why = dw::Snap::Player) -> void
     {
         g_player_camera.store(nullptr);
         g_player_root.store(nullptr);
@@ -177,7 +177,7 @@ struct Core::Impl
     // A level change, called from the LoadMap pre hook and the engine tick; harmless if run twice for one load.
     auto forget_world() -> void
     {
-        forget_player(dwsc::Snap::World);
+        forget_player(dw::Snap::World);
         // Smoothwalker drops its camera-mode pointers, re-applies in the next world and rebuilds its overlay.
         notify([](const Listener& l) {
             if (l.world_changed) l.world_changed(l.user);
@@ -190,7 +190,7 @@ struct Core::Impl
         auto* object = static_cast<UObject*>(actor);
         if (!object || m_controller.alive()) return;
         auto* cls = object->GetClassPrivate();
-        if (cls && cls->GetNamePrivate() == m_player_controller_name) adopt_controller(dwsc::LiveRef::of(object));
+        if (cls && cls->GetNamePrivate() == m_player_controller_name) adopt_controller(dw::LiveRef::of(object));
     }
 
     auto on_end_play(AActor* actor) -> void
@@ -204,11 +204,11 @@ struct Core::Impl
     {
         g_player_camera.store(nullptr);
         g_player_root.store(nullptr);
-        request_cut(dwsc::Snap::Pawn);
+        request_cut(dw::Snap::Pawn);
         m_pawn = m_camera = m_root = {};
     }
 
-    auto adopt_controller(dwsc::LiveRef controller) -> void
+    auto adopt_controller(dw::LiveRef controller) -> void
     {
         forget_player();
         hold_controller(controller);
@@ -264,7 +264,7 @@ struct Core::Impl
     {
         if (m_new_controller_pending.exchange(false))
         {
-            dwsc::LiveRef candidate;
+            dw::LiveRef candidate;
             {
                 std::lock_guard guard(m_new_controller_mutex);
                 candidate = std::exchange(m_new_controller, {});
@@ -278,7 +278,7 @@ struct Core::Impl
         if (!requested && now < m_next_find) return;
         m_next_find = now + m_find_interval;
         m_find_interval = std::min(m_find_interval * 2, std::chrono::seconds(60));
-        auto candidate = dwsc::LiveRef::of(UObjectGlobals::FindFirstOf(STR("BP_PlayerController_C")));
+        auto candidate = dw::LiveRef::of(UObjectGlobals::FindFirstOf(STR("BP_PlayerController_C")));
         if (candidate.object && !candidate.object->HasAnyFlags(static_cast<EObjectFlags>(RF_ClassDefaultObject | RF_ArchetypeObject)) &&
             candidate.alive())
         {
@@ -293,7 +293,7 @@ struct Core::Impl
     // Pointer reads and object array lookups only, before anything reads through a possibly-freed held pointer.
     auto on_engine_tick(UEngine* engine) -> void
     {
-        if (dwapi::g_game_thread.load(std::memory_order_relaxed) == 0) dwapi::g_game_thread.store(GetCurrentThreadId());
+        if (lua::g_game_thread.load(std::memory_order_relaxed) == 0) lua::g_game_thread.store(GetCurrentThreadId());
         check_world(engine);
         if (m_controller.object && !m_controller.alive())
         {
@@ -332,12 +332,12 @@ struct Core::Impl
         if (pawn != m_pawn.object) m_offset_wait = std::chrono::seconds(2); // a new pawn does not inherit the old one's wait
         m_offset_retry = false;
         forget_pawn();
-        m_pawn = dwsc::LiveRef::of(pawn);
+        m_pawn = dw::LiveRef::of(pawn);
         // Controller.Pawn can point at a Garbage pawn until GC; re-adopting it would warn every tick.
         if (!m_pawn.alive()) return;
 
-        auto camera = dwsc::LiveRef::of(object_ptr(pawn, STR("FollowCamera")));
-        auto root = dwsc::LiveRef::of(object_ptr(pawn, STR("RootComponent")));
+        auto camera = dw::LiveRef::of(object_ptr(pawn, STR("FollowCamera")));
+        auto root = dw::LiveRef::of(object_ptr(pawn, STR("RootComponent")));
         // m_pawn stays set on failure, so a pawn without them is reported once, not every tick.
         if (!camera.alive() || !root.alive())
         {
@@ -425,9 +425,9 @@ Core::Core() : m(std::make_unique<Impl>())
     {
         Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] hot reload: restarted on the DLL already loaded (pinned); a rebuilt DLL needs the game restarted\n"));
     }
-    dwapi::g_enabled = &processor_enabled;
-    dwapi::g_reset = &g_reset; // release("cut") snaps through the same flag a teleport sets
-    dwapi::g_reset_reason = &g_reset_reason;
+    lua::g_enabled = &processor_enabled;
+    lua::g_reset = &g_reset; // release("cut") snaps through the same flag a teleport sets
+    lua::g_reset_reason = &g_reset_reason;
     QueryPerformanceFrequency(&g_qpc_frequency);
 }
 
@@ -468,7 +468,7 @@ auto Core::start() -> bool
                 auto* object = info.GetCurrentResolvedReturnValue();
                 if (!object) return;
                 std::lock_guard guard(self->m_new_controller_mutex);
-                self->m_new_controller = dwsc::LiveRef::of(object);
+                self->m_new_controller = dw::LiveRef::of(object);
                 self->m_new_controller_pending.store(true);
             }, options));
     bool engine_tick =
@@ -490,17 +490,17 @@ auto Core::start() -> bool
 // C++ mods are started first (docs/design.md, "Checks run 2026-09-22").
 auto Core::lua_start(lua_State* L, const std::string& mod, const std::string& mod_version) -> void
 {
-    dwapi::install(L, mod, mod_version);
+    lua::install(L, mod, mod_version);
 }
 
 auto Core::lua_stop(lua_State* L) -> void
 {
-    dwapi::uninstall(L);
+    lua::uninstall(L);
 }
 
 auto Core::stop_lua() -> void
 {
-    dwapi::uninstall_all();
+    lua::uninstall_all();
 }
 
 auto Core::unregister_callbacks() -> void
@@ -556,7 +556,7 @@ auto Core::reset_globals() -> void
     g_tuning = DEFAULT_TUNING;
     ReleaseSRWLockExclusive(&g_tuning_lock);
     g_reset.store(true);
-    g_reset_reason.store(static_cast<int>(dwsc::Snap::Startup));
+    g_reset_reason.store(static_cast<int>(dw::Snap::Startup));
     g_hook_timing.store(false);
     g_log_verbose.store(false);
     g_player_camera.store(nullptr);
@@ -582,6 +582,6 @@ auto Core::reset_globals() -> void
     g_view = ViewState{};
     g_processor.store(nullptr);
     g_listener.store(nullptr);
-    dwapi::reset_state();
+    lua::reset_state();
 }
-} // namespace dwcam
+} // namespace dw::camera

@@ -1,5 +1,5 @@
 // The split build: the core's hook side (camera/pipeline.hpp) with Smoothwalker's processor
-// (smoothwalker/follow/processor.hpp), joined only through the core's C table (dwcam::get_api, what dwcc_get_api
+// (smoothwalker/follow/processor.hpp), joined only through the core's C table (dw::camera::get_api, what dwcc_get_api
 // returns), as the DLL runs them. The UE4SS-bound code that feeds them (core.cpp's constructor lines,
 // smoothwalker.cpp's apply_position, update and api_status) is quoted below. Namespaces are renamed new_* on the
 // command line so both builds link into one program.
@@ -14,7 +14,8 @@
 
 namespace
 {
-    using namespace dwcam;
+    using namespace dw::camera;
+    namespace dwapi = dw::camera::lua; // api_ops.inc is written against dwapi:: and shared with the baseline build
 
 #include "api_ops.inc"
 
@@ -40,7 +41,7 @@ namespace
 
         auto publish(const harness::HSettings& h) -> void override
         {
-            dwsw::publish_view(m_processor, *m_core, harness::to_settings<dwsc::Settings>(h));
+            dw::smoothwalker::follow::publish_view(m_processor, *m_core, harness::to_settings<dw::smoothwalker::settings::Settings>(h));
         }
 
         auto set_enabled(bool on) -> void override { m_processor.set_enabled(on); }
@@ -55,7 +56,7 @@ namespace
 
         auto mode_write() -> void override { m_processor.mode_written(); }
 
-        auto request_cut(int reason) -> void override { dwcam::request_cut(static_cast<dwsc::Snap>(reason)); }
+        auto request_cut(int reason) -> void override { dw::camera::request_cut(static_cast<dw::Snap>(reason)); }
 
         auto set_player(void* camera, void* root, int32_t translation_offset, int32_t half_height_offset) -> void override
         {
@@ -100,7 +101,7 @@ namespace
         {
             // Smoothwalker::Impl::debug_panel and api_status (smoothwalker.cpp), then the keys' reads.
             r.put("panel.enabled", m_processor.enabled());
-            const dwsw::FollowTuning follow = m_processor.tuning();
+            const dw::smoothwalker::follow::FollowTuning follow = m_processor.tuning();
             r.put("panel.max_lag_h", follow.max_lag_h);
             r.put("panel.max_lag_v", follow.max_lag_v);
             r.put("panel.rotation_smoothing", follow.rotation_smoothing);
@@ -156,7 +157,7 @@ namespace
 
       private:
         const Api* m_core = nullptr;
-        dwsw::FollowProcessor m_processor;
+        dw::smoothwalker::follow::FollowProcessor m_processor;
     };
 } // namespace
 

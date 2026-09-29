@@ -27,10 +27,14 @@
 #include <Unreal/UObject.hpp>
 #include <Unreal/UObjectGlobals.hpp>
 
-namespace dwsc
+namespace dw::smoothwalker::ui
 {
     using namespace RC;
     using namespace RC::Unreal;
+    using modes::Group;
+    using modes::group_name;
+    using modes::ModeListing;
+    using settings::g_log_verbose;
 
     // The camera API as the panel shows it.
     struct ApiStatus
@@ -493,4 +497,4 @@ namespace dwsc
             forget();
         }
     };
-} // namespace dwsc
+} // namespace dw::smoothwalker::ui

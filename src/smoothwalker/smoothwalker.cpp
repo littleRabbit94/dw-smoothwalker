@@ -42,7 +42,7 @@
 using namespace RC;
 using namespace RC::Unreal;
 
-namespace dwsw
+namespace dw::smoothwalker
 {
 namespace
 {
@@ -82,14 +82,14 @@ namespace
 
 struct Smoothwalker::Impl
 {
-    const dwcam::Api& m_core;              // the camera core's table: everything this side knows of the core
+    const camera::Api& m_core;             // the camera core's table: everything this side knows of the core
     BindKey m_bind_key;
     std::wstring m_version;
     std::vector<Hook::GlobalCallbackId> m_callbacks;
-    FollowProcessor m_processor;           // registered with the core for this object's life
+    follow::FollowProcessor m_processor;   // registered with the core for this object's life
 
     std::mutex m_file_mutex; // the config files, m_settings, m_baseline, m_presets, m_loaded_id; the engine tick never takes it
-    dwsc::Settings m_settings{};
+    settings::Settings m_settings{};
     uint64_t m_settings_stamp = 0;                // write time of smoothwalker.ini as last read or written
     std::map<std::string, double> m_baseline;     // each numeric key as last known to be in smoothwalker.ini
     int m_loaded_id = 0;                          // last preset loaded or cycled; shown while it still matches
@@ -97,7 +97,7 @@ struct Smoothwalker::Impl
     UObject* m_menu_host = nullptr;               // the Mod Menu host last seen open; checked before any rescan
     bool m_menu_logged = false;
     bool m_custom_pinned = false;                 // Custom was picked: shown until a preset is loaded or a slot adopted
-    std::vector<dwsc::Preset> m_presets;          // built-ins, slots, drop-ins, in cycle order; scanned once per session
+    std::vector<settings::Preset> m_presets;      // built-ins, slots, drop-ins, in cycle order; scanned once per session
     size_t m_loaded_slots = 0, m_loaded_dropins = 0; // load_presets_locked()'s counts, for the constructor's load line
     std::string m_pending_file;                   // content last written to smoothwalker.pending; empty when none
     std::atomic<bool> m_flush_pending{false};     // live settings differ from m_baseline
@@ -105,9 +105,9 @@ struct Smoothwalker::Impl
     std::chrono::steady_clock::time_point m_next_flush{};
     std::string m_toggle_key, m_preset_key, m_shoulder_key, m_debug_key;
 
-    dwsc::ModeTuner m_tuner; // game thread only
+    modes::ModeTuner m_tuner; // game thread only
     std::mutex m_position_mutex;
-    dwsc::PositionTuning m_position{};
+    modes::PositionTuning m_position{};
     std::atomic<uint64_t> m_position_generation{1};
     uint64_t m_position_applied_generation = 0; // game thread only
 
@@ -124,18 +124,18 @@ struct Smoothwalker::Impl
     int m_banner_state = 0; // 0 unresolved, 1 ready, -1 unavailable (game thread only)
     UFunction* m_banner_function = nullptr;
     UObject* m_banner_library = nullptr;
-    dwsc::LiveRef m_notifications; // NotificationSubsystem, game thread only, checked live before use
+    dw::LiveRef m_notifications; // NotificationSubsystem, game thread only, checked live before use
 
-    dwsc::DebugOverlay m_overlay;          // game thread only
+    ui::DebugOverlay m_overlay;            // game thread only
     std::atomic<bool> m_debug_overlay{false};
     std::mutex m_debug_mutex;              // m_debug_preset, m_debug_tuning: written by publish_locked, read by the overlay's refresh
     std::wstring m_debug_preset;           // the active preset's name, or Custom
     bool m_debug_tuning = true;            // camera_tuning
 
-    // The core's game-thread notifications (dwcam::Listener), kept for this object's life.
-    const dwcam::Listener m_listener{sizeof(dwcam::Listener), this, &Impl::on_world_changed, &Impl::on_camera_changed, &Impl::on_tick};
+    // The core's game-thread notifications (camera::Listener), kept for this object's life.
+    const camera::Listener m_listener{sizeof(camera::Listener), this, &Impl::on_world_changed, &Impl::on_camera_changed, &Impl::on_tick};
 
-    Impl(const dwcam::Api& core, BindKey bind_key, std::wstring version) : m_core(core), m_bind_key(std::move(bind_key)), m_version(std::move(version))
+    Impl(const camera::Api& core, BindKey bind_key, std::wstring version) : m_core(core), m_bind_key(std::move(bind_key)), m_version(std::move(version))
     {
         if (!m_core.register_processor(m_processor.registration()))
             Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] the camera core already runs another view processor: smoothing inactive\n"));
@@ -145,10 +145,10 @@ struct Smoothwalker::Impl
         std::lock_guard guard(m_file_mutex);
         // log_verbose is read once here, ahead of load_presets_locked(), so its per-preset lines are gated from
         // the start; reload_settings_locked(true) below re-derives the same value from the full parse.
-        if (auto content = dwsc::read_file(SETTINGS_PATH))
+        if (auto content = settings::read_file(SETTINGS_PATH))
         {
-            auto numbers = dwsc::parse_numbers(*content);
-            if (auto found = numbers.find("log_verbose"); found != numbers.end()) dwsc::g_log_verbose.store(found->second != 0.0);
+            auto numbers = settings::parse_numbers(*content);
+            if (auto found = numbers.find("log_verbose"); found != numbers.end()) settings::g_log_verbose.store(found->second != 0.0);
         }
         load_presets_locked();
         reload_settings_locked(true);
@@ -176,7 +176,7 @@ struct Smoothwalker::Impl
                     auto* camera = m_core.player_camera();
                     if (!camera || params.Outer != camera) return;
                     if (auto* mode = info.GetCurrentResolvedReturnValue())
-                        m_tuner.note_new(dwsc::LiveRef::of(mode), GetCurrentThreadId() == m_core.game_thread_id());
+                        m_tuner.note_new(dw::LiveRef::of(mode), GetCurrentThreadId() == m_core.game_thread_id());
                 },
                 options);
         if (id != Hook::ERROR_ID) m_callbacks.push_back(id);
@@ -269,13 +269,13 @@ struct Smoothwalker::Impl
         self.apply_position();
         auto* controller = static_cast<UObject*>(self.m_core.player_controller());
         auto* camera = static_cast<UObject*>(self.m_core.player_camera());
-        self.m_overlay.tick(self.m_debug_overlay.load(), controller, camera, [&] { return dwsc::format_panel(self.debug_panel(camera)); });
+        self.m_overlay.tick(self.m_debug_overlay.load(), controller, camera, [&] { return ui::format_panel(self.debug_panel(camera)); });
     }
 
     // The camera API as the panel shows it (Api::camera_owner).
-    auto api_status() -> dwsc::ApiStatus
+    auto api_status() -> ui::ApiStatus
     {
-        dwsc::ApiStatus s;
+        ui::ApiStatus s;
         double lease = NAN;
         std::string name(64, '\0');
         uint32_t n = m_core.camera_owner(name.data(), static_cast<uint32_t>(name.size()), &lease);
@@ -286,7 +286,7 @@ struct Smoothwalker::Impl
         }
         if (n == 0) return s;
         name.resize(std::min<size_t>(n, name.size() - 1));
-        s.owner = dwsc::to_wide(name);
+        s.owner = settings::to_wide(name);
         s.lease = lease;
         return s;
     }
@@ -404,7 +404,7 @@ struct Smoothwalker::Impl
         if (m_banner_state != 1) return;
 
         // Cached: FindFirstOf walks the whole object array (28 ms measured), and this runs mid-glide after a preset change.
-        if (!m_notifications.alive()) m_notifications = dwsc::LiveRef::of(UObjectGlobals::FindFirstOf(STR("NotificationSubsystem")));
+        if (!m_notifications.alive()) m_notifications = dw::LiveRef::of(UObjectGlobals::FindFirstOf(STR("NotificationSubsystem")));
         drop_stale_banners(m_notifications.object);
         FText text(line.c_str());
         uint8_t params[BANNER_PARAMS_SIZE]{};
@@ -453,24 +453,24 @@ struct Smoothwalker::Impl
     {
         // No hard cut: the core crossfades on the new generations instead of snapping the lag away mid-motion. Only a
         // changed value starts one: a shoulder swap and the switches change none, and a fade holds part of the old lag.
-        publish_view(m_processor, m_core, m_settings);
+        follow::publish_view(m_processor, m_core, m_settings);
         m_show_banner.store(m_settings.show_banner);
         m_debug_overlay.store(m_settings.debug_overlay);
         {
             auto* active = m_settings.preset != 0 ? find_preset(m_settings.preset) : nullptr;
             std::lock_guard guard(m_debug_mutex);
-            m_debug_preset = m_settings.preset == 0 ? STR("Custom") : active ? dwsc::to_wide(active->name) : STR("preset ") + std::to_wstring(m_settings.preset);
+            m_debug_preset = m_settings.preset == 0 ? STR("Custom") : active ? settings::to_wide(active->name) : STR("preset ") + std::to_wstring(m_settings.preset);
             m_debug_tuning = m_settings.camera_tuning;
         }
 
         // enabled off is the game as shipped, camera modes and its own lag included (position_of).
-        auto position = dwsc::position_of(m_settings);
+        auto position = modes::position_of(m_settings);
         std::lock_guard guard(m_position_mutex);
         // With camera_tuning off only the lag switch is written, so a changed position number applies nothing.
         // The values are kept, so switching it on applies the latest.
-        auto written = [](dwsc::PositionTuning p) {
+        auto written = [](modes::PositionTuning p) {
             if (p.active) return p;
-            dwsc::PositionTuning lag_only;
+            modes::PositionTuning lag_only;
             lag_only.active = false;
             lag_only.own_lag = p.own_lag;
             return lag_only;
@@ -498,16 +498,16 @@ struct Smoothwalker::Impl
         auto* camera = static_cast<UObject*>(m_core.player_camera());
         m_tuner.tick(m_core.view_updates(), m_core.view_seconds(), camera);
         // off: no per-tick GetState calls either
-        auto state = camera && m_processor.enabled() ? m_tuner.mode_state(camera) : dwsc::ModeState{};
+        auto state = camera && m_processor.enabled() ? m_tuner.mode_state(camera) : modes::ModeState{};
         m_processor.set_aiming(state.aiming);
-        if (state.combat != m_processor.swap_combat(state.combat) && dwsc::g_log_verbose.load(std::memory_order_relaxed))
+        if (state.combat != m_processor.swap_combat(state.combat) && settings::g_log_verbose.load(std::memory_order_relaxed))
             Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] combat camera {}\n"), state.combat ? STR("on") : STR("off"));
-        if (state.traversal != m_processor.swap_traversal(state.traversal) && dwsc::g_log_verbose.load(std::memory_order_relaxed))
+        if (state.traversal != m_processor.swap_traversal(state.traversal) && settings::g_log_verbose.load(std::memory_order_relaxed))
             Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] traversal camera {}\n"), state.traversal ? STR("on") : STR("off"));
         if (!camera) return;
         auto generation = m_position_generation.load();
         if (generation == m_position_applied_generation) return;
-        dwsc::PositionTuning position;
+        modes::PositionTuning position;
         {
             std::lock_guard guard(m_position_mutex);
             position = m_position;
@@ -523,20 +523,20 @@ struct Smoothwalker::Impl
     {
         // Stamp first: a write landing between the two is then seen by the next poll.
         auto stamp = last_write(SETTINGS_PATH);
-        auto content = dwsc::read_file(SETTINGS_PATH);
+        auto content = settings::read_file(SETTINGS_PATH);
         // At startup the key names are read only once, so ride out a Mod Menu rename in progress.
         for (int i = 0; startup && !content && i < 10; ++i)
         {
             Sleep(20);
             stamp = last_write(SETTINGS_PATH);
-            content = dwsc::read_file(SETTINGS_PATH);
+            content = settings::read_file(SETTINGS_PATH);
         }
         if (!content)
         {
             // The Mod Menu replaces the file by rename, so it is briefly absent: keep what is live and retry.
             if (!startup) return;
             Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] smoothwalker.ini not found, using defaults\n"));
-            m_settings = dwsc::Settings{};
+            m_settings = settings::Settings{};
             m_toggle_key = m_settings.toggle_key;
             m_preset_key = m_settings.preset_key;
             m_shoulder_key = m_settings.shoulder_key;
@@ -545,11 +545,11 @@ struct Smoothwalker::Impl
             return;
         }
         m_settings_stamp = stamp;
-        auto file = dwsc::parse_numbers(*content);
+        auto file = settings::parse_numbers(*content);
 
         if (startup)
         {
-            m_settings = dwsc::parse_settings(*content);
+            m_settings = settings::parse_settings(*content);
             m_toggle_key = m_settings.toggle_key;
             m_preset_key = m_settings.preset_key;
             m_shoulder_key = m_settings.shoulder_key;
@@ -572,7 +572,7 @@ struct Smoothwalker::Impl
             return;
         }
 
-        dwsc::Values edits;
+        settings::Values edits;
         for (auto& [key, value] : file)
         {
             auto known = m_baseline.find(key);
@@ -587,25 +587,25 @@ struct Smoothwalker::Impl
         auto edited = [&](const char* key) {
             return std::any_of(edits.begin(), edits.end(), [&](auto& edit) { return edit.first == key; });
         };
-        auto is_slot = [](int id) { return id >= 1 && id <= dwsc::MAX_SLOTS; };
+        auto is_slot = [](int id) { return id >= 1 && id <= settings::MAX_SLOTS; };
         int active_before = m_settings.preset; // the slot an Apply that leaves the picker alone saves into
 
         // (a) Ordinary edits onto the live settings. The toggle's state changes only if the file's enabled did.
-        dwsc::apply_values(m_settings, edits);
+        settings::apply_values(m_settings, edits);
         if (edited("enabled")) set_enabled_locked(m_settings.enabled); // fades like the toggle key
 
-        dwsc::Values own; // the preset keys this Apply moved
+        settings::Values own; // the preset keys this Apply moved
         for (auto& edit : edits)
         {
-            if (dwsc::is_preset_key(edit.first)) own.push_back(edit);
+            if (settings::is_preset_key(edit.first)) own.push_back(edit);
         }
         auto slot_name = [&](int id) {
             auto* slot = find_preset(id);
-            return dwsc::to_wide(slot ? slot->name : "Slot " + std::to_string(id));
+            return settings::to_wide(slot ? slot->name : "Slot " + std::to_string(id));
         };
         // The slot file is written now: the menu does not watch it.
         auto save_slot = [&](int id) {
-            bool ok = save_slot_locked(id, dwsc::preset_of(m_settings));
+            bool ok = save_slot_locked(id, settings::preset_of(m_settings));
             Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] saved slot {}{}\n"), id, ok ? STR("") : STR(": write failed"));
             return ok;
         };
@@ -631,7 +631,7 @@ struct Smoothwalker::Impl
             // an Apply there still works and moves only the keys it changed.
             if (load_preset_locked(picked))
             {
-                dwsc::apply_values(m_settings, own);
+                settings::apply_values(m_settings, own);
                 if (is_slot(picked) && !own.empty()) save_slot(picked);
             }
         }
@@ -665,18 +665,18 @@ struct Smoothwalker::Impl
     auto load_presets_locked() -> void
     {
         m_presets.clear();
-        for (auto& p : dwsc::builtin_presets()) m_presets.push_back({p.id, p.name, p.values});
+        for (auto& p : settings::builtin_presets()) m_presets.push_back({p.id, p.name, p.values});
         CreateDirectoryW(PRESETS_DIR_W, nullptr); // so it is there to drop files into; fails harmlessly if present
 
-        auto files = dwsc::list_preset_files(PRESETS_DIR_W);
-        auto read_preset = [&](const std::wstring& name) -> std::optional<std::pair<std::string, dwsc::Values>> {
-            auto content = dwsc::read_small_file(std::wstring(PRESETS_DIR_W) + L"\\" + name, dwsc::MAX_PRESET_FILE);
+        auto files = settings::list_preset_files(PRESETS_DIR_W);
+        auto read_preset = [&](const std::wstring& name) -> std::optional<std::pair<std::string, settings::Values>> {
+            auto content = settings::read_small_file(std::wstring(PRESETS_DIR_W) + L"\\" + name, settings::MAX_PRESET_FILE);
             if (!content)
             {
                 Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] presets/{}: unreadable or over 64 KiB, skipped\n"), name);
                 return std::nullopt;
             }
-            auto parsed = dwsc::parse_preset_file(std::move(*content));
+            auto parsed = settings::parse_preset_file(std::move(*content));
             if (parsed.second.empty())
             {
                 Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] presets/{}: no preset settings, skipped\n"), name);
@@ -690,28 +690,28 @@ struct Smoothwalker::Impl
             // The file's name line is the slot's display name; the file name stays "Slot N.ini".
             if (auto parsed = read_preset(name))
             {
-                m_presets.push_back({slot, dwsc::display_name(parsed->first, "Slot " + std::to_string(slot), slot), dwsc::normalize_preset(parsed->second)});
+                m_presets.push_back({slot, settings::display_name(parsed->first, "Slot " + std::to_string(slot), slot), settings::normalize_preset(parsed->second)});
             }
         }
 
-        std::vector<dwsc::Preset> dropins;
+        std::vector<settings::Preset> dropins;
         size_t over_limit = 0;
         for (auto& name : files.dropins)
         {
-            if (dropins.size() >= static_cast<size_t>(dwsc::MAX_DROPINS))
+            if (dropins.size() >= static_cast<size_t>(settings::MAX_DROPINS))
             {
                 ++over_limit;
                 continue;
             }
             auto parsed = read_preset(name);
             if (!parsed) continue;
-            int id = dwsc::FIRST_DROPIN_ID + static_cast<int>(dropins.size());
-            auto stem = dwsc::utf8_of(name.substr(0, name.size() - 4)).value_or("");
-            dropins.push_back({id, dwsc::display_name(parsed->first, stem, id), dwsc::normalize_preset(parsed->second)});
+            int id = settings::FIRST_DROPIN_ID + static_cast<int>(dropins.size());
+            auto stem = settings::utf8_of(name.substr(0, name.size() - 4)).value_or("");
+            dropins.push_back({id, settings::display_name(parsed->first, stem, id), settings::normalize_preset(parsed->second)});
         }
         if (over_limit)
         {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] {} presets over the limit of {} skipped\n"), over_limit, dwsc::MAX_DROPINS);
+            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] {} presets over the limit of {} skipped\n"), over_limit, settings::MAX_DROPINS);
         }
 
         // Picker order: saved slots, drop-ins, then the empty slots, so nothing empty sits between the presets that
@@ -719,7 +719,7 @@ struct Smoothwalker::Impl
         // a slot saved this session becomes the active id.
         std::string values = "0|101|102|103", labels = "Custom|Tight|Balanced|Cinematic";
         std::string empty_values, empty_labels;
-        for (int n = 1; n <= dwsc::MAX_SLOTS; ++n)
+        for (int n = 1; n <= settings::MAX_SLOTS; ++n)
         {
             auto id = std::to_string(n);
             auto* saved = find_preset(n); // m_presets holds the built-ins and the slots here
@@ -742,11 +742,11 @@ struct Smoothwalker::Impl
         values += empty_values;
         labels += empty_labels;
         bool listed = false;
-        if (auto manifest = dwsc::read_file(MANIFEST_PATH))
+        if (auto manifest = settings::read_file(MANIFEST_PATH))
         {
-            if (auto updated = dwsc::with_preset_choices(*manifest, "[Setting.preset]", values, labels))
+            if (auto updated = settings::with_preset_choices(*manifest, "[Setting.preset]", values, labels))
             {
-                listed = *updated == *manifest || dwsc::write_file(MANIFEST_PATH, *updated);
+                listed = *updated == *manifest || settings::write_file(MANIFEST_PATH, *updated);
                 if (!listed) Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] could not write mod_settings.ini\n"));
             }
             else
@@ -764,18 +764,18 @@ struct Smoothwalker::Impl
                                             dropins.size());
             dropins.clear();
         }
-        bool verbose = dwsc::g_log_verbose.load(std::memory_order_relaxed);
+        bool verbose = settings::g_log_verbose.load(std::memory_order_relaxed);
         if (verbose)
         {
             for (auto& p : dropins)
             {
-                Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] preset {} from the presets folder: {}\n"), p.id, dwsc::to_wide(p.name));
+                Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] preset {} from the presets folder: {}\n"), p.id, settings::to_wide(p.name));
             }
         }
-        size_t slots = m_presets.size() - dwsc::builtin_presets().size();
+        size_t slots = m_presets.size() - settings::builtin_presets().size();
         m_presets.insert(m_presets.end(), std::make_move_iterator(dropins.begin()), std::make_move_iterator(dropins.end()));
         m_loaded_slots = slots;
-        m_loaded_dropins = m_presets.size() - slots - dwsc::builtin_presets().size();
+        m_loaded_dropins = m_presets.size() - slots - settings::builtin_presets().size();
         if (verbose)
         {
             Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] presets: {} saved slots, {} from the presets folder\n"), m_loaded_slots, m_loaded_dropins);
@@ -809,33 +809,33 @@ struct Smoothwalker::Impl
         if (m_menu_host && !m_menu_logged)
         {
             m_menu_logged = true;
-            if (dwsc::g_log_verbose.load(std::memory_order_relaxed))
+            if (settings::g_log_verbose.load(std::memory_order_relaxed))
                 Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] Mod Menu open: {}\n"), m_menu_host->GetFullName());
         }
         return m_menu_host != nullptr;
     }
 
-    auto save_slot_locked(int slot, dwsc::Values values) -> bool
+    auto save_slot_locked(int slot, settings::Values values) -> bool
     {
-        values = dwsc::normalize_preset(values);
+        values = settings::normalize_preset(values);
         CreateDirectoryA(PRESETS_DIR, nullptr);
         auto path = std::string(PRESETS_DIR) + "/Slot " + std::to_string(slot) + ".ini";
         auto* known = find_preset(slot);
         auto name = known ? known->name : "Slot " + std::to_string(slot); // a renamed slot keeps its name
-        if (!dwsc::write_file(path, dwsc::slot_file_content(slot, name, values))) return false;
+        if (!settings::write_file(path, settings::slot_file_content(slot, name, values))) return false;
         if (known)
         {
             known->values = std::move(values);
             return true;
         }
-        auto is_after = [&](const dwsc::Preset& p) { return (p.id >= 1 && p.id <= dwsc::MAX_SLOTS && p.id > slot) || p.id >= dwsc::FIRST_DROPIN_ID; };
-        m_presets.insert(std::find_if(m_presets.begin(), m_presets.end(), is_after), dwsc::Preset{slot, "Slot " + std::to_string(slot), std::move(values)});
+        auto is_after = [&](const settings::Preset& p) { return (p.id >= 1 && p.id <= settings::MAX_SLOTS && p.id > slot) || p.id >= settings::FIRST_DROPIN_ID; };
+        m_presets.insert(std::find_if(m_presets.begin(), m_presets.end(), is_after), settings::Preset{slot, "Slot " + std::to_string(slot), std::move(values)});
         return true;
     }
 
-    auto find_preset(int id) -> dwsc::Preset*
+    auto find_preset(int id) -> settings::Preset*
     {
-        auto it = std::find_if(m_presets.begin(), m_presets.end(), [&](const dwsc::Preset& p) { return p.id == id; });
+        auto it = std::find_if(m_presets.begin(), m_presets.end(), [&](const settings::Preset& p) { return p.id == id; });
         return it != m_presets.end() ? &*it : nullptr;
     }
 
@@ -848,10 +848,10 @@ struct Smoothwalker::Impl
             Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] preset {} is empty, nothing loaded\n"), id);
             return false;
         }
-        dwsc::apply_values(m_settings, preset->values);
+        settings::apply_values(m_settings, preset->values);
         m_loaded_id = id;
         m_custom_pinned = false;
-        auto name = dwsc::to_wide(preset->name);
+        auto name = settings::to_wide(preset->name);
         Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] loaded preset {}\n"), name);
         request_banner(STR("Smoothwalker: ") + name);
         return true;
@@ -860,9 +860,9 @@ struct Smoothwalker::Impl
     // m_settings.preset becomes the preset the live settings match, preferring the last one loaded, else 0 (Custom).
     auto update_active_locked() -> void
     {
-        auto matches = [&](const dwsc::Preset& p) {
+        auto matches = [&](const settings::Preset& p) {
             return !p.values.empty() && std::all_of(p.values.begin(), p.values.end(), [&](auto& entry) {
-                return std::abs(dwsc::number_of(m_settings, entry.first) - entry.second) <= 1e-4;
+                return std::abs(settings::number_of(m_settings, entry.first) - entry.second) <= 1e-4;
             });
         };
         if (m_custom_pinned)
@@ -883,7 +883,7 @@ struct Smoothwalker::Impl
     auto cycle_preset() -> void
     {
         std::lock_guard guard(m_file_mutex);
-        auto at = std::find_if(m_presets.begin(), m_presets.end(), [&](const dwsc::Preset& p) { return p.id == m_settings.preset; });
+        auto at = std::find_if(m_presets.begin(), m_presets.end(), [&](const settings::Preset& p) { return p.id == m_settings.preset; });
         size_t next = m_settings.preset == 0 || at == m_presets.end() ? 0 : (static_cast<size_t>(at - m_presets.begin()) + 1) % m_presets.size();
         if (!load_preset_locked(m_presets[next].id)) return;
         update_active_locked();
@@ -893,14 +893,14 @@ struct Smoothwalker::Impl
 
     // The live numbers that differ from the file; preset is written as m_settings holds it (the active preset).
     // Compared as written (%.6g), so a value the file cannot hold exactly is not rewritten forever.
-    auto pending_writes_locked() -> dwsc::Values
+    auto pending_writes_locked() -> settings::Values
     {
-        dwsc::Values writes;
-        for (auto* key : dwsc::NUMERIC_KEYS)
+        settings::Values writes;
+        for (auto* key : settings::NUMERIC_KEYS)
         {
-            double value = dwsc::number_of(m_settings, key);
+            double value = settings::number_of(m_settings, key);
             auto known = m_baseline.find(key);
-            if (known == m_baseline.end() || dwsc::format_number(known->second) != dwsc::format_number(value)) writes.emplace_back(key, value);
+            if (known == m_baseline.end() || settings::format_number(known->second) != settings::format_number(value)) writes.emplace_back(key, value);
         }
         return writes;
     }
@@ -930,7 +930,7 @@ struct Smoothwalker::Impl
         {
             DeleteFileA(PENDING_PATH);
         }
-        else if (!dwsc::write_file(PENDING_PATH, content))
+        else if (!settings::write_file(PENDING_PATH, content))
         {
             Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] could not write smoothwalker.pending\n"));
             return;
@@ -944,11 +944,11 @@ struct Smoothwalker::Impl
     auto add_missing_keys_locked() -> void
     {
         if (last_write(SETTINGS_PATH) != m_settings_stamp) return; // missing (stamp 0 both), or changed since the parse
-        auto content = dwsc::read_file(SETTINGS_PATH);
+        auto content = settings::read_file(SETTINGS_PATH);
         if (!content) return;
-        auto [updated, added] = dwsc::with_missing_keys(*content, m_settings);
+        auto [updated, added] = settings::with_missing_keys(*content, m_settings);
         if (added.empty()) return;
-        if (!dwsc::write_file(SETTINGS_PATH, updated))
+        if (!settings::write_file(SETTINGS_PATH, updated))
         {
             Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] smoothwalker.ini: could not add {} missing keys\n"), added.size());
             return;
@@ -957,7 +957,7 @@ struct Smoothwalker::Impl
         std::string names;
         for (auto& key : added)
         {
-            if (dwsc::is_numeric_key(key)) m_baseline[key] = std::stod(dwsc::format_number(dwsc::number_of(m_settings, key))); // debug_key is a name
+            if (settings::is_numeric_key(key)) m_baseline[key] = std::stod(settings::format_number(settings::number_of(m_settings, key))); // debug_key is a name
             names += (names.empty() ? "" : ", ") + key;
         }
         mark_pending_locked(); // the added keys are no longer pending, and the side file takes the new stamp
@@ -967,7 +967,7 @@ struct Smoothwalker::Impl
     // A write-back the last session missed. Applied only if smoothwalker.ini still has the stamped write time.
     auto apply_pending_file_locked() -> void
     {
-        auto content = dwsc::read_file(PENDING_PATH);
+        auto content = settings::read_file(PENDING_PATH);
         if (!content) return;
         DeleteFileA(PENDING_PATH);
 
@@ -978,10 +978,10 @@ struct Smoothwalker::Impl
         {
             if (auto cut = line.find_first_of(";#"); cut != std::string::npos) line.resize(cut);
             auto eq = line.find('=');
-            if (eq == std::string::npos || dwsc::trim(line.substr(0, eq)) != "stamp") continue;
+            if (eq == std::string::npos || settings::trim(line.substr(0, eq)) != "stamp") continue;
             try
             {
-                stamp = std::stoull(dwsc::trim(line.substr(eq + 1)));
+                stamp = std::stoull(settings::trim(line.substr(eq + 1)));
             }
             catch (...)
             {
@@ -992,8 +992,8 @@ struct Smoothwalker::Impl
             Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] smoothwalker.pending ignored: smoothwalker.ini changed since\n"));
             return;
         }
-        auto numbers = dwsc::parse_numbers(*content);
-        dwsc::apply_values(m_settings, dwsc::Values(numbers.begin(), numbers.end()));
+        auto numbers = settings::parse_numbers(*content);
+        settings::apply_values(m_settings, settings::Values(numbers.begin(), numbers.end()));
         Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] applied {} settings the last session had not written yet\n"), numbers.size());
     }
 
@@ -1015,10 +1015,10 @@ struct Smoothwalker::Impl
             return;
         }
 
-        auto content = dwsc::read_file(SETTINGS_PATH);
-        auto updated = content ? dwsc::rewrite_numbers(*content, writes) : std::string{};
+        auto content = settings::read_file(SETTINGS_PATH);
+        auto updated = content ? settings::rewrite_numbers(*content, writes) : std::string{};
         bool changed = content && updated != *content;
-        if (!content || (changed && !dwsc::write_file(SETTINGS_PATH, updated)))
+        if (!content || (changed && !settings::write_file(SETTINGS_PATH, updated)))
         {
             if (!m_flush_failing) Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] could not write smoothwalker.ini, retrying\n"));
             m_flush_failing = true;
@@ -1027,7 +1027,7 @@ struct Smoothwalker::Impl
         }
         if (changed) m_settings_stamp = last_write(SETTINGS_PATH);
         // A key missing from the file counts as written too, so it is not retried every tick.
-        for (auto& [key, value] : writes) m_baseline[key] = std::stod(dwsc::format_number(value));
+        for (auto& [key, value] : writes) m_baseline[key] = std::stod(settings::format_number(value));
         m_flush_failing = false;
         mark_pending_locked(); // nothing left: clears the flag and deletes smoothwalker.pending
     }
@@ -1035,9 +1035,9 @@ struct Smoothwalker::Impl
     // The debug overlay's panel, gathered at its refresh (a quarter second apart) on the game thread: the core's feed
     // (Api::read_debug), the follow's settings under their shared lock, the copy publish_locked leaves in m_debug_*,
     // the tuner and the API claim (Api::camera_owner). Never m_file_mutex, which the engine tick does not take.
-    auto debug_panel(UObject* camera) -> dwsc::DebugPanel
+    auto debug_panel(UObject* camera) -> ui::DebugPanel
     {
-        dwsc::DebugPanel p;
+        ui::DebugPanel p;
         p.enabled = m_processor.enabled();
         {
             std::lock_guard guard(m_debug_mutex);
@@ -1046,20 +1046,20 @@ struct Smoothwalker::Impl
         }
         p.camera_type = m_tuner.camera_type_name(camera);
         p.modes = m_tuner.list_modes(camera, p.modes_stale);
-        const FollowTuning follow = m_processor.tuning();
+        const follow::FollowTuning follow = m_processor.tuning();
         p.max_lag_h = follow.max_lag_h;
         p.max_lag_v = follow.max_lag_v;
         p.rotation_smoothing = follow.rotation_smoothing;
-        dwcam::Debug feed{};
+        camera::Debug feed{};
         feed.size = sizeof(feed);
         m_core.read_debug(&feed);
         p.keep_follow = feed.keep_follow;
         p.keep_turn = feed.keep_turn;
-        p.influence = static_cast<dwsc::Influence>(feed.influence);
+        p.influence = static_cast<dw::Influence>(feed.influence);
         p.lag_h = feed.lag_h;
         p.lag_v = feed.lag_v;
         p.rate_h = feed.rate_h;
-        p.snap = static_cast<dwsc::Snap>(feed.snap);
+        p.snap = static_cast<dw::Snap>(feed.snap);
         p.snap_age = feed.snap_age;
         p.api = api_status();
         p.api.glide = feed.glide != 0;
@@ -1067,7 +1067,7 @@ struct Smoothwalker::Impl
     }
 };
 
-Smoothwalker::Smoothwalker(const dwcam::Api& core, BindKey bind_key, std::wstring version)
+Smoothwalker::Smoothwalker(const camera::Api& core, BindKey bind_key, std::wstring version)
     : m(std::make_unique<Impl>(core, std::move(bind_key), std::move(version)))
 {
 }
@@ -1113,6 +1113,6 @@ auto Smoothwalker::shutdown() -> void
         m_leak = true;
         Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] unload: a camera call did not finish, the component was left allocated\n"));
     }
-    dwsc::g_log_verbose.store(false);
+    settings::g_log_verbose.store(false);
 }
-} // namespace dwsw
+} // namespace dw::smoothwalker

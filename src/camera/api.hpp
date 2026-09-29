@@ -9,7 +9,7 @@
 
 #include <cstdint>
 
-namespace dwcam
+namespace dw::camera
 {
     // 1: the first table. Entries are only ever appended; a caller checks `size` before using a later one.
     constexpr uint32_t API_VERSION = 1;
@@ -57,9 +57,9 @@ namespace dwcam
         uint32_t size;                    // set by the caller to sizeof(Debug); nothing is written if smaller
         double keep_follow, keep_turn;    // the processor's feed (FrameOut) as last reported; NAN: not following
         double rate_h;                    // likewise
-        int32_t influence;                // likewise, dwsc::Influence
+        int32_t influence;                // likewise, dw::Influence
         double lag_h, lag_v;              // cm of lag on screen, horizontal and vertical; NAN: not following
-        int32_t snap;                     // dwsc::Snap of the last restart from the capsule
+        int32_t snap;                     // dw::Snap of the last restart from the capsule
         double snap_age;                  // s since it; NAN: none yet
         int32_t glide;                    // 1: the running crossfade was started by a release("glide")
     };
@@ -116,7 +116,7 @@ namespace dwcam
         // 0 when nobody holds the camera (an expired lease reads as nobody).
         uint32_t (*camera_owner)(char* name, uint32_t capacity, double* lease_seconds);
     };
-} // namespace dwcam
+} // namespace dw::camera
 
 // The table, or null for a version this core does not serve (0, or newer than API_VERSION). Any thread.
-extern "C" const dwcam::Api* dwcc_get_api(uint32_t version);
+extern "C" const dw::camera::Api* dwcc_get_api(uint32_t version);

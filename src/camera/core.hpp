@@ -11,7 +11,7 @@
 
 struct lua_State;
 
-namespace dwcam
+namespace dw::camera
 {
     class Core
     {
@@ -40,4 +40,4 @@ namespace dwcam
         struct Impl;
         std::unique_ptr<Impl> m;
     };
-} // namespace dwcam
+} // namespace dw::camera

@@ -13,7 +13,7 @@
 #include <cmath>
 #include <iterator>
 
-namespace dwsw
+namespace dw::smoothwalker::follow
 {
     // The follow's settings. Numbers only, so the hook's copy allocates nothing on a worker thread.
     struct FollowTuning
@@ -69,7 +69,7 @@ namespace dwsw
     class Follow
     {
       public:
-        auto frame(const FollowTuning& t, const FollowInputs& sw, const dwcam::FrameIn& in, dwcam::FrameOut& out, FollowReport& report) -> void
+        auto frame(const FollowTuning& t, const FollowInputs& sw, const camera::FrameIn& in, camera::FrameOut& out, FollowReport& report) -> void
         {
             out.location = in.camera;
             out.rotation = in.rotation;
@@ -89,7 +89,7 @@ namespace dwsw
         }
 
       private:
-        dwsc::Vec3 m_pivot_smoothed{}; // x, y: the capsule centre; z: the capsule bottom (feet)
+        dw::Vec3 m_pivot_smoothed{}; // x, y: the capsule centre; z: the capsule bottom (feet)
         // A crouch or stand: the game eases its camera height over about a third of a second, and the game's own
         // vertical lag (off while the mod is on) used to delay that further. The change is lagged here through the
         // vertical follow: crouch_drop is the game's height change so far, feet-relative (root motion cancels),
@@ -100,7 +100,7 @@ namespace dwsw
         double m_crouch_drop = 0.0;
         double m_crouch_smoothed = 0.0;
         double m_crouch_elapsed = 0.0;
-        dwsc::Quat m_rotation_smoothed{};
+        dw::Quat m_rotation_smoothed{};
         double m_nominal_distance = 0.0;
         double m_aim = 0.0;          // 0 to 1, eased toward aiming: how far the follow is handed to the player's aim
         double m_combat = 0.0;       // 0 to 1, eased toward combat: how far the follow is handed to the combat camera
@@ -112,39 +112,39 @@ namespace dwsw
         // and the camera pop up. The bottom of the capsule does not move in a crouch, so the vertical follow
         // tracks it: the game's eased height passes through and only real vertical travel is lagged. A missing
         // or implausible half height falls back to the centre.
-        static auto feet_z(const dwcam::FrameIn& in) -> double { return std::isfinite(in.half_height) ? in.pivot.z - in.half_height : in.pivot.z; }
+        static auto feet_z(const camera::FrameIn& in) -> double { return std::isfinite(in.half_height) ? in.pivot.z - in.half_height : in.pivot.z; }
 
         // From the capsule, showing the game's view.
-        auto start(const FollowInputs& sw, const dwcam::FrameIn& in) -> void
+        auto start(const FollowInputs& sw, const camera::FrameIn& in) -> void
         {
             m_aim = sw.aiming ? 1.0 : 0.0;
             m_combat = sw.combat ? 1.0 : 0.0;
             m_traversal = sw.traversal ? 1.0 : 0.0;
-            m_pivot_smoothed = dwsc::Vec3{in.pivot.x, in.pivot.y, feet_z(in)};
+            m_pivot_smoothed = dw::Vec3{in.pivot.x, in.pivot.y, feet_z(in)};
             m_rotation_smoothed = in.rotation;
             m_half_last = in.half_height;
             m_crouch_base = NAN;
             m_crouch_drop = m_crouch_smoothed = 0.0;
-            m_nominal_distance = dwsc::length(in.camera - in.pivot);
+            m_nominal_distance = dw::length(in.camera - in.pivot);
         }
 
-        auto step(const FollowTuning& t, const FollowInputs& sw, const dwcam::FrameIn& in, dwcam::FrameOut& out, FollowReport& report) -> void
+        auto step(const FollowTuning& t, const FollowInputs& sw, const camera::FrameIn& in, camera::FrameOut& out, FollowReport& report) -> void
         {
-            const dwsc::Vec3 pivot = in.pivot;
-            const dwsc::Vec3 camera = in.camera;
-            const dwsc::Quat rotation = in.rotation;
+            const dw::Vec3 pivot = in.pivot;
+            const dw::Vec3 camera = in.camera;
+            const dw::Quat rotation = in.rotation;
             const double half_height = in.half_height;
             const double feet = feet_z(in);
             const double dt = in.dt;
 
-            dwsc::Vec3& ps = m_pivot_smoothed;
+            dw::Vec3& ps = m_pivot_smoothed;
             double inner_h = t.soft_leash ? 3.0 * t.max_lag_h : t.max_lag_h;
             double inner_v = t.soft_leash ? 3.0 * t.max_lag_v : t.max_lag_v;
 
             double lag_hx = pivot.x - ps.x, lag_hy = pivot.y - ps.y;
             double lag_h = std::sqrt(lag_hx * lag_hx + lag_hy * lag_hy);
-            double a_h = dwsc::follow_alpha(t.follow_rate_h, t.curve_h, lag_h, t.catchup_distance, t.min_rate_scale, dt);
-            out.rate_h = dwsc::follow_rate(t.follow_rate_h, t.curve_h, lag_h, t.catchup_distance, t.min_rate_scale);
+            double a_h = dw::follow_alpha(t.follow_rate_h, t.curve_h, lag_h, t.catchup_distance, t.min_rate_scale, dt);
+            out.rate_h = dw::follow_rate(t.follow_rate_h, t.curve_h, lag_h, t.catchup_distance, t.min_rate_scale);
             ps.x += lag_hx * a_h;
             ps.y += lag_hy * a_h;
             lag_hx = pivot.x - ps.x;
@@ -161,7 +161,7 @@ namespace dwsw
             }
 
             double lag_v = feet - ps.z;
-            double a_v = dwsc::follow_alpha(t.follow_rate_v, t.curve_v, std::abs(lag_v), t.catchup_distance, t.min_rate_scale, dt);
+            double a_v = dw::follow_alpha(t.follow_rate_v, t.curve_v, std::abs(lag_v), t.catchup_distance, t.min_rate_scale, dt);
             ps.z += lag_v * a_v;
             lag_v = feet - ps.z;
             if (std::abs(lag_v) > inner_v)
@@ -199,7 +199,7 @@ namespace dwsw
                 double w_aim = m_aim;
                 double w_combat = m_combat * (1.0 - m_aim);
                 double w_traversal = m_traversal * (1.0 - m_combat) * (1.0 - m_aim);
-                double weights[4]{1.0 - w_aim - w_combat - w_traversal, w_traversal, w_combat, w_aim}; // in dwsc::Influence order
+                double weights[4]{1.0 - w_aim - w_combat - w_traversal, w_traversal, w_combat, w_aim}; // in dw::Influence order
                 out.influence = static_cast<int>(std::max_element(std::begin(weights), std::end(weights)) - std::begin(weights));
             }
 
@@ -225,30 +225,30 @@ namespace dwsw
                 m_crouch_elapsed += dt;
                 if (m_crouch_elapsed <= 0.6) m_crouch_drop = m_crouch_base - rel;
                 double gap = m_crouch_drop - m_crouch_smoothed;
-                double a_c = dwsc::follow_alpha(t.follow_rate_v, t.curve_v, std::abs(gap), t.catchup_distance, t.min_rate_scale, dt);
+                double a_c = dw::follow_alpha(t.follow_rate_v, t.curve_v, std::abs(gap), t.catchup_distance, t.min_rate_scale, dt);
                 m_crouch_smoothed += gap * a_c;
                 hold = m_crouch_drop - m_crouch_smoothed;
                 if (m_crouch_elapsed > 0.6 && std::abs(hold) < 0.1) m_crouch_base = NAN;
             }
             double shown_hold = std::copysign(leash(std::abs(hold), t.max_lag_v, t.soft_leash), hold) * keep_pos;
-            dwsc::Vec3 shown_pivot{pivot.x - lag_hx * scale_h, pivot.y - lag_hy * scale_h, pivot.z - shown_v + shown_hold};
+            dw::Vec3 shown_pivot{pivot.x - lag_hx * scale_h, pivot.y - lag_hy * scale_h, pivot.z - shown_v + shown_hold};
 
             // The arm swings with the smoothed rotation so the camera still orbits the pivot.
-            dwsc::Vec3 arm = camera - pivot;
+            dw::Vec3 arm = camera - pivot;
             if (t.rotation_smoothing)
             {
                 double a_r = 1.0 - std::exp(-std::max(t.rotation_rate, 0.0) * dt);
-                m_rotation_smoothed = dwsc::slerp(m_rotation_smoothed, rotation, a_r);
+                m_rotation_smoothed = dw::slerp(m_rotation_smoothed, rotation, a_r);
                 // A trail past 180 degrees would catch up the short way round, which is backwards: at a turning
                 // follow speed of 1 a 360 spin reversed the camera halfway (Nexus bug report, 2026-09-21). The
                 // trail is capped at 90 degrees, pulled in along the same arc, so the catch-up always runs the
                 // way the view turned. A single-frame turn past 180 degrees stays ambiguous, as for any smoothing.
                 constexpr double MAX_TRAIL = 0.5 * 3.14159265358979323846;
-                double trail = dwsc::angle_between(m_rotation_smoothed, rotation);
-                if (trail > MAX_TRAIL) m_rotation_smoothed = dwsc::slerp(rotation, m_rotation_smoothed, MAX_TRAIL / trail);
-                dwsc::Quat shown = keep_rot < 1.0 ? dwsc::slerp(m_rotation_smoothed, rotation, 1.0 - keep_rot) : m_rotation_smoothed;
-                dwsc::Quat delta = dwsc::multiply(shown, dwsc::conjugate(rotation));
-                arm = dwsc::rotate(delta, arm);
+                double trail = dw::angle_between(m_rotation_smoothed, rotation);
+                if (trail > MAX_TRAIL) m_rotation_smoothed = dw::slerp(rotation, m_rotation_smoothed, MAX_TRAIL / trail);
+                dw::Quat shown = keep_rot < 1.0 ? dw::slerp(m_rotation_smoothed, rotation, 1.0 - keep_rot) : m_rotation_smoothed;
+                dw::Quat delta = dw::multiply(shown, dw::conjugate(rotation));
+                arm = dw::rotate(delta, arm);
                 out.rotation = shown;
                 out.rotated = true;
             }
@@ -257,11 +257,11 @@ namespace dwsw
                 m_rotation_smoothed = rotation;
             }
 
-            dwsc::Vec3 result = shown_pivot + arm;
+            dw::Vec3 result = shown_pivot + arm;
 
             // The game has already pulled its camera in front of walls. While it sits closer than usual, the
             // smoothed camera may not be farther out than the game's.
-            double game_distance = dwsc::length(arm);
+            double game_distance = dw::length(arm);
             double settle = 1.0 - std::exp(-1.0 * dt);
             m_nominal_distance = std::max(game_distance, m_nominal_distance + (game_distance - m_nominal_distance) * settle);
             if (m_nominal_hold > 0.0)
@@ -269,14 +269,14 @@ namespace dwsw
                 m_nominal_hold -= dt;
                 m_nominal_distance = game_distance;
             }
-            if (t.wall_clamp && dwcam::clamp_to_wall(result, pivot, game_distance, dwcam::wall_weight(game_distance, m_nominal_distance)))
+            if (t.wall_clamp && camera::clamp_to_wall(result, pivot, game_distance, camera::wall_weight(game_distance, m_nominal_distance)))
             {
                 report.clamped = true;
             }
             out.location = result;
 
             report.stats = true;
-            report.shown_lag = dwsc::length(pivot - shown_pivot);
+            report.shown_lag = dw::length(pivot - shown_pivot);
         }
     };
-} // namespace dwsw
+} // namespace dw::smoothwalker::follow

@@ -6,7 +6,7 @@
 
 #include <algorithm>
 
-namespace dwcam
+namespace dw::camera
 {
     // How much of the wall clamp applies: 0 at 0.85 of the usual distance, 1 at 0.65 and closer. Eased because the
     // game's own modes (aiming, close combat) cross 0.85 too, and a hard threshold dropped the whole lag in one frame.
@@ -18,14 +18,14 @@ namespace dwcam
     }
 
     // Pulls result toward the game's distance from the pivot by weight; true if it moved.
-    inline auto clamp_to_wall(dwsc::Vec3& result, const dwsc::Vec3& pivot, double game_distance, double weight) -> bool
+    inline auto clamp_to_wall(dw::Vec3& result, const dw::Vec3& pivot, double game_distance, double weight) -> bool
     {
         if (weight <= 0.0) return false;
-        dwsc::Vec3 out = result - pivot;
-        double out_distance = dwsc::length(out);
+        dw::Vec3 out = result - pivot;
+        double out_distance = dw::length(out);
         if (!(out_distance > game_distance) || out_distance <= 0.0) return false;
         double limit = out_distance + (game_distance - out_distance) * weight;
         result = pivot + out * (limit / out_distance);
         return true;
     }
-} // namespace dwcam
+} // namespace dw::camera

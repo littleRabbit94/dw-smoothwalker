@@ -12,9 +12,9 @@
 #include <atomic>
 #include <cstdint>
 
-namespace dwsw
+namespace dw::smoothwalker::follow
 {
-    inline auto follow_tuning_of(const dwsc::Settings& s) -> FollowTuning
+    inline auto follow_tuning_of(const settings::Settings& s) -> FollowTuning
     {
         FollowTuning t;
         t.follow_rate_h = s.follow_rate_h;
@@ -46,7 +46,7 @@ namespace dwsw
         auto operator=(const FollowProcessor&) -> FollowProcessor& = delete;
 
         // What Api::register_processor takes; valid for this object's life.
-        auto registration() const -> const dwcam::Processor* { return &m_registration; }
+        auto registration() const -> const camera::Processor* { return &m_registration; }
 
         // A publish (under Smoothwalker's file mutex). Only a changed value bumps the generation: the core
         // crossfades on it, and a fade the switches or a shoulder swap started would hold part of the old lag for the
@@ -114,7 +114,7 @@ namespace dwsw
 
       private:
         SRWLOCK m_lock = SRWLOCK_INIT; // m_tuning, m_settings_generation
-        FollowTuning m_tuning = follow_tuning_of(dwsc::Settings{});
+        FollowTuning m_tuning = follow_tuning_of(settings::Settings{});
         uint64_t m_settings_generation = 0;
 
         std::atomic<bool> m_enabled{true};
@@ -134,7 +134,7 @@ namespace dwsw
         uint64_t m_generation = 0; // FrameOut::generation: bumped by a settings change or a mode write
 
         // Hook thread, once per player-camera update that reaches the core's pipeline.
-        static auto frame(void* user, const dwcam::FrameIn* in, dwcam::FrameOut* out) -> void
+        static auto frame(void* user, const camera::FrameIn* in, camera::FrameOut* out) -> void
         {
             auto& self = *static_cast<FollowProcessor*>(user);
             AcquireSRWLockShared(&self.m_lock);
@@ -174,17 +174,17 @@ namespace dwsw
             return on ? 1 : 0;
         }
 
-        const dwcam::Processor m_registration{sizeof(dwcam::Processor), this, &FollowProcessor::frame, &FollowProcessor::state};
+        const camera::Processor m_registration{sizeof(camera::Processor), this, &FollowProcessor::frame, &FollowProcessor::state};
     };
 
     // The part of a publish the core's hook reads: the follow's settings, the cut thresholds (smoothwalker.ini's,
     // pushed to the core on every publish) and the log switches. Under Smoothwalker's file mutex.
-    inline auto publish_view(FollowProcessor& processor, const dwcam::Api& core, const dwsc::Settings& s) -> void
+    inline auto publish_view(FollowProcessor& processor, const camera::Api& core, const settings::Settings& s) -> void
     {
         processor.publish(follow_tuning_of(s));
         core.set_cut_thresholds(s.reset_distance, s.reset_gap);
         processor.set_log_stats(s.log_stats);
-        dwsc::g_log_verbose.store(s.log_verbose);
-        core.set_diagnostics((s.log_verbose ? dwcam::DIAG_VERBOSE : 0u) | (s.log_stats ? dwcam::DIAG_HOOK_TIMING : 0u));
+        settings::g_log_verbose.store(s.log_verbose);
+        core.set_diagnostics((s.log_verbose ? camera::DIAG_VERBOSE : 0u) | (s.log_stats ? camera::DIAG_HOOK_TIMING : 0u));
     }
-} // namespace dwsw
+} // namespace dw::smoothwalker::follow

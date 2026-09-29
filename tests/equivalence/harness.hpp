@@ -28,7 +28,7 @@ namespace harness
         bool log_stats = false, log_verbose = false;
     };
 
-    // Settings for either build's dwsc::Settings (the same fields in both).
+    // Settings for either build (baseline dwsc::Settings, split dw::smoothwalker::settings::Settings; the same fields).
     template <typename S>
     auto to_settings(const HSettings& h) -> S
     {

@@ -8,7 +8,7 @@
 #include <Unreal/UObject.hpp>
 #include <Unreal/UObjectArray.hpp>
 
-namespace dwsc
+namespace dw
 {
     // A UObject pointer kept across ticks, with the object array index it had when taken from a live object.
     // alive() reads only GUObjectArray, never the object: true while the slot still holds the same pointer and
@@ -35,4 +35,4 @@ namespace dwsc
             return item && item->GetUObject() == object && !item->HasAnyFlags(DEAD) && object->GetClassPrivate() == cls;
         }
     };
-} // namespace dwsc
+} // namespace dw

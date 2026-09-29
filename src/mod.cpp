@@ -34,13 +34,13 @@ class DWSmoothwalker : public CppUserModBase
   public:
     DWSmoothwalker() : CppUserModBase()
     {
-        m_core = std::make_unique<dwcam::Core>(); // pins the DLL first, and logs a restart on it
+        m_core = std::make_unique<dw::camera::Core>(); // pins the DLL first, and logs a restart on it
         ModName = STR("DWSmoothwalker");
         ModVersion = STR("0.10.1");
         ModDescription = STR("Frame-interpolated third-person camera");
         ModAuthors = STR("littleRabbit6");
         auto bind_key = [this](int key, std::function<void()> action) { register_keydown_event(static_cast<Input::Key>(key), std::move(action)); };
-        m_smoothwalker = std::make_unique<dwsw::Smoothwalker>(*dwcc_get_api(dwcam::API_VERSION), bind_key, ModVersion);
+        m_smoothwalker = std::make_unique<dw::smoothwalker::Smoothwalker>(*dwcc_get_api(dw::camera::API_VERSION), bind_key, ModVersion);
     }
 
     // UE4SS FreeLibrary's the DLL right after this (hot reload); pinned, the image stays mapped (core.cpp,
@@ -78,8 +78,8 @@ class DWSmoothwalker : public CppUserModBase
     }
 
   private:
-    std::unique_ptr<dwcam::Core> m_core;
-    std::unique_ptr<dwsw::Smoothwalker> m_smoothwalker;
+    std::unique_ptr<dw::camera::Core> m_core;
+    std::unique_ptr<dw::smoothwalker::Smoothwalker> m_smoothwalker;
 };
 
 #define DW_SMOOTHWALKER_API __declspec(dllexport)

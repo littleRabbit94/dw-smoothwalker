@@ -35,10 +35,12 @@
 #include <Unreal/UObjectArray.hpp>
 #include <Unreal/UObjectGlobals.hpp>
 
-namespace dwsc
+namespace dw::smoothwalker::modes
 {
     using namespace RC;
     using namespace RC::Unreal;
+    using settings::g_log_verbose;
+    using settings::Settings;
 
     enum Group : int
     {
@@ -1091,4 +1093,4 @@ namespace dwsc
             else if (m_flip_stage != Pending) m_flip_again = true;
         }
     };
-} // namespace dwsc
+} // namespace dw::smoothwalker::modes

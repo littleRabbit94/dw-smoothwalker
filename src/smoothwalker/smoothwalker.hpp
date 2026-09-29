@@ -10,7 +10,7 @@
 #include <memory>
 #include <string>
 
-namespace dwsw
+namespace dw::smoothwalker
 {
     class Smoothwalker
     {
@@ -20,7 +20,7 @@ namespace dwsw
         using BindKey = std::function<void(int key, std::function<void()> action)>;
 
         // Registers the follow with the core, reads smoothwalker.ini and the presets, logs the load line.
-        Smoothwalker(const dwcam::Api& core, BindKey bind_key, std::wstring version);
+        Smoothwalker(const camera::Api& core, BindKey bind_key, std::wstring version);
         // Destroys the component, unless shutdown() found a core call still running inside it: then the component is
         // released and left allocated (the core's stuck call may still read it).
         ~Smoothwalker();
@@ -41,4 +41,4 @@ namespace dwsw
         std::unique_ptr<Impl> m;
         bool m_leak = false; // shutdown: a processor or listener call did not drain; ~Smoothwalker leaks m
     };
-} // namespace dwsw
+} // namespace dw::smoothwalker

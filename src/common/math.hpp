@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace dwsc
+namespace dw
 {
     struct Vec3
     {
@@ -166,4 +166,4 @@ namespace dwsc
         Combat,
         Aiming,
     };
-} // namespace dwsc
+} // namespace dw

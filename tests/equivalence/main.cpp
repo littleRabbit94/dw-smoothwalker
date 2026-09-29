@@ -59,7 +59,7 @@ namespace
                  cuts_requested = 0, claims_ok = 0, claims_refused = 0, renewals = 0, releases_glide = 0, releases_cut = 0, uninstalls = 0,
                  rekeys = 0, layer_sets = 0, layer_refused = 0, layer_no_slot = 0, layer_clears = 0, stats_takes = 0, panels = 0, faults = 0, nan_views = 0,
                  pauses = 0, teleports = 0, crouches = 0, bad_half_heights = 0, crossfades = 0, glides = 0, transition_zero_publishes = 0;
-        std::map<int, uint64_t> snaps; // dwsc::Snap -> restarts seen
+        std::map<int, uint64_t> snaps; // Snap -> restarts seen
     };
 
     const char* const SNAP_NAMES[] = {"None", "Startup", "Teleport", "Gap", "World", "Player", "Pawn", "Toggle", "ApiCut", "ClaimEnded", "ViewLost"};

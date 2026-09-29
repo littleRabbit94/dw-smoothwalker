@@ -23,7 +23,7 @@
 #include <utility>
 #include <vector>
 
-namespace dwsc
+namespace dw::smoothwalker::settings
 {
     // Saved preset slots, ids 1..MAX_SLOTS (60 ceiling: see MAX_DROPINS); mod_settings.ini lists them by hand.
     inline constexpr int MAX_SLOTS = 6;
@@ -892,4 +892,4 @@ namespace dwsc
         if (!found_values || !found_labels) return std::nullopt;
         return out;
     }
-} // namespace dwsc
+} // namespace dw::smoothwalker::settings

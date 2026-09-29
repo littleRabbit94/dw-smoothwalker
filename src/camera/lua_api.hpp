@@ -29,7 +29,7 @@
 #include <Helpers/String.hpp>
 #include <lua.hpp>
 
-namespace dwapi
+namespace dw::camera::lua
 {
     constexpr int API_VERSION = 4; // 4: a repeat claim with a ttl renews the lease
 
@@ -54,7 +54,7 @@ namespace dwapi
     inline Snapshot g_snapshot{};
     inline bool (*g_enabled)() = nullptr;          // the processor's live switch (Processor::state), set by the core; any thread
     inline std::atomic<bool>* g_reset = nullptr;   // the hook's hard-cut flag, set by the core: release("cut")
-    inline std::atomic<int>* g_reset_reason = nullptr; // why g_reset was set (dwsc::Snap), set by the core; the debug overlay shows it
+    inline std::atomic<int>* g_reset_reason = nullptr; // why g_reset was set (dw::Snap), set by the core; the debug overlay shows it
     inline std::atomic<uint32_t> g_game_thread{0};  // captured on the engine tick
 
     // ---------------------------------------------------------------------------------------------- authority
@@ -215,8 +215,8 @@ namespace dwapi
         }
         if (!touched) return true;
 
-        dwsc::Quat q = dwsc::from_rotator(rotation[0], rotation[1], rotation[2]);
-        dwsc::Vec3 moved = dwsc::rotate(q, dwsc::Vec3{sum[0], sum[1], sum[2]});
+        dw::Quat q = dw::from_rotator(rotation[0], rotation[1], rotation[2]);
+        dw::Vec3 moved = dw::rotate(q, dw::Vec3{sum[0], sum[1], sum[2]});
         location[0] += moved.x;
         location[1] += moved.y;
         location[2] += moved.z;
@@ -508,7 +508,7 @@ namespace dwapi
         if (glide) g_release_generation.fetch_add(1, std::memory_order_relaxed);
         else if (g_reset)
         {
-            if (g_reset_reason) g_reset_reason->store(static_cast<int>(dwsc::Snap::ApiCut), std::memory_order_relaxed);
+            if (g_reset_reason) g_reset_reason->store(static_cast<int>(dw::Snap::ApiCut), std::memory_order_relaxed);
             g_reset->store(true, std::memory_order_relaxed);
         }
         g_owner_keep_layers.store(false, std::memory_order_relaxed);
@@ -754,4 +754,4 @@ namespace dwapi
         g_snapshot = Snapshot{};
         g_game_thread.store(0);
     }
-} // namespace dwapi
+} // namespace dw::camera::lua
