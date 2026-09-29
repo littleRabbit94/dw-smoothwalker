@@ -36,7 +36,8 @@ namespace dw::camera
         auto lua_stop(lua_State* L) -> void;
 
         // Unload, called by the mod's destructor in this order around Smoothwalker's own steps (mod.cpp). A false
-        // return: a call is still running inside the Core after 5 s, so the Core must not be destroyed.
+        // return: a call is still running inside the Core after 5 s, so the Core must not be destroyed (not logged
+        // here: the mod names every drain that timed out in one line).
         auto stop_lua() -> bool;             // every Lua table left holds stubs; Lua calls in flight waited for
         auto unregister_callbacks() -> void; // UnregisterCallback waits for running callbacks
         auto unhook() -> bool;               // player camera null, slot 214 restored, hook calls in flight waited for

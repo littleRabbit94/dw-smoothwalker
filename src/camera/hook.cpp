@@ -129,8 +129,6 @@ namespace
 
     auto unpublish_pipeline() -> bool
     {
-        if (g_pipeline.clear_and_drain(5000)) return true;
-        RC::Output::send<RC::LogLevel::Warning>(STR("[DWSmoothwalker] unload: a camera update is still in the hook\n"));
-        return false;
+        return g_pipeline.clear_and_drain(5000);
     }
 } // namespace dw::camera

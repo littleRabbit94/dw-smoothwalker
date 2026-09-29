@@ -1074,13 +1074,7 @@ Smoothwalker::Smoothwalker(camera::CameraCore& core, BindKey bind_key, std::wstr
 {
 }
 
-// A leaked Impl is owned by nothing afterwards: the core cleared its processor and listener slots before it timed out
-// (so no new call can reach it), and no static holds a pointer to it, so the next instance neither reuses nor frees
-// it. Only the call the core still has in flight touches it.
-Smoothwalker::~Smoothwalker()
-{
-    if (m_leak) (void)m.release();
-}
+Smoothwalker::~Smoothwalker() = default;
 
 auto Smoothwalker::start() -> void
 {
@@ -1101,19 +1095,16 @@ auto Smoothwalker::unregister_callbacks() -> void
 // After the core unhooked and waited for the hook (mod.cpp): the game thread is out of m_tuner (the callbacks
 // are gone), and no hook call is inside the processor. The CDOs get their base back; then the follow and the
 // listener leave the core. Everything of this side lives in this object and goes with it; the verbose flag it
-// writes is rewritten by the next instance's constructor.
-auto Smoothwalker::shutdown() -> void
+// writes is rewritten by the next instance's constructor. False: a core call into the follow or the listener is still
+// running, so the Impl (the follow, the tuner, the listener's target) must stay allocated; the mod then leaks this
+// object and the core together and logs it (mod.cpp). The core cleared both slots before it timed out, so no new
+// call reaches a leaked Impl.
+auto Smoothwalker::shutdown() -> bool
 {
     m->m_tuner.restore();
     // Both waits always run: the second must not be skipped by the first timing out.
     const bool listener_drained = m->m_core.clear_listener(m->m_hooks);
     const bool processor_drained = m->m_core.unregister_processor(m->m_processor);
-    if (!listener_drained || !processor_drained)
-    {
-        // A camera call the core made into the follow or the listener is still running, so the Impl (the follow, the
-        // tuner, the listener's target) stays allocated: ~Smoothwalker releases it instead of destroying it.
-        m_leak = true;
-        Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] unload: a camera call did not finish, the component was left allocated\n"));
-    }
+    return listener_drained && processor_drained;
 }
 } // namespace dw::smoothwalker

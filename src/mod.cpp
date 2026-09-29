@@ -46,14 +46,30 @@ class DWSmoothwalker : public CppUserModBase
     // UE4SS FreeLibrary's the DLL right after this (hot reload); pinned, the image stays mapped (core.cpp,
     // pin_module). The Lua functions and the hook leave the core's slots first; UnregisterCallback waits for running
     // callbacks, so the game thread is out of both components before the modes are restored; the members go last,
-    // and the next instance starts from fresh ones.
+    // and the next instance starts from fresh ones. A drain that timed out leaves a call running inside one of them,
+    // and each reaches the other (the core calls the follow and the listener, Smoothwalker holds the core's
+    // interface), so both are then leaked: no static points at either, and the next instance builds its own.
     ~DWSmoothwalker() override
     {
-        m_core->stop_lua();
+        const bool lua_drained = m_core->stop_lua();
         m_smoothwalker->unregister_callbacks();
         m_core->unregister_callbacks();
-        m_core->unhook();
-        m_smoothwalker->shutdown();
+        const bool hook_drained = m_core->unhook();
+        const bool smoothwalker_drained = m_smoothwalker->shutdown();
+        if (lua_drained && hook_drained && smoothwalker_drained) return;
+
+        std::wstring stuck;
+        auto add = [&](bool drained, const wchar_t* what) {
+            if (drained) return;
+            if (!stuck.empty()) stuck += L", ";
+            stuck += what;
+        };
+        add(lua_drained, L"a Lua call in the camera API");
+        add(hook_drained, L"a camera update in the hook");
+        add(smoothwalker_drained, L"a core call in the follow or the listener");
+        Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] unload: still running after 5 s: {}; both components left allocated\n"), stuck);
+        (void)m_smoothwalker.release();
+        (void)m_core.release();
     }
 
     auto on_lua_start(StringViewType mod_name, LuaMadeSimple::Lua& lua, LuaMadeSimple::Lua&, LuaMadeSimple::Lua&, LuaMadeSimple::Lua*) -> void override

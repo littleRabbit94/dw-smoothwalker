@@ -21,8 +21,8 @@ namespace dw::smoothwalker
 
         // Registers the follow with the core, reads smoothwalker.ini and the presets, logs the load line.
         Smoothwalker(camera::CameraCore& core, BindKey bind_key, std::wstring version);
-        // Destroys the component, unless shutdown() found a core call still running inside it: then the component is
-        // released and left allocated (the core's stuck call may still read it).
+        // Destroys the component. Not reached when a drain timed out: the mod then leaks this object and the core
+        // (mod.cpp), since a stuck call may still read either.
         ~Smoothwalker();
         Smoothwalker(const Smoothwalker&) = delete;
         auto operator=(const Smoothwalker&) -> Smoothwalker& = delete;
@@ -34,11 +34,11 @@ namespace dw::smoothwalker
 
         // Unload, called by the mod's destructor in this order around the core's own steps (mod.cpp):
         auto unregister_callbacks() -> void; // UnregisterCallback waits for running callbacks
-        auto shutdown() -> void;             // after the core unhooked: modes restored, off the core
+        auto shutdown() -> bool;             // after the core unhooked: modes restored, off the core; false: a
+                                             // processor or listener call still runs after 5 s
 
       private:
         struct Impl;
         std::unique_ptr<Impl> m;
-        bool m_leak = false; // shutdown: a processor or listener call did not drain; ~Smoothwalker leaks m
     };
 } // namespace dw::smoothwalker

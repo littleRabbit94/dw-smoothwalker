@@ -28,7 +28,7 @@ namespace dw::camera
     auto hook_slot(uintptr_t** entry) -> bool;
     // Puts back what hook_slot replaced, if the slot still holds this hook, then sleeps 50 ms. Logs a slot left alone.
     auto restore_slot() -> void;
-    // No hook call reaches the Pipeline any more; waits up to 5 s for the calls in flight. False: one is still running
-    // (logged), and the Pipeline must stay allocated.
+    // No hook call reaches the Pipeline any more; waits up to 5 s for the calls in flight. False: one is still running,
+    // and the Pipeline must stay allocated (the mod logs it, mod.cpp).
     auto unpublish_pipeline() -> bool;
 } // namespace dw::camera

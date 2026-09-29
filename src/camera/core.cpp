@@ -450,13 +450,11 @@ auto Core::lua_stop(lua_State* L) -> void
 }
 
 // The tables first (stubs, consumers released), then the slot: a Lua call already inside the Authority returns
-// before the Core can go.
+// before the Core can go. A timeout is the mod's to log (mod.cpp).
 auto Core::stop_lua() -> bool
 {
     lua::uninstall_all(m->m_authority);
-    if (lua::detach()) return true;
-    Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] unload: a Lua call is still in the camera API\n"));
-    return false;
+    return lua::detach();
 }
 
 auto Core::unregister_callbacks() -> void
