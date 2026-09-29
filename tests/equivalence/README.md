@@ -24,7 +24,7 @@ Exit 0 and `PASS` only if every session matched. Mutations (`core`, `follow`, `p
 - **Baseline:** `f22aa8e`'s headers and its `dllmain.cpp` from `namespace` to the end of `camera_live`, extracted by
   `run.sh`, patched with `baseline-fixes/*.patch` (below), and compiled (`base_driver.cpp`).
 - **Split:** the working tree's `camera/pipeline.hpp` and `smoothwalker/follow/processor.hpp`, joined only through
-  the core's table (`new_driver.cpp`).
+  the core's interface (`new_driver.cpp`).
 - Both link into one program (the baseline's four namespaces renamed `base_*`, the split's root `dw` renamed `new_dw`, on the command line) and get the same events in
   lockstep from one seeded session (`main.cpp`): walking, jumps, teleports under and over `reset_distance`, pauses,
   slow motion, crouches, implausible half heights, a missing half-height offset, NaN and infinite views, odd
