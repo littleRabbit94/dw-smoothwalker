@@ -25,9 +25,11 @@ Exit 0 and `PASS` only if every session matched. Mutations (`core`, `follow`, `p
   `run.sh`, patched with `baseline-fixes/*.patch` (below), and compiled (`base_driver.cpp`).
 - **Split:** the working tree's camera and `smoothwalker/follow/processor.hpp`, joined only through the core's
   interface (`new_driver.cpp`). The camera's own translation units are compiled as the DLL builds them (`NEW_SOURCES`
-  in `run.sh`: `camera/authority.cpp`, `camera/hook.cpp`, `camera/pipeline.cpp`, each with `shim/prelude.hpp`
-  first); the driver installs the hook on a slot of its own with `hook_slot` and calls `get_camera_view_hook`, and
-  the API operations call the product's `Authority` (`new_api_ops.inc`).
+  in `run.sh`: `camera/authority.cpp`, `camera/guarded.cpp`, `camera/hook.cpp`, `camera/pipeline.cpp`, each with
+  `shim/prelude.hpp` first); the driver gives the Pipeline and the Authority the harness's clock (`Clock` over
+  `harness::qpc_tick`) and the Pipeline a guarded copy that fails where `harness::fault_now()` says, installs the hook
+  on a slot of its own with `hook_slot` and calls `get_camera_view_hook`, and the API operations call the product's
+  `Authority` (`new_api_ops.inc`).
 - Both link into one program (the baseline's four namespaces renamed `base_*`, the split's root `dw` renamed `new_dw`, on the command line) and get the same events in
   lockstep from one seeded session (`main.cpp`): walking, jumps, teleports under and over `reset_distance`, pauses,
   slow motion, crouches, implausible half heights, a missing half-height offset, NaN and infinite views, odd
@@ -41,7 +43,8 @@ Exit 0 and `PASS` only if every session matched. Mutations (`core`, `follow`, `p
   `Smoothwalker.enabled()`, the layer state, and, when taken, the log_stats counters and the overlay's reads. The two
   records must be equal byte for byte, with one exception: every NaN counts as one value (which NaN an operation on
   two NaNs returns follows operand order, which the compiler may swap). The clocks must match too: the fake
-  `QueryPerformanceCounter` advances one tick per call, so both builds must make the same calls in the same order.
+  `QueryPerformanceCounter` (the baseline) and the injected `Clock::now` (the split) both advance `harness::qpc_tick`
+  one tick per call, so both builds must make the same calls in the same order.
 
 ## Intended changes since f22aa8e
 
@@ -71,7 +74,7 @@ session has 2 to 8 re-keys, and the first one whose consumer held a layer is the
 | `base_driver.cpp`, `new_driver.cpp` | Each build behind that interface; UE4SS-bound feeding code is quoted from the mod |
 | `base_api_ops.inc` | The baseline's Lua API game-thread operations without Lua, over f22aa8e's `dwapi::` state; frozen with the baseline |
 | `new_api_ops.inc` | The same operations over the working tree: the Lua argument checks, then `Authority`'s own methods; `api_state` reads `Authority::inspect` in the baseline's record order |
-| `shim/` | Windows, Lua, UE4SS log stubs; `prelude.hpp` maps SEH to injectable faults (forced first into the camera's `.cpp` files) |
+| `shim/` | Windows, Lua, UE4SS log stubs; `prelude.hpp` maps SEH to injectable faults for the baseline (forced first into the camera's `.cpp` files, where it only lets `guarded.cpp` compile: the split's faults come through its injected copy) |
 
 Out of reach (UObjects, UE4SS): discovery, the engine tick, `mode_tuner.hpp`, banners, the overlay widget, the
 settings file. Those are checked in game.

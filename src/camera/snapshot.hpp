@@ -1,8 +1,10 @@
 // The API view snapshot (docs/design.md, "Slice 1 as built"): what the hook handed back on the player's last camera
 // update, published once per update under a seqlock. One writer (the hook, one player-camera update at a time), any
 // number of readers on any thread (Smoothwalker.view() and live(), claim()'s fade check). Numbers only.
-// Needs the Windows types included before it.
+// Needs the Windows types included before it (camera/clock.hpp).
 #pragma once
+
+#include "clock.hpp"
 
 #include <atomic>
 #include <cmath>
@@ -24,45 +26,28 @@ namespace dw::camera
         View game;        // the view as the game built it, before Smoothwalker
         View shown;       // what Smoothwalker handed back (equal to game when off)
         double pivot[3];  // the character pivot the follow is built around; NAN when unknown
-        int64_t qpc;      // QueryPerformanceCounter at publish
+        int64_t qpc;      // the publisher's clock (QueryPerformanceCounter) at publish
     };
 
     constexpr double LIVE_WINDOW = 0.25; // s, the camera_live() window
 
-    inline auto qpc_now() -> int64_t
+    // s since the snapshot was stamped, on `clock`, which counts the same ticks as the stamping clock: one now().
+    inline auto age_seconds(const Snapshot& s, const Clock& clock) -> double
     {
-        LARGE_INTEGER li{};
-        QueryPerformanceCounter(&li);
-        return li.QuadPart;
-    }
-
-    // Constant per boot: a function-local static, never reset.
-    inline auto qpc_frequency() -> double
-    {
-        static const double f = [] {
-            LARGE_INTEGER li{};
-            QueryPerformanceFrequency(&li);
-            return static_cast<double>(li.QuadPart);
-        }();
-        return f;
-    }
-
-    inline auto age_seconds(const Snapshot& s) -> double
-    {
-        return static_cast<double>(qpc_now() - s.qpc) / qpc_frequency();
+        return static_cast<double>(clock.now() - s.qpc) / clock.frequency();
     }
 
     class ViewSnapshot
     {
       public:
-        // The hook. Stamps the snapshot with one qpc_now().
-        auto publish(const View& game, const View& shown, const double* pivot) -> void
+        // The hook. `qpc`: the stamp, the publisher's clock now.
+        auto publish(const View& game, const View& shown, const double* pivot, int64_t qpc) -> void
         {
             Snapshot s{};
             s.game = game;
             s.shown = shown;
             for (int i = 0; i < 3; ++i) s.pivot[i] = pivot ? pivot[i] : NAN;
-            s.qpc = qpc_now();
+            s.qpc = qpc;
             auto v = m_seq.load(std::memory_order_relaxed);
             m_seq.store(v + 1, std::memory_order_release);
             std::memcpy(&m_data, &s, sizeof(s));

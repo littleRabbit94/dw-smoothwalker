@@ -18,6 +18,18 @@ namespace
 {
     using namespace dw::camera;
 
+    // The harness's clock: one tick per now(), the same clock the baseline's QueryPerformanceCounter reads.
+    constexpr Clock HARNESS_CLOCK{&harness::qpc_tick, &qpc_frequency};
+
+    // The harness's guarded copy: fails the access the harness armed a fault for, as prelude.hpp's __try does for the
+    // baseline.
+    auto harness_copy(void* dst, const void* src, size_t n) -> bool
+    {
+        if (::harness::fault_now()) return false;
+        std::memcpy(dst, src, n);
+        return true;
+    }
+
 #include "new_api_ops.inc"
 
     class NewDriver final : public harness::Variant
@@ -27,7 +39,9 @@ namespace
         {
             // Core::Core (core.cpp).
             g_authority.link(&processor_enabled, &g_pipeline.reset_flag(), &g_pipeline.reset_reason(), &g_pipeline.snapshot());
-            g_pipeline.read_qpc_frequency();
+            g_pipeline.set_clock(HARNESS_CLOCK);
+            g_pipeline.set_guarded_copy(&harness_copy);
+            g_authority.set_clock(HARNESS_CLOCK);
             // Core::Impl::install_hook (core.cpp), on a slot of the harness's that holds the game's GetCameraView.
             m_slot = reinterpret_cast<uintptr_t*>(&harness::original_view);
             if (!hook_slot(&m_slot)) std::abort();

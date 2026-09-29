@@ -1,5 +1,5 @@
-// The camera API's state: consumers, the owner, layers (camera/authority.hpp). The qpc_now() calls are part of the
-// contract: the equivalence harness counts them, in order.
+// The camera API's state: consumers, the owner, layers (camera/authority.hpp). The clock's now() calls are part of
+// the contract: the equivalence harness counts them, in order.
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -38,7 +38,7 @@ namespace dw::camera
         {
             std::lock_guard guard(m_mutex);
             expires = m_owner_expires.load(std::memory_order_relaxed);
-            if (m_owner_state && (expires == 0 || qpc_now() < expires)) mod = m_owner_mod;
+            if (m_owner_state && (expires == 0 || m_clock.now() < expires)) mod = m_owner_mod;
         }
         if (expires_out) *expires_out = expires;
         return mod;
@@ -87,7 +87,7 @@ namespace dw::camera
     {
         if (!m_owner_state) return;
         auto expires = m_owner_expires.load(std::memory_order_relaxed);
-        if (expires != 0 && qpc_now() >= expires) release_locked(false);
+        if (expires != 0 && m_clock.now() >= expires) release_locked(false);
     }
 
     // Under m_mutex. Fades the slot out over its last blend; the slot stays the consumer's.
@@ -143,14 +143,14 @@ namespace dw::camera
 
     auto Authority::claim(const void* key, bool keep_layers, double ttl) -> ApiResult
     {
-        const int64_t expires = ttl > 0 ? qpc_now() + static_cast<int64_t>(ttl * qpc_frequency()) : 0;
+        const int64_t expires = ttl > 0 ? m_clock.now() + static_cast<int64_t>(ttl * m_clock.frequency()) : 0;
         // Smoothwalker's own crossfade is mid-flight: taking the camera now would strand it. The flag is only
         // trusted while the camera is actually updating, so a pause or a cutscene mid-fade cannot pin it true.
         bool fade_live = false;
         if (m_blending.load(std::memory_order_relaxed))
         {
             Snapshot s{};
-            fade_live = read_view(s) && age_seconds(s) < LIVE_WINDOW;
+            fade_live = read_view(s) && age_seconds(s, m_clock) < LIVE_WINDOW;
         }
         std::lock_guard guard(m_mutex);
         drop_expired_locked();
@@ -194,7 +194,7 @@ namespace dw::camera
         l.blend = std::max(l.blend, 0.0);
         if (std::isfinite(l.fov_abs)) l.fov_abs = std::clamp(l.fov_abs, 5.0, 170.0);
         l.active = true;
-        l.expires = ttl > 0 ? qpc_now() + static_cast<int64_t>(ttl * qpc_frequency()) : 0;
+        l.expires = ttl > 0 ? m_clock.now() + static_cast<int64_t>(ttl * m_clock.frequency()) : 0;
 
         std::lock_guard guard(m_mutex);
         auto it = m_states.find(key);
@@ -232,7 +232,7 @@ namespace dw::camera
         std::memcpy(layers, m_layers, sizeof(layers));
         ReleaseSRWLockShared(&m_layers_lock);
 
-        const int64_t now = qpc_now();
+        const int64_t now = m_clock.now();
         bool any = false, touched = false;
         double sum[7]{};
         for (int i = 0; i < MAX_LAYERS; ++i)
@@ -311,6 +311,7 @@ namespace dw::camera
         m_layers_any.store(false);
         m_blending.store(false);
         m_game_thread.store(0);
+        m_clock = QPC_CLOCK;
     }
 
     auto Authority::inspect() const -> Inspect

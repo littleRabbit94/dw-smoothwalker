@@ -18,6 +18,7 @@ add_library(DWSmoothwalker SHARED
     "${CMAKE_CURRENT_SOURCE_DIR}/src/mod.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/camera/authority.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/camera/core.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/camera/guarded.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/camera/hook.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/camera/pipeline.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/smoothwalker.cpp")

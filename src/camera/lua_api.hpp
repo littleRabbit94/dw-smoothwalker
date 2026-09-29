@@ -114,7 +114,7 @@ namespace dw::camera::lua
             lua_pushnumber(L, s.pivot[2]); lua_setfield(L, -2, "z");
             lua_setfield(L, -2, "pivot");
         }
-        lua_pushnumber(L, age_seconds(s)); lua_setfield(L, -2, "age");
+        lua_pushnumber(L, age_seconds(s, g_authority.clock())); lua_setfield(L, -2, "age");
         return 1;
     }
 
@@ -128,7 +128,7 @@ namespace dw::camera::lua
             lua_pushnumber(L, HUGE_VAL);
             return 2;
         }
-        double age = age_seconds(s);
+        double age = age_seconds(s, g_authority.clock());
         lua_pushboolean(L, age < LIVE_WINDOW ? 1 : 0);
         lua_pushnumber(L, age);
         return 2;

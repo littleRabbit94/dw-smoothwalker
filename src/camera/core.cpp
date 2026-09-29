@@ -5,6 +5,7 @@
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
 #include "core.hpp"
+#include "guarded.hpp"
 #include "hook.hpp"
 #include "lua_api.hpp"
 #include "pipeline.hpp"
@@ -335,7 +336,7 @@ struct Core::Impl
         {
             if (offset == relative_offset) continue;
             double block[7]{};
-            if (!guarded_read(base + offset, block, sizeof(block))) break;
+            if (!seh_copy(block, base + offset, sizeof(block))) break;
             bool location = std::abs(block[0] - want[0]) < 0.5 && std::abs(block[1] - want[1]) < 0.5 && std::abs(block[2] - want[2]) < 0.5;
             bool scale = std::abs(block[4] - 1.0) < 1e-3 && std::abs(block[5] - 1.0) < 1e-3 && std::abs(block[6] - 1.0) < 1e-3;
             if (location && scale)
@@ -366,7 +367,6 @@ Core::Core() : m(std::make_unique<Impl>())
     }
     // release("cut") snaps through the same flag a teleport sets.
     g_authority.link(&processor_enabled, &g_pipeline.reset_flag(), &g_pipeline.reset_reason(), &g_pipeline.snapshot());
-    g_pipeline.read_qpc_frequency();
 }
 
 Core::~Core() = default;

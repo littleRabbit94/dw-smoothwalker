@@ -1,5 +1,5 @@
 // The camera core's hook side (camera/pipeline.hpp): one player-camera update, and the CameraCore state around it.
-// The QueryPerformanceCounter calls are part of the contract: the equivalence harness counts them, in order.
+// The clock's now() calls are part of the contract: the equivalence harness counts them, in order.
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
 #include "pipeline.hpp"
@@ -32,35 +32,9 @@ namespace
     }
 } // namespace
 
-    auto guarded_read(void* from, void* to, size_t bytes) -> bool
-    {
-        __try
-        {
-            memcpy(to, from, bytes);
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            return false;
-        }
-    }
-
-    auto guarded_write(void* to, const void* from, size_t bytes) -> bool
-    {
-        __try
-        {
-            memcpy(to, from, bytes);
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            return false;
-        }
-    }
-
     auto Pipeline::seconds_between(LARGE_INTEGER a, LARGE_INTEGER b) const -> double
     {
-        return static_cast<double>(b.QuadPart - a.QuadPart) / static_cast<double>(m_qpc_frequency.QuadPart);
+        return static_cast<double>(b.QuadPart - a.QuadPart) / m_clock.frequency();
     }
 
     auto Pipeline::publish_api_view(const ViewHead& game, const ViewHead& shown, const dw::Vec3* pivot) -> void
@@ -69,7 +43,7 @@ namespace
         View s{{shown.location[0], shown.location[1], shown.location[2]}, {shown.rotation[0], shown.rotation[1], shown.rotation[2]}, shown.fov};
         double p[3]{};
         if (pivot) { p[0] = pivot->x; p[1] = pivot->y; p[2] = pivot->z; }
-        m_snapshot.publish(g, s, pivot ? p : nullptr);
+        m_snapshot.publish(g, s, pivot ? p : nullptr, m_clock.now());
     }
 
     // The debug overlay's feed while nothing is followed.
@@ -107,7 +81,7 @@ namespace
         // The slot is read before the lease, so a fresh claim never pairs with the previous owner's stale expiry.
         const bool owner_held = g_authority.owner_slot() >= 0;
         const int64_t owner_expires = g_authority.owner_expires();
-        const bool owned = owner_held && (owner_expires == 0 || qpc_now() < owner_expires);
+        const bool owned = owner_held && (owner_expires == 0 || m_clock.now() < owner_expires);
         const bool owner_keeps_layers = owned && g_authority.owner_keeps_layers();
         // The release generation, sampled here because the falling edge below needs it; `changed` uses this sample.
         const auto release = g_authority.release_generation();
@@ -131,14 +105,14 @@ namespace
         ReleaseSRWLockShared(&m_tuning_lock);
 
         LARGE_INTEGER now{};
-        QueryPerformanceCounter(&now);
+        now.QuadPart = m_clock.now();
 
         auto* root = m_player_root.load(std::memory_order_relaxed);
         auto offset = m_translation_offset.load(std::memory_order_relaxed);
         double pivot_raw[3]{};
         ViewHead view{};
-        if (!root || offset < 0 || !guarded_read(static_cast<uint8_t*>(root) + offset, pivot_raw, sizeof(pivot_raw)) ||
-            !guarded_read(desired_view, &view, VIEW_BYTES))
+        if (!root || offset < 0 || !m_copy(pivot_raw, static_cast<uint8_t*>(root) + offset, sizeof(pivot_raw)) ||
+            !m_copy(&view, desired_view, VIEW_BYTES))
         {
             lose_view();
             return;
@@ -159,7 +133,7 @@ namespace
         // NAN when missing or implausible.
         float half_height = NAN;
         auto half_offset = m_half_height_offset.load(std::memory_order_relaxed);
-        if (half_offset >= 0 && !guarded_read(static_cast<uint8_t*>(root) + half_offset, &half_height, sizeof(half_height))) half_height = NAN;
+        if (half_offset >= 0 && !m_copy(&half_height, static_cast<uint8_t*>(root) + half_offset, sizeof(half_height))) half_height = NAN;
         if (!std::isfinite(half_height) || half_height < 0.0f || half_height > 1000.0f) half_height = NAN;
 
         // The cut thresholds, the processor's switch and settings, and its mode writes crossfade; a hard cut (player
@@ -314,7 +288,7 @@ namespace
         bool wrote = apply_result || layered;
         if (wrote)
         {
-            if (!guarded_write(desired_view, &view, VIEW_BYTES))
+            if (!m_copy(desired_view, &view, VIEW_BYTES))
             {
                 lose_view();
                 return;
@@ -341,9 +315,7 @@ namespace
         {
             m_view_seconds.store(m_view_seconds.load(std::memory_order_relaxed) + delta_time, std::memory_order_relaxed);
         }
-        LARGE_INTEGER stamp{};
-        QueryPerformanceCounter(&stamp);
-        m_last_view_qpc.store(stamp.QuadPart, std::memory_order_relaxed);
+        m_last_view_qpc.store(m_clock.now(), std::memory_order_relaxed);
         // The processor slot and its switch, sampled once for this whole update (Processor::state). No processor
         // reads as off with toggle generation 0: the core alone leaves the game's view alone.
         Counted in_processor(m_in_processor);
@@ -359,7 +331,7 @@ namespace
             g_authority.set_blending(false);
             publish_debug_idle();
             ViewHead view{};
-            if (guarded_read(desired_view, &view, VIEW_BYTES)) publish_api_view(view, view, nullptr);
+            if (m_copy(&view, desired_view, VIEW_BYTES)) publish_api_view(view, view, nullptr);
             return;
         }
         if (!m_hook_timing.load(std::memory_order_relaxed))
@@ -367,20 +339,18 @@ namespace
             update_view(desired_view, delta_time, processor, enabled, toggle);
             return;
         }
-        LARGE_INTEGER start{}, stop{};
-        QueryPerformanceCounter(&start);
+        const int64_t start = m_clock.now();
         update_view(desired_view, delta_time, processor, enabled, toggle);
-        QueryPerformanceCounter(&stop);
+        const int64_t stop = m_clock.now();
         m_calls_timed.fetch_add(1, std::memory_order_relaxed);
-        m_ticks_spent.fetch_add(static_cast<uint64_t>(stop.QuadPart - start.QuadPart), std::memory_order_relaxed);
+        m_ticks_spent.fetch_add(static_cast<uint64_t>(stop - start), std::memory_order_relaxed);
     }
 
     auto Pipeline::camera_live() const -> bool
     {
-        LARGE_INTEGER now{};
-        QueryPerformanceCounter(&now);
+        const int64_t now = m_clock.now();
         auto last = m_last_view_qpc.load(std::memory_order_relaxed);
-        return last != 0 && static_cast<double>(now.QuadPart - last) / static_cast<double>(m_qpc_frequency.QuadPart) < 0.25;
+        return last != 0 && static_cast<double>(now - last) / m_clock.frequency() < 0.25;
     }
 
     auto Pipeline::processor_enabled() -> bool
@@ -441,7 +411,7 @@ namespace
         auto timed = m_calls_timed.exchange(0);
         auto ticks = m_ticks_spent.exchange(0);
         calls = timed;
-        microseconds_per_call = timed ? 1e6 * static_cast<double>(ticks) / static_cast<double>(m_qpc_frequency.QuadPart) / timed : 0.0;
+        microseconds_per_call = timed ? 1e6 * static_cast<double>(ticks) / m_clock.frequency() / timed : 0.0;
     }
 
     auto Pipeline::read_debug() const -> DebugFeed
@@ -457,9 +427,8 @@ namespace
         out.snap_age = NAN;
         if (auto at = m_debug_snap_qpc.load(std::memory_order_relaxed))
         {
-            LARGE_INTEGER now{};
-            QueryPerformanceCounter(&now);
-            out.snap_age = static_cast<double>(now.QuadPart - at) / static_cast<double>(m_qpc_frequency.QuadPart);
+            const int64_t now = m_clock.now();
+            out.snap_age = static_cast<double>(now - at) / m_clock.frequency();
         }
         out.glide = m_debug_glide.load(std::memory_order_relaxed);
         return out;
@@ -498,6 +467,8 @@ namespace
         m_processor.store(nullptr);
         m_listener.store(nullptr);
         m_snapshot.reset();
+        m_clock = QPC_CLOCK;
+        m_copy = &seh_copy;
     }
 
     auto Pipeline::inspect() const -> Inspect
@@ -558,7 +529,8 @@ namespace
             int64_t expires = 0;
             std::string mod = g_authority.owner(&expires);
             Owner owner;
-            owner.lease = !mod.empty() && expires != 0 ? std::max(0.0, static_cast<double>(expires - qpc_now()) / qpc_frequency()) : NAN;
+            const Clock& clock = g_authority.clock();
+            owner.lease = !mod.empty() && expires != 0 ? std::max(0.0, static_cast<double>(expires - clock.now()) / clock.frequency()) : NAN;
             owner.mod = std::move(mod);
             return owner;
         }

@@ -10,6 +10,7 @@
 // Needs the Windows types included before it.
 #pragma once
 
+#include "clock.hpp"
 #include "snapshot.hpp"
 
 #include <atomic>
@@ -88,6 +89,13 @@ namespace dw::camera
             size_t consumers;
         };
 
+        explicit Authority(Clock clock = QPC_CLOCK) : m_clock(clock) {}
+
+        // The clock every lease, expiry and age is read on. Set before first use (a test's clock); reset() puts
+        // QPC_CLOCK back.
+        auto set_clock(Clock clock) -> void { m_clock = clock; }
+        auto clock() const -> const Clock& { return m_clock; }
+
         // The core's pipeline, set by the core at construction and kept across reset(): the processor's live switch
         // (any thread), the hook's hard-cut flag and its reason (release("cut") snaps through the same flag a
         // teleport sets), and the view snapshot claim() checks.
@@ -149,8 +157,8 @@ namespace dw::camera
         auto apply_layers(double* location, double* rotation, float& fov, double dt) -> bool;
 
         // Every field back to its static-init value, for the next instance on the same pinned image
-        // (Core::reset_globals). After every Lua table holds stubs and the hook stopped following the player. Kept:
-        // the locks and the link() pointers.
+        // (Core::reset_globals), the clock included. After every Lua table holds stubs and the hook stopped following
+        // the player. Kept: the locks and the link() pointers.
         auto reset() -> void;
 
         auto inspect() const -> Inspect;
@@ -160,6 +168,7 @@ namespace dw::camera
         auto drop_expired_locked() -> void;
         auto clear_slot_locked(int slot) -> void;
 
+        Clock m_clock;
         bool (*m_enabled)() = nullptr;
         std::atomic<bool>* m_reset = nullptr;
         std::atomic<int>* m_reset_reason = nullptr;

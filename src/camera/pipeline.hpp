@@ -16,7 +16,9 @@
 #include "../common/log.hpp"
 #include "../common/math.hpp"
 #include "api.hpp"
+#include "clock.hpp"
 #include "frame.hpp"
+#include "guarded.hpp"
 #include "snapshot.hpp"
 
 #include <atomic>
@@ -70,10 +72,6 @@ namespace dw::camera
         bool blend_glide = false;                         // the running crossfade came from a release("glide")
     };
 
-    // A memory copy that answers false instead of faulting (SEH). Kept free of C++ objects: __try needs a plain frame.
-    auto guarded_read(void* from, void* to, size_t bytes) -> bool;
-    auto guarded_write(void* to, const void* from, size_t bytes) -> bool;
-
     // Counts a caller in for as long as it lives (the processor and listener slots).
     struct Counted
     {
@@ -87,13 +85,19 @@ namespace dw::camera
     class Pipeline
     {
       public:
+        explicit Pipeline(Clock clock = QPC_CLOCK, GuardedCopy copy = &seh_copy) : m_clock(clock), m_copy(copy) {}
+
+        // The clock every stamp, gap and age is read on, and the copy every read of the player's objects and the
+        // write of the view go through. Set before first use (a test's); reset() puts the defaults back.
+        auto set_clock(Clock clock) -> void { m_clock = clock; }
+        auto set_guarded_copy(GuardedCopy copy) -> void { m_copy = copy; }
+
         // The hook (camera/hook.cpp), after the game's own GetCameraView: the rest of one camera update. Returns at
         // once for any camera but the player's.
         auto on_camera_view(void* self, float delta_time, void* desired_view) -> void;
 
         // ------------------------------------------------------------------------ game thread (camera/core.cpp)
 
-        auto read_qpc_frequency() -> void { QueryPerformanceFrequency(&m_qpc_frequency); }
         // A hard cut on the next camera update, and why. The first reason since the hook last took a cut is kept: a
         // level change is followed by a new controller and a new pawn, and the level change is the one to show. A
         // hook taking the cut between the load and the stores leaves this cut with the older reason (display only).
@@ -154,9 +158,9 @@ namespace dw::camera
         auto snapshot() const -> const ViewSnapshot& { return m_snapshot; }
 
         // Every field back to its static-init value, for the next instance on the same pinned image
-        // (Core::reset_globals). Kept: the tuning lock, m_in_processor and m_in_listener (self-balancing, and a call
-        // through a hook left in the chain may be in flight), and the QPC frequency (per boot; the constructor
-        // queries it again). The verbose flag (common/log.hpp), which set_diagnostics writes, goes back to off too.
+        // (Core::reset_globals), the clock and the copy included. Kept: the tuning lock, m_in_processor and
+        // m_in_listener (self-balancing, and a call through a hook left in the chain may be in flight). The verbose
+        // flag (common/log.hpp), which set_diagnostics writes, goes back to off too.
         auto reset() -> void;
 
         // Read-only copy of what the hook publishes, for a single-threaded check (the equivalence harness).
@@ -182,6 +186,9 @@ namespace dw::camera
         auto publish_debug_idle() -> void;
         auto lose_view() -> void;
         auto update_view(void* desired_view, float delta_time, Processor* processor, bool enabled, uint64_t toggle) -> void;
+
+        Clock m_clock;
+        GuardedCopy m_copy;
 
         SRWLOCK m_tuning_lock = SRWLOCK_INIT; // m_tuning
         Tuning m_tuning = DEFAULT_TUNING;
@@ -226,7 +233,6 @@ namespace dw::camera
         std::atomic<int> m_in_listener{0};  // the game thread inside m_listener
 
         ViewState m_view;
-        LARGE_INTEGER m_qpc_frequency{};
         ViewSnapshot m_snapshot; // the API snapshot: published here, read by Lua's view() and live() through the Authority
     };
 

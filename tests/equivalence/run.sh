@@ -71,7 +71,7 @@ case "$MUTATE" in
     *) echo "unknown mutation: $MUTATE"; exit 2 ;;
 esac
 
-NEW_SOURCES="camera/authority.cpp camera/hook.cpp camera/pipeline.cpp"
+NEW_SOURCES="camera/authority.cpp camera/guarded.cpp camera/hook.cpp camera/pipeline.cpp"
 FLAGS="-std=c++23 -O2 -Wall -Wextra -Wno-unused-function -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -I$HERE -I$HERE/shim -I$BUILD"
 $CXX $FLAGS -I"$BUILD/base/src" $BASE_DEFS -Ddwapi=base_dwapi -Ddwsc=base_dwsc -Ddwsw=base_dwsw -Ddwcam=base_dwcam -c "$HERE/base_driver.cpp" -o "$BUILD/base.o" &
 $CXX $FLAGS -I"$BUILD/new/src" -Ddw=new_dw -c "$HERE/new_driver.cpp" -o "$BUILD/new.o" &
