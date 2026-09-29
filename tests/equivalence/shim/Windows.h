@@ -1,6 +1,6 @@
-// The Windows surface the hook region, config.hpp and lua_api.hpp use, for a Linux build of the equivalence
-// harness. The clock is the harness's (QueryPerformanceCounter advances by one tick per call, so the two variants
-// must make the same calls in the same order to stay in step); locks are no-ops
+// The Windows surface the hook region, config.hpp, lua_api.hpp and the camera's .cpp files use, for a Linux build of
+// the equivalence harness. The clock is the harness's (QueryPerformanceCounter advances by one tick per call, so the
+// two variants must make the same calls in the same order to stay in step); locks are no-ops
 // (one thread); the file and string calls fail harmlessly (never reached).
 #pragma once
 
@@ -60,6 +60,21 @@ inline void AcquireSRWLockExclusive(SRWLOCK*) {}
 inline void ReleaseSRWLockExclusive(SRWLOCK*) {}
 
 inline void Sleep(DWORD) {}
+
+// The slot 214 install (camera/hook.cpp): a harness-owned slot, always writable; nothing is ever mapped.
+#define PAGE_READWRITE 0x04
+inline BOOL VirtualProtect(void*, size_t, DWORD protect, DWORD* old)
+{
+    if (old) *old = protect;
+    return TRUE;
+}
+#define GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT 0x2
+#define GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS 0x4
+inline BOOL GetModuleHandleExW(DWORD, LPCWSTR, HMODULE* out)
+{
+    if (out) *out = nullptr;
+    return FALSE;
+}
 inline DWORD GetCurrentThreadId() { return 1; }
 inline DWORD GetLastError() { return 0; }
 

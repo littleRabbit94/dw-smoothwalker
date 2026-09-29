@@ -65,20 +65,20 @@ plant() { # file, from, to: replace one exact line fragment, or fail
 }
 case "$MUTATE" in
     "") ;;
-    core) plant camera/pipeline.hpp "double w = s * s * (3.0 - 2.0 * s);" "double w = s;" ;;          # the crossfade eased linearly
+    core) plant camera/pipeline.cpp "double w = s * s * (3.0 - 2.0 * s);" "double w = s;" ;;          # the crossfade eased linearly
     follow) plant smoothwalker/follow/follow.hpp "m_nominal_hold = t.transition + 0.3;" "m_nominal_hold = t.transition + 0.35;" ;; # the wall-clamp hold
     processor) plant smoothwalker/follow/processor.hpp "if (settings != m_seen_settings || sw.mode_write)" "if (settings != m_seen_settings)" ;; # mode writes do not fade
     *) echo "unknown mutation: $MUTATE"; exit 2 ;;
 esac
 
-NEW_SOURCES="camera/authority.cpp"
+NEW_SOURCES="camera/authority.cpp camera/hook.cpp camera/pipeline.cpp"
 FLAGS="-std=c++23 -O2 -Wall -Wextra -Wno-unused-function -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -I$HERE -I$HERE/shim -I$BUILD"
 $CXX $FLAGS -I"$BUILD/base/src" $BASE_DEFS -Ddwapi=base_dwapi -Ddwsc=base_dwsc -Ddwsw=base_dwsw -Ddwcam=base_dwcam -c "$HERE/base_driver.cpp" -o "$BUILD/base.o" &
 $CXX $FLAGS -I"$BUILD/new/src" -Ddw=new_dw -c "$HERE/new_driver.cpp" -o "$BUILD/new.o" &
 NEW_OBJECTS="$BUILD/new.o"
-for src in $NEW_SOURCES; do # the split's own translation units, as CMakeLists.txt builds them
+for src in $NEW_SOURCES; do # the split's own translation units, as CMakeLists.txt builds them; prelude.hpp first, as the drivers
     obj="$BUILD/new_$(basename "$src" .cpp).o"
-    $CXX $FLAGS -I"$BUILD/new/src" -Ddw=new_dw -c "$BUILD/new/src/$src" -o "$obj" &
+    $CXX $FLAGS -I"$BUILD/new/src" -Ddw=new_dw -include "$HERE/shim/prelude.hpp" -c "$BUILD/new/src/$src" -o "$obj" &
     NEW_OBJECTS="$NEW_OBJECTS $obj"
 done
 $CXX $FLAGS -c "$HERE/main.cpp" -o "$BUILD/main.o" &

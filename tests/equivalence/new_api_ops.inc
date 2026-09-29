@@ -65,8 +65,8 @@ namespace ops
     // Everything the API side holds that the hook reads or writes, in base_api_ops.inc's record order.
     inline auto api_state(harness::Record& r) -> void
     {
-        r.put("api.seq", g_api_snapshot.seq());
-        const Snapshot& snapshot = g_api_snapshot.data();
+        r.put("api.seq", g_pipeline.snapshot().seq());
+        const Snapshot& snapshot = g_pipeline.snapshot().data();
         auto view = [&](const char* label, const View& v) {
             r.put(label, v.location);
             r.put(label, v.rotation);

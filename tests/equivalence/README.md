@@ -23,9 +23,11 @@ Exit 0 and `PASS` only if every session matched. Mutations (`core`, `follow`, `p
 
 - **Baseline:** `f22aa8e`'s headers and its `dllmain.cpp` from `namespace` to the end of `camera_live`, extracted by
   `run.sh`, patched with `baseline-fixes/*.patch` (below), and compiled (`base_driver.cpp`).
-- **Split:** the working tree's `camera/pipeline.hpp` and `smoothwalker/follow/processor.hpp`, joined only through
-  the core's interface (`new_driver.cpp`), with the camera's own translation units linked in (`NEW_SOURCES` in
-  `run.sh`: `camera/authority.cpp`). The API operations call the product's `Authority` (`new_api_ops.inc`).
+- **Split:** the working tree's camera and `smoothwalker/follow/processor.hpp`, joined only through the core's
+  interface (`new_driver.cpp`). The camera's own translation units are compiled as the DLL builds them (`NEW_SOURCES`
+  in `run.sh`: `camera/authority.cpp`, `camera/hook.cpp`, `camera/pipeline.cpp`, each with `shim/prelude.hpp`
+  first); the driver installs the hook on a slot of its own with `hook_slot` and calls `get_camera_view_hook`, and
+  the API operations call the product's `Authority` (`new_api_ops.inc`).
 - Both link into one program (the baseline's four namespaces renamed `base_*`, the split's root `dw` renamed `new_dw`, on the command line) and get the same events in
   lockstep from one seeded session (`main.cpp`): walking, jumps, teleports under and over `reset_distance`, pauses,
   slow motion, crouches, implausible half heights, a missing half-height offset, NaN and infinite views, odd
@@ -69,7 +71,7 @@ session has 2 to 8 re-keys, and the first one whose consumer held a layer is the
 | `base_driver.cpp`, `new_driver.cpp` | Each build behind that interface; UE4SS-bound feeding code is quoted from the mod |
 | `base_api_ops.inc` | The baseline's Lua API game-thread operations without Lua, over f22aa8e's `dwapi::` state; frozen with the baseline |
 | `new_api_ops.inc` | The same operations over the working tree: the Lua argument checks, then `Authority`'s own methods; `api_state` reads `Authority::inspect` in the baseline's record order |
-| `shim/` | Windows, Lua, UE4SS log stubs; `prelude.hpp` maps SEH to injectable faults |
+| `shim/` | Windows, Lua, UE4SS log stubs; `prelude.hpp` maps SEH to injectable faults (forced first into the camera's `.cpp` files) |
 
 Out of reach (UObjects, UE4SS): discovery, the engine tick, `mode_tuner.hpp`, banners, the overlay widget, the
 settings file. Those are checked in game.

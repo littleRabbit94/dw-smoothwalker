@@ -1,5 +1,5 @@
-// The camera API's state: consumers, the owner, layers (camera/authority.hpp). Bodies moved from camera/lua_api.hpp
-// unchanged; every qpc_now() call sits where it was.
+// The camera API's state: consumers, the owner, layers (camera/authority.hpp). The qpc_now() calls are part of the
+// contract: the equivalence harness counts them, in order.
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
 #ifndef WIN32_LEAN_AND_MEAN

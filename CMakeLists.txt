@@ -18,6 +18,8 @@ add_library(DWSmoothwalker SHARED
     "${CMAKE_CURRENT_SOURCE_DIR}/src/mod.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/camera/authority.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/camera/core.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/camera/hook.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/camera/pipeline.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/smoothwalker.cpp")
 target_link_libraries(DWSmoothwalker PUBLIC UE4SS)
 # Record the PDB by file name rather than absolute path. The name is literal because the Visual Studio

@@ -1,11 +1,13 @@
-// The split build: the core's hook side (camera/pipeline.hpp, with camera/authority.cpp linked in) and Smoothwalker's
-// processor (smoothwalker/follow/processor.hpp), joined only through the core's interface (dw::camera::core_api(),
-// what Core::api() returns), as the DLL runs them. The UE4SS-bound code that feeds them (core.cpp's constructor lines,
+// The split build: the core's hook side (camera/hook.cpp's hook over camera/pipeline.cpp and camera/authority.cpp,
+// linked in) and Smoothwalker's processor (smoothwalker/follow/processor.hpp), joined only through the core's
+// interface (dw::camera::core_api(), what Core::api() returns), as the DLL runs them. The UE4SS-bound code that feeds them (core.cpp's constructor lines,
 // smoothwalker.cpp's apply_position, update and api_status) is quoted below. Namespaces are renamed new_* on the
 // command line so both builds link into one program.
 
 #include "prelude.hpp" // first: see there
 
+#include "camera/authority.hpp"
+#include "camera/hook.hpp"
 #include "camera/pipeline.hpp"
 #include "smoothwalker/follow/processor.hpp"
 #undef ifstream
@@ -24,9 +26,11 @@ namespace
         auto init(const harness::HSettings& settings, bool enabled) -> void override
         {
             // Core::Core (core.cpp).
-            g_authority.link(&processor_enabled, &g_reset, &g_reset_reason, &g_api_snapshot);
-            QueryPerformanceFrequency(&g_qpc_frequency);
-            g_original = &harness::original_view;
+            g_authority.link(&processor_enabled, &g_pipeline.reset_flag(), &g_pipeline.reset_reason(), &g_pipeline.snapshot());
+            g_pipeline.read_qpc_frequency();
+            // Core::Impl::install_hook (core.cpp), on a slot of the harness's that holds the game's GetCameraView.
+            m_slot = reinterpret_cast<uintptr_t*>(&harness::original_view);
+            if (!hook_slot(&m_slot)) std::abort();
             ops::install(0);
             ops::install(1);
             // Smoothwalker::Impl's constructor (smoothwalker.cpp): register, then the startup publish and switch.
@@ -53,14 +57,14 @@ namespace
 
         auto mode_write() -> void override { m_processor.mode_written(); }
 
-        auto request_cut(int reason) -> void override { dw::camera::request_cut(static_cast<dw::camera::Snap>(reason)); }
+        auto request_cut(int reason) -> void override { g_pipeline.request_cut(static_cast<dw::camera::Snap>(reason)); }
 
         auto set_player(void* camera, void* root, int32_t translation_offset, int32_t half_height_offset) -> void override
         {
-            g_player_camera.store(camera);
-            g_player_root.store(root);
-            g_translation_offset.store(translation_offset);
-            g_half_height_offset.store(half_height_offset);
+            g_pipeline.set_player_camera(camera);
+            g_pipeline.set_player_root(root);
+            g_pipeline.set_translation_offset(translation_offset);
+            g_pipeline.set_half_height_offset(half_height_offset);
         }
 
         auto hook(void* self, float delta_time, void* desired_view) -> void override { get_camera_view_hook(self, delta_time, desired_view); }
@@ -125,25 +129,27 @@ namespace
 
         auto state(harness::Record& r) -> void override
         {
-            r.put("debug.keep_follow", g_debug_keep_follow.load());
-            r.put("debug.keep_turn", g_debug_keep_turn.load());
-            r.put("debug.influence", g_debug_influence.load());
-            r.put("debug.lag_h", g_debug_lag_h.load());
-            r.put("debug.lag_v", g_debug_lag_v.load());
-            r.put("debug.rate_h", g_debug_rate_h.load());
-            r.put("debug.snap", g_debug_snap.load());
-            r.put("debug.snap_qpc", g_debug_snap_qpc.load());
-            r.put("debug.glide", g_debug_glide.load());
-            r.put("hook.view_updates", g_view_updates.load());
-            r.put("hook.view_seconds", g_view_seconds.load());
-            r.put("hook.last_view_qpc", g_last_view_qpc.load());
-            r.put("hook.reset", g_reset.load());
-            r.put("hook.reset_reason", g_reset_reason.load());
+            const Pipeline::Inspect p = g_pipeline.inspect();
+            r.put("debug.keep_follow", p.keep_follow);
+            r.put("debug.keep_turn", p.keep_turn);
+            r.put("debug.influence", p.influence);
+            r.put("debug.lag_h", p.lag_h);
+            r.put("debug.lag_v", p.lag_v);
+            r.put("debug.rate_h", p.rate_h);
+            r.put("debug.snap", p.snap);
+            r.put("debug.snap_qpc", p.snap_qpc);
+            r.put("debug.glide", p.glide);
+            r.put("hook.view_updates", p.view_updates);
+            r.put("hook.view_seconds", p.view_seconds);
+            r.put("hook.last_view_qpc", p.last_view_qpc);
+            r.put("hook.reset", p.reset);
+            r.put("hook.reset_reason", p.reset_reason);
             r.put("lua.enabled", g_authority.enabled());
             ops::api_state(r);
         }
 
       private:
+        uintptr_t* m_slot = nullptr; // the harness's vtable slot 214
         CameraCore* m_core = nullptr;
         dw::smoothwalker::follow::FollowProcessor m_processor;
     };
