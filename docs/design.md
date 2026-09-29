@@ -972,7 +972,14 @@ smoothing itself and the lag switch are contested by nobody.
 
 Another mod's write is taken as an absolute value that replaces the shipped one for that field, and the
 player's settings apply on top of it: another mod sets `TargetOffset.X` to -300 and the distance is 120%, so
-Smoothwalker writes -360. Not run against the game yet.
+Smoothwalker writes -360.
+
+**Run against Farther and Centered Camera 1.3.1 (236), 2026-09-28**, on the stage 2 build: its values stayed on
+screen with the player's settings on top. It writes CDOs at `ClientRestart` and `LoadMapPost` (56 X offsets over 26
+classes, then the walking profile copied onto the sprint modes), all before Smoothwalker's first capture, so those
+became the captured values and the log stayed silent (see "Limits"). A later change it made was caught:
+`Sprint: X offset -380 on key 1 (Default) written by another mod (shipped -400), used as its base`, and key 2
+-340 -> -360. The "shipped -400" there is 236's first write; the game ships Sprint key 1 at -230.
 
 - **Two value sets per mode.** `shipped` is the first capture and never changes (for the logs). `base` starts
   equal to it and is what every write is computed from (`expected()`, the one computation behind `write()`)
