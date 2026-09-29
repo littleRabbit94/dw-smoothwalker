@@ -253,8 +253,9 @@ loads the slot, so `unregister_processor` (clear, then wait for 0) never returns
 
 **Game-thread order.** Smoothwalker's per-tick work (banners, `apply_position`, the overlay) ran in the middle of the
 engine tick, after the controller check and before the pawn check, and a world change or a new pawn reset its tuner
-at the same moment. Separate engine-tick callbacks for the two components would run in registration order, so a new
-camera would reach `apply_position` a tick early or a world change a tick late. So the core calls a `Listener` at those exact points:
+at the same moment. A separate engine-tick callback for Smoothwalker runs before or after the core's whole tick, never
+between its checks, so a new camera would reach `apply_position` a tick early or a world change a tick late. So the
+core calls a `Listener` at those exact points:
 `world_changed` (inside `forget_world`, LoadMap and the tick's world check), `tick` (after `discover_controller`),
 `camera_changed` (after a new camera is published). Smoothwalker registers its own `StaticConstructObject` callback
 for camera modes pushed on the player camera; the core's own one only hands over the controller.
