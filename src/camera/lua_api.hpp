@@ -10,10 +10,10 @@
 // take a ttl lease, so a consumer that crashes mid-claim cannot hold the camera forever. claim() and release()
 // are game thread only; owner() reads under g_mutex and is thread-agnostic.
 //
-// The core's (core/pipeline.hpp includes it): needs the Windows types included before it.
+// The core's (camera/pipeline.hpp includes it): needs the Windows types included before it.
 #pragma once
 
-#include "../smoothing.hpp"
+#include "../common/math.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -724,7 +724,7 @@ namespace dwapi
     }
 
     // Every variable above back to its static-init value, for the next instance on the same pinned image
-    // (core/core.cpp, reset_globals). After uninstall_all, so every table left in a Lua state holds stubs, and after
+    // (camera/core.cpp, reset_globals). After uninstall_all, so every table left in a Lua state holds stubs, and after
     // the hook stopped following the player, so it no longer reaches publish or apply_layers. A state that reaches
     // on_lua_start again gets a fresh table of the same, still mapped, functions. Kept: the locks, the constants,
     // g_enabled / g_reset / g_reset_reason (they point at the core's function and globals, reset there) and

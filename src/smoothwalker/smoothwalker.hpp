@@ -1,10 +1,10 @@
-// Smoothwalker as a component of the one UE4SS mod (dllmain.cpp): the follow (a processor of the camera core),
+// Smoothwalker as a component of the one UE4SS mod (mod.cpp): the follow (a processor of the camera core),
 // camera position in the game's modes, presets and slots, smoothwalker.ini, keys, banners and the debug overlay. It
-// reaches the core only through the C table (core/api.hpp) and registers its own UE4SS callbacks, apart from the
+// reaches the core only through the C table (camera/api.hpp) and registers its own UE4SS callbacks, apart from the
 // core's (docs/design.md, "Core and processors"). Everything else of it is in smoothwalker.cpp.
 #pragma once
 
-#include "../core/api.hpp"
+#include "../camera/api.hpp"
 
 #include <functional>
 #include <memory>
@@ -32,7 +32,7 @@ namespace dwsw
         // on_update: the settings poll, the write-back, the log_stats report.
         auto update() -> void;
 
-        // Unload, called by the mod's destructor in this order around the core's own steps (dllmain.cpp):
+        // Unload, called by the mod's destructor in this order around the core's own steps (mod.cpp):
         auto unregister_callbacks() -> void; // UnregisterCallback waits for running callbacks
         auto shutdown() -> void;             // after the core unhooked: modes restored, off the core, globals reset
 

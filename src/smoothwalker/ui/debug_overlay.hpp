@@ -2,12 +2,12 @@
 // the player's camera modes, the last hard cut and the camera API claim (docs/design.md, "Debug overlay").
 // Built, refreshed and removed on the game thread only, from the engine tick. The GetCameraView hook never touches
 // it: the core publishes numbers that the refresh reads through its table (Api::read_debug, Api::camera_owner;
-// sw/smoothwalker.cpp, debug_panel).
+// smoothwalker/smoothwalker.cpp, debug_panel).
 #pragma once
 
-#include "config.hpp"
-#include "mode_tuning.hpp"
-#include "../smoothing.hpp"
+#include "../settings/settings.hpp"
+#include "../modes/mode_tuner.hpp"
+#include "../../common/math.hpp"
 
 #include <algorithm>
 #include <chrono>

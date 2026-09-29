@@ -9,8 +9,8 @@
 // apply flips the player's camera type away and back (docs/design.md, "How writes land").
 #pragma once
 
-#include "../live_ref.hpp"
-#include "config.hpp"
+#include "../../common/live_ref.hpp"
+#include "../settings/settings.hpp"
 
 #include <algorithm>
 #include <chrono>

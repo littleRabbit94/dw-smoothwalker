@@ -1,7 +1,7 @@
 // The camera core's C interface (docs/design.md, "Core and processors"): the only way Smoothwalker's side reaches
 // the core. A table of plain function pointers with its size and version at its head, handed out by
 // dwcc_get_api(). Across it: pointers, fixed-width numbers and the standard-layout structs below and in
-// core/frame.hpp; no C++ references, no std types, no exceptions. The table is internal to the one DLL:
+// camera/frame.hpp; no C++ references, no std types, no exceptions. The table is internal to the one DLL:
 // dwcc_get_api() is an ordinary extern "C" function, not a DLL export.
 #pragma once
 

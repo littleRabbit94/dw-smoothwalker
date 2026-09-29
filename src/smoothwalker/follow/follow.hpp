@@ -1,13 +1,13 @@
-// The follow: the math behind Smoothwalker's view processor (sw/processor.hpp, core/frame.hpp). A smoothed pivot
+// The follow: the math behind Smoothwalker's view processor (processor.hpp, camera/frame.hpp). A smoothed pivot
 // trails the capsule, the camera becomes smoothed pivot + (game camera - pivot), so orbiting stays instant and only
 // following lags. Optional rotation smoothing, the crouch hold, the aiming / combat / traversal shares and the wall
 // clamp live here too. docs/design.md, "Follow", "Pivot" and "Walls". Numbers only: runs on the hook thread, no
 // Unreal or UE4SS types.
 #pragma once
 
-#include "../../core/frame.hpp"
-#include "../../core/wall.hpp"
-#include "../../smoothing.hpp"
+#include "../../camera/frame.hpp"
+#include "../../camera/wall.hpp"
+#include "../../common/math.hpp"
 
 #include <algorithm>
 #include <cmath>

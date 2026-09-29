@@ -1,7 +1,7 @@
 // The camera core's hook side (docs/design.md, "Core and processors"): the GetCameraView hook on vtable slot 214,
 // the view update count and world seconds, cuts, the crossfade, layers, the write and the API snapshot, the
-// processor and listener slots, and the C table over them (core/api.hpp). Nothing here calls a UObject or UE4SS:
-// the hook runs on task-graph workers. Included by core/core.cpp only (and the equivalence harness,
+// processor and listener slots, and the C table over them (camera/api.hpp). Nothing here calls a UObject or UE4SS:
+// the hook runs on task-graph workers. Included by camera/core.cpp only (and the equivalence harness,
 // tests/equivalence), so its globals live in that one translation unit.
 #pragma once
 
@@ -13,7 +13,7 @@
 #endif
 #include <Windows.h>
 
-#include "../smoothing.hpp"
+#include "../common/math.hpp"
 #include "api.hpp"
 #include "frame.hpp"
 #include "lua_api.hpp"

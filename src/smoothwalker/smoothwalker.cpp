@@ -1,16 +1,16 @@
 // Smoothwalker's side of the DLL (docs/design.md, "Core and processors"): the follow as the camera core's processor
-// (sw/processor.hpp), camera position in the game's modes (sw/mode_tuning.hpp), presets and slots, smoothwalker.ini,
-// keys, banners and the debug overlay (sw/debug_overlay.hpp). Reaches the core only through its C table
-// (core/api.hpp).
+// (follow/processor.hpp), camera position in the game's modes (modes/mode_tuner.hpp), presets and slots,
+// smoothwalker.ini, keys, banners and the debug overlay (ui/debug_overlay.hpp). Reaches the core only through its C
+// table (camera/api.hpp).
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
-#include "processor.hpp"
+#include "follow/processor.hpp"
 #include "smoothwalker.hpp"
-#include "config.hpp"
-#include "debug_overlay.hpp"
-#include "mode_tuning.hpp"
-#include "../live_ref.hpp"
-#include "../smoothing.hpp"
+#include "settings/settings.hpp"
+#include "ui/debug_overlay.hpp"
+#include "modes/mode_tuner.hpp"
+#include "../common/live_ref.hpp"
+#include "../common/math.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -1096,7 +1096,7 @@ auto Smoothwalker::unregister_callbacks() -> void
     m->m_callbacks.clear();
 }
 
-// After the core unhooked and waited for the hook (dllmain.cpp): the game thread is out of m_tuner (the callbacks
+// After the core unhooked and waited for the hook (mod.cpp): the game thread is out of m_tuner (the callbacks
 // are gone), and no hook call is inside the processor. The CDOs get their base back; then the follow and the
 // listener leave the core, and the one namespace-scope global this side holds goes back to its static-init value
 // (docs/design.md, "The DLL is pinned"). Everything else of this side lives in this object and goes with it.

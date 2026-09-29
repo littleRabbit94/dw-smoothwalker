@@ -3,7 +3,7 @@ Intended change since f22aa8e: a re-key (install on a state that already has a c
 f22aa8e replaced the consumer with `g_states[main] = Consumer{...}` and never released a layer slot it held:
 g_slot_owner[slot] stayed set, the old layer kept applying, and repeated re-keys used up the 8 slots. The fix is
 the same release an uninstall does, in a new install_locked (which the harness's api_ops.inc calls, EQ_BASELINE_FIXED).
-Mirrors src/core/lua_api.hpp; see tests/equivalence/README.md, "Intended changes since f22aa8e".
+Mirrors src/camera/lua_api.hpp; see tests/equivalence/README.md, "Intended changes since f22aa8e".
 
 --- a/src/lua_api.hpp
 +++ b/src/lua_api.hpp

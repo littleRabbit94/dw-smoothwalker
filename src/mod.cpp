@@ -2,15 +2,15 @@
 // slot 214). Design and measurements: docs/design.md.
 //
 // One UE4SS mod, one DLL, made of two components (docs/design.md, "Core and processors"):
-// the camera core (core/core.hpp: the hook, the player, cuts, the crossfade, layers, the Lua API) and Smoothwalker
-// (sw/smoothwalker.hpp: the follow, camera position, presets, settings, keys, banners, the overlay), which reaches
-// the core only through its C table (core/api.hpp). This file is the glue: it owns both, forwards UE4SS's calls,
-// and orders the unload between them.
+// the camera core (camera/core.hpp: the hook, the player, cuts, the crossfade, layers, the Lua API) and Smoothwalker
+// (smoothwalker/smoothwalker.hpp: the follow, camera position, presets, settings, keys, banners, the overlay),
+// which reaches the core only through its C table (camera/api.hpp). This file is the glue: it owns both, forwards
+// UE4SS's calls, and orders the unload between them.
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
-#include "core/api.hpp"
-#include "core/core.hpp"
-#include "sw/smoothwalker.hpp"
+#include "camera/api.hpp"
+#include "camera/core.hpp"
+#include "smoothwalker/smoothwalker.hpp"
 
 #include <functional>
 #include <memory>

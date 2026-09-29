@@ -2,7 +2,7 @@
 // (follow/follow.hpp) on its result and by the core's crossfade on the faded part of the lag. Numbers only.
 #pragma once
 
-#include "../smoothing.hpp"
+#include "../common/math.hpp"
 
 #include <algorithm>
 

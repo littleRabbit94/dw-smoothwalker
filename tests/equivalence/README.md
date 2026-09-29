@@ -23,8 +23,8 @@ Exit 0 and `PASS` only if every session matched. Mutations (`core`, `follow`, `p
 
 - **Baseline:** `f22aa8e`'s headers and its `dllmain.cpp` from `namespace` to the end of `camera_live`, extracted by
   `run.sh`, patched with `baseline-fixes/*.patch` (below), and compiled (`base_driver.cpp`).
-- **Split:** the working tree's `core/pipeline.hpp` and `sw/processor.hpp`, joined only through the core's table
-  (`new_driver.cpp`).
+- **Split:** the working tree's `camera/pipeline.hpp` and `smoothwalker/follow/processor.hpp`, joined only through
+  the core's table (`new_driver.cpp`).
 - Both link into one program (namespaces renamed `base_*` / `new_*` on the command line) and get the same events in
   lockstep from one seeded session (`main.cpp`): walking, jumps, teleports under and over `reset_distance`, pauses,
   slow motion, crouches, implausible half heights, a missing half-height offset, NaN and infinite views, odd
@@ -69,5 +69,5 @@ session has 2 to 8 re-keys, and the first one whose consumer held a layer is the
 | `api_ops.inc` | The Lua API's game-thread operations without Lua, over either build's state |
 | `shim/` | Windows, Lua, UE4SS log stubs; `prelude.hpp` maps SEH to injectable faults |
 
-Out of reach (UObjects, UE4SS): discovery, the engine tick, `mode_tuning.hpp`, banners, the overlay widget, the
+Out of reach (UObjects, UE4SS): discovery, the engine tick, `mode_tuner.hpp`, banners, the overlay widget, the
 settings file. Those are checked in game.

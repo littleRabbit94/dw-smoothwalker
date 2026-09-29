@@ -1,13 +1,13 @@
-// The split build: the core's hook side (core/pipeline.hpp) with Smoothwalker's processor (sw/processor.hpp),
-// joined only through the core's C table (dwcam::get_api, what dwcc_get_api returns), as the DLL runs them. The
-// UE4SS-bound code that feeds them (core.cpp's constructor lines, smoothwalker.cpp's apply_position, update and
-// api_status) is quoted below. Namespaces are renamed new_* on the command line so both builds link into one
-// program.
+// The split build: the core's hook side (camera/pipeline.hpp) with Smoothwalker's processor
+// (smoothwalker/follow/processor.hpp), joined only through the core's C table (dwcam::get_api, what dwcc_get_api
+// returns), as the DLL runs them. The UE4SS-bound code that feeds them (core.cpp's constructor lines,
+// smoothwalker.cpp's apply_position, update and api_status) is quoted below. Namespaces are renamed new_* on the
+// command line so both builds link into one program.
 
 #include "prelude.hpp" // first: see there
 
-#include "core/pipeline.hpp"
-#include "sw/processor.hpp"
+#include "camera/pipeline.hpp"
+#include "smoothwalker/follow/processor.hpp"
 #undef ifstream
 
 #include "harness.hpp"

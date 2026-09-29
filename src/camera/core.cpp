@@ -1,11 +1,11 @@
 // The camera core's side of the DLL (docs/design.md, "Core and processors"): installs the GetCameraView
-// hook on vtable slot 214 (core/pipeline.hpp), finds the player, its pawn and its camera, injects the Lua API
-// (core/lua_api.hpp) and hands out the C table (core/api.hpp). Includes no Smoothwalker header.
+// hook on vtable slot 214 (camera/pipeline.hpp), finds the player, its pawn and its camera, injects the Lua API
+// (camera/lua_api.hpp) and hands out the C table (camera/api.hpp). Includes no Smoothwalker header.
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
 #include "pipeline.hpp"
 #include "core.hpp"
-#include "../live_ref.hpp"
+#include "../common/live_ref.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -549,7 +549,7 @@ auto Core::unhook() -> void
 // call through a hook left in the chain may be in flight), g_starts, the locks, constants, and the QPC frequency
 // (per boot; the constructor queries it again). Called last by the mod's destructor: g_player_camera is already
 // null and the in-hook wait is done, so a hook that is still reached returns after the original and never touches
-// any of this. Smoothwalker's side resets its own (sw/smoothwalker.cpp, shutdown).
+// any of this. Smoothwalker's side resets its own (smoothwalker/smoothwalker.cpp, shutdown).
 auto Core::reset_globals() -> void
 {
     AcquireSRWLockExclusive(&g_tuning_lock);

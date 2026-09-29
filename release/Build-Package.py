@@ -19,7 +19,7 @@ release/example-consumer/ at ue4ss/Mods/<folder>/ (Scripts/main.lua, enabled.txt
 gates its syntax; the build fails when luac is not found.
 
 Source: mod/ in this repo; mod/dlls/main.dll is the git-ignored build output of src/.
-Version: ModVersion in src/dllmain.cpp. The build fails if:
+Version: ModVersion in src/mod.cpp. The build fails if:
   - ModVersion, mod_settings.ini [Mod] Version and the newest entry in the changelog block of
     nexus-page-metadata.md disagree;
   - a ConfigKey in mod_settings.ini is missing from smoothwalker.ini or present more than once (either
@@ -27,8 +27,8 @@ Version: ModVersion in src/dllmain.cpp. The build fails if:
   - a shipped smoothwalker.ini value is outside its setting's Minimum/Maximum or not in its PresetValues;
   - main.dll is older than the newest file in src/ (rebuild first);
   - mod/ has a scripts/ subfolder (UE4SS would log a red main.lua error on every start);
-  - the example preset lacks a name line or a key from PRESET_KEYS (config.hpp), holds an unknown or
-    repeated key, or has a value outside its Mod Menu range, off its Step, or not in PresetValues.
+  - the example preset lacks a name line or a key from PRESET_KEYS (src/smoothwalker/settings/settings.hpp), holds an
+    unknown or repeated key, or has a value outside its Mod Menu range, off its Step, or not in PresetValues.
 
 Usage: python release/Build-Package.py (from any directory)
 """
@@ -61,9 +61,9 @@ def fail(msg: str) -> None:
 
 
 def mod_version() -> str:
-    m = re.search(r'ModVersion\s*=\s*STR\("([^"]+)"\)', (SRC / "dllmain.cpp").read_text(encoding="utf-8"))
+    m = re.search(r'ModVersion\s*=\s*STR\("([^"]+)"\)', (SRC / "mod.cpp").read_text(encoding="utf-8"))
     if not m:
-        fail("ModVersion not found in dllmain.cpp")
+        fail("ModVersion not found in mod.cpp")
     return m.group(1)
 
 
@@ -110,7 +110,7 @@ def check_versions(ver: str, sections: dict[str, dict[str, str]]) -> None:
     manifest_ver = sections.get("Mod", {}).get("Version")
     log_ver = newest_changelog_version()
     if not (ver == manifest_ver == log_ver):
-        fail(f"versions disagree: dllmain.cpp ModVersion {ver!r}, mod_settings.ini [Mod] Version "
+        fail(f"versions disagree: mod.cpp ModVersion {ver!r}, mod_settings.ini [Mod] Version "
              f"{manifest_ver!r}, newest changelog entry {log_ver!r}")
 
 
@@ -146,10 +146,10 @@ def check_settings(sections: dict[str, dict[str, str]], values: dict[str, list[s
 
 
 def preset_keys() -> list[str]:
-    text = (SRC / "config.hpp").read_text(encoding="utf-8")
+    text = (SRC / "smoothwalker" / "settings" / "settings.hpp").read_text(encoding="utf-8")
     m = re.search(r"PRESET_KEYS\{(.*?)\};", text, re.S)
     if not m:
-        fail("PRESET_KEYS not found in config.hpp")
+        fail("PRESET_KEYS not found in settings.hpp")
     return re.findall(r'"(\w+)"', m.group(1))
 
 

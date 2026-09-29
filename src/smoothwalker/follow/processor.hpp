@@ -1,13 +1,13 @@
-// The follow as the camera core's view processor (core/api.hpp, docs/design.md "Core and processors"): its switch
+// The follow as the camera core's view processor (camera/api.hpp, docs/design.md "Core and processors"): its switch
 // and toggle generation, its settings and their generation, and what the follow reads besides the core's frame
 // (mode writes, the aiming / combat / traversal flags), all on Smoothwalker's side of the table. No Unreal or UE4SS
 // types: the core calls frame() and state() on the hook thread. Owned by the Smoothwalker component
-// (sw/smoothwalker.cpp) and registered with the core for its whole life.
+// (smoothwalker/smoothwalker.cpp) and registered with the core for its whole life.
 #pragma once
 
-#include "../core/api.hpp"
-#include "config.hpp"
-#include "follow/follow.hpp"
+#include "../../camera/api.hpp"
+#include "../settings/settings.hpp"
+#include "follow.hpp"
 
 #include <atomic>
 #include <cstdint>

@@ -59,7 +59,7 @@ namespace dwsc
 
         bool show_banner = true;
 
-        // Camera position (mode_tuning.hpp). These defaults leave the game's modes as shipped.
+        // Camera position (mode_tuner.hpp). These defaults leave the game's modes as shipped.
         bool camera_tuning = true;
         double exploration_distance = 100, exploration_height = 0, exploration_shoulder = 0, exploration_fov = 0;
         double sprint_distance = 100, sprint_height = 0, sprint_shoulder = 0, sprint_fov = 0;
@@ -80,7 +80,7 @@ namespace dwsc
         std::string debug_key;      // shows and hides it; empty: not bound
     };
 
-    // Settings::log_verbose as published, for the headers that log without the settings (mode_tuning.hpp,
+    // Settings::log_verbose as published, for the headers that log without the settings (mode_tuner.hpp,
     // debug_overlay.hpp). A Verbose line is sent only while it is set.
     inline std::atomic<bool> g_log_verbose{false};
 
