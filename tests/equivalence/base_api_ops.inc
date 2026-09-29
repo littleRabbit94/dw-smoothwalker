@@ -1,8 +1,9 @@
-// The camera API's game-thread operations without Lua, over whichever build's dwapi namespace is in scope (the two
-// drivers include this after their lua_api.hpp). Each is the bookkeeping of the matching lua_api.hpp function after
-// its argument parsing, in the same order: install / uninstall (on_lua_start / on_lua_stop), l_claim, l_release,
-// l_layer_set, l_layer_clear. lua_api.hpp's own functions (release_locked, drop_expired_locked, clear_slot, read,
-// qpc_now, ...) are called, not copied. Consumers are fake lua_State pointers; the harness never enters Lua.
+// The baseline's camera API game-thread operations without Lua, over f22aa8e's dwapi namespace (base_driver.cpp
+// includes this after its lua_api.hpp; frozen with the baseline). Each is the bookkeeping of the matching lua_api.hpp
+// function after its argument parsing, in the same order: install / uninstall (on_lua_start / on_lua_stop), l_claim,
+// l_release, l_layer_set, l_layer_clear. lua_api.hpp's own functions (release_locked, drop_expired_locked,
+// clear_slot, read, qpc_now, ...) are called, not copied. Consumers are fake lua_State pointers; the harness never
+// enters Lua. The working tree's side is new_api_ops.inc, over the product's Authority.
 
 namespace ops
 {

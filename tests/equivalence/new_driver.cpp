@@ -1,6 +1,6 @@
-// The split build: the core's hook side (camera/pipeline.hpp) with Smoothwalker's processor
-// (smoothwalker/follow/processor.hpp), joined only through the core's interface (dw::camera::core_api(), what
-// Core::api() returns), as the DLL runs them. The UE4SS-bound code that feeds them (core.cpp's constructor lines,
+// The split build: the core's hook side (camera/pipeline.hpp, with camera/authority.cpp linked in) and Smoothwalker's
+// processor (smoothwalker/follow/processor.hpp), joined only through the core's interface (dw::camera::core_api(),
+// what Core::api() returns), as the DLL runs them. The UE4SS-bound code that feeds them (core.cpp's constructor lines,
 // smoothwalker.cpp's apply_position, update and api_status) is quoted below. Namespaces are renamed new_* on the
 // command line so both builds link into one program.
 
@@ -15,9 +15,8 @@
 namespace
 {
     using namespace dw::camera;
-    namespace dwapi = dw::camera::lua; // api_ops.inc is written against dwapi:: and shared with the baseline build
 
-#include "api_ops.inc"
+#include "new_api_ops.inc"
 
     class NewDriver final : public harness::Variant
     {
@@ -25,9 +24,7 @@ namespace
         auto init(const harness::HSettings& settings, bool enabled) -> void override
         {
             // Core::Core (core.cpp).
-            dwapi::g_enabled = &processor_enabled;
-            dwapi::g_reset = &g_reset;
-            dwapi::g_reset_reason = &g_reset_reason;
+            g_authority.link(&processor_enabled, &g_reset, &g_reset_reason, &g_api_snapshot);
             QueryPerformanceFrequency(&g_qpc_frequency);
             g_original = &harness::original_view;
             ops::install(0);
@@ -142,7 +139,7 @@ namespace
             r.put("hook.last_view_qpc", g_last_view_qpc.load());
             r.put("hook.reset", g_reset.load());
             r.put("hook.reset_reason", g_reset_reason.load());
-            r.put("lua.enabled", dwapi::g_enabled && dwapi::g_enabled());
+            r.put("lua.enabled", g_authority.enabled());
             ops::api_state(r);
         }
 

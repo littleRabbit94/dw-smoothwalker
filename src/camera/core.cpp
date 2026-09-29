@@ -1,10 +1,12 @@
 // The camera core's side of the DLL (docs/design.md, "Core and processors"): installs the GetCameraView
 // hook on vtable slot 214 (camera/pipeline.hpp), finds the player, its pawn and its camera, injects the Lua API
-// (camera/lua_api.hpp) and hands out its interface (camera/api.hpp, CameraCore). Includes no Smoothwalker header.
+// (camera/lua_api.hpp over camera/authority.hpp) and hands out its interface (camera/api.hpp, CameraCore).
+// Includes no Smoothwalker header.
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
 #include "pipeline.hpp"
 #include "core.hpp"
+#include "lua_api.hpp"
 #include "../common/live_ref.hpp"
 
 #include <atomic>
@@ -286,7 +288,7 @@ struct Core::Impl
     // Pointer reads and object array lookups only, before anything reads through a possibly-freed held pointer.
     auto on_engine_tick(UEngine* engine) -> void
     {
-        if (lua::g_game_thread.load(std::memory_order_relaxed) == 0) lua::g_game_thread.store(GetCurrentThreadId());
+        if (g_authority.game_thread() == 0) g_authority.set_game_thread(GetCurrentThreadId());
         check_world(engine);
         if (m_controller.object && !m_controller.alive())
         {
@@ -414,9 +416,8 @@ Core::Core() : m(std::make_unique<Impl>())
     {
         Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] hot reload: restarted on the DLL already loaded (pinned); a rebuilt DLL needs the game restarted\n"));
     }
-    lua::g_enabled = &processor_enabled;
-    lua::g_reset = &g_reset; // release("cut") snaps through the same flag a teleport sets
-    lua::g_reset_reason = &g_reset_reason;
+    // release("cut") snaps through the same flag a teleport sets.
+    g_authority.link(&processor_enabled, &g_reset, &g_reset_reason, &g_api_snapshot);
     QueryPerformanceFrequency(&g_qpc_frequency);
 }
 
@@ -540,10 +541,12 @@ auto Core::unhook() -> void
 // out here carries the previous instance's state into it. Any new namespace-scope, class-static or function-local
 // static that holds state goes here (docs/design.md, "The DLL is pinned"). Kept on purpose: g_original,
 // g_vtable_entry and g_hook_left (install_hook), g_in_hook, g_in_processor and g_in_listener (self-balancing, and a
-// call through a hook left in the chain may be in flight), g_starts, the locks, constants, and the QPC frequency
-// (per boot; the constructor queries it again). Called last by the mod's destructor: g_player_camera is already
-// null and the in-hook wait is done, so a hook that is still reached returns after the original and never touches
-// any of this. Smoothwalker's side resets its own (smoothwalker/smoothwalker.cpp, shutdown).
+// call through a hook left in the chain may be in flight), g_starts, the locks, constants, the QPC frequency (per
+// boot; the constructor queries it again) and the Authority's link() pointers (set again by the constructor). The
+// Authority (camera/authority.hpp) and the API snapshot go last, after every Lua table holds stubs. Called last by
+// the mod's destructor: g_player_camera is already null and the in-hook wait is done, so a hook that is still
+// reached returns after the original and never touches any of this. Smoothwalker's side resets its own
+// (smoothwalker/smoothwalker.cpp, shutdown).
 auto Core::reset_globals() -> void
 {
     AcquireSRWLockExclusive(&g_tuning_lock);
@@ -576,6 +579,7 @@ auto Core::reset_globals() -> void
     g_view = ViewState{};
     g_processor.store(nullptr);
     g_listener.store(nullptr);
-    lua::reset_state();
+    g_authority.reset();
+    g_api_snapshot.reset();
 }
 } // namespace dw::camera

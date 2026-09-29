@@ -24,7 +24,8 @@ Exit 0 and `PASS` only if every session matched. Mutations (`core`, `follow`, `p
 - **Baseline:** `f22aa8e`'s headers and its `dllmain.cpp` from `namespace` to the end of `camera_live`, extracted by
   `run.sh`, patched with `baseline-fixes/*.patch` (below), and compiled (`base_driver.cpp`).
 - **Split:** the working tree's `camera/pipeline.hpp` and `smoothwalker/follow/processor.hpp`, joined only through
-  the core's interface (`new_driver.cpp`).
+  the core's interface (`new_driver.cpp`), with the camera's own translation units linked in (`NEW_SOURCES` in
+  `run.sh`: `camera/authority.cpp`). The API operations call the product's `Authority` (`new_api_ops.inc`).
 - Both link into one program (the baseline's four namespaces renamed `base_*`, the split's root `dw` renamed `new_dw`, on the command line) and get the same events in
   lockstep from one seeded session (`main.cpp`): walking, jumps, teleports under and over `reset_distance`, pauses,
   slow motion, crouches, implausible half heights, a missing half-height offset, NaN and infinite views, odd
@@ -47,7 +48,7 @@ patch on the extracted baseline, so baseline and working tree again agree bit fo
 teeth for everything else. `run.sh` applies `baseline-fixes/*.patch` (in name order, `patch -p1` from the baseline's
 `src` parent) right after `git archive`. `--no-baseline-fixes` skips them and defines nothing extra: that run must
 FAIL, which shows the harness sees the change. A patch's leading text says what it changes and why. Where the
-harness's own operation code (`api_ops.inc`) mirrors baseline bookkeeping, it calls the function the patch adds when
+harness's own operation code (`base_api_ops.inc`) mirrors baseline bookkeeping, it calls the function the patch adds when
 `EQ_BASELINE_FIXED` is defined (`run.sh` does that only with the patches applied) and keeps the f22aa8e copy otherwise.
 
 | Patch | Changes | Why |
@@ -66,7 +67,8 @@ session has 2 to 8 re-keys, and the first one whose consumer held a layer is the
 | `main.cpp` | Session generator, lockstep driver, comparison, coverage counts; optional third argument (`EQ_REKEY_CHANCE` in `run.sh`) is the re-key chance |
 | `harness.hpp` | The driver interface, settings, records |
 | `base_driver.cpp`, `new_driver.cpp` | Each build behind that interface; UE4SS-bound feeding code is quoted from the mod |
-| `api_ops.inc` | The Lua API's game-thread operations without Lua, over either build's state (written against `dwapi::`; `new_driver.cpp` aliases it to `dw::camera::lua`) |
+| `base_api_ops.inc` | The baseline's Lua API game-thread operations without Lua, over f22aa8e's `dwapi::` state; frozen with the baseline |
+| `new_api_ops.inc` | The same operations over the working tree: the Lua argument checks, then `Authority`'s own methods; `api_state` reads `Authority::inspect` in the baseline's record order |
 | `shim/` | Windows, Lua, UE4SS log stubs; `prelude.hpp` maps SEH to injectable faults |
 
 Out of reach (UObjects, UE4SS): discovery, the engine tick, `mode_tuner.hpp`, banners, the overlay widget, the

@@ -16,6 +16,7 @@ add_subdirectory("${DW_RE_UE4SS_SOURCE_DIR}" RE-UE4SS)
 # the core only through camera/api.hpp, and mod.cpp owns both (docs/design.md, "Core and processors").
 add_library(DWSmoothwalker SHARED
     "${CMAKE_CURRENT_SOURCE_DIR}/src/mod.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/camera/authority.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/camera/core.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/smoothwalker.cpp")
 target_link_libraries(DWSmoothwalker PUBLIC UE4SS)

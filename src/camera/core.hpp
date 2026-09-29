@@ -1,7 +1,7 @@
 // The camera core as a component of the one UE4SS mod (mod.cpp): the slot 214 hook and its pin, player and
 // camera discovery, the Lua injection, and the interface the Smoothwalker side uses (camera/api.hpp, CameraCore).
 // It registers its own UE4SS callbacks, apart from Smoothwalker's (docs/design.md, "Core and processors").
-// Everything else of it is in core.cpp and camera/pipeline.hpp.
+// Everything else of it is in core.cpp, camera/pipeline.hpp, camera/authority.hpp and camera/lua_api.hpp.
 #pragma once
 
 #include "api.hpp"

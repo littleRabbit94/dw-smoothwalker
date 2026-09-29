@@ -15,8 +15,9 @@
 
 #include "../common/math.hpp"
 #include "api.hpp"
+#include "authority.hpp"
 #include "frame.hpp"
-#include "lua_api.hpp"
+#include "snapshot.hpp"
 #include "wall.hpp"
 
 #include <algorithm>
@@ -44,14 +45,17 @@ namespace
     };
     constexpr size_t VIEW_BYTES = offsetof(ViewHead, fov) + sizeof(float); // stops at FOV: not the padding, not DesiredFOV
 
-    // The API snapshot (lua_api.hpp): the game's view, what was handed back, and the pivot. Hook thread, numbers only.
+    // The API snapshot (camera/snapshot.hpp): published here, read by Lua's view() and live() through the Authority.
+    ViewSnapshot g_api_snapshot;
+
+    // The game's view, what was handed back, and the pivot, into the API snapshot. Hook thread, numbers only.
     auto publish_api_view(const ViewHead& game, const ViewHead& shown, const dw::Vec3* pivot) -> void
     {
-        lua::View g{{game.location[0], game.location[1], game.location[2]}, {game.rotation[0], game.rotation[1], game.rotation[2]}, game.fov};
-        lua::View s{{shown.location[0], shown.location[1], shown.location[2]}, {shown.rotation[0], shown.rotation[1], shown.rotation[2]}, shown.fov};
+        View g{{game.location[0], game.location[1], game.location[2]}, {game.rotation[0], game.rotation[1], game.rotation[2]}, game.fov};
+        View s{{shown.location[0], shown.location[1], shown.location[2]}, {shown.rotation[0], shown.rotation[1], shown.rotation[2]}, shown.fov};
         double p[3]{};
         if (pivot) { p[0] = pivot->x; p[1] = pivot->y; p[2] = pivot->z; }
-        lua::publish(g, s, pivot ? p : nullptr);
+        g_api_snapshot.publish(g, s, pivot ? p : nullptr);
     }
 
     // The core's own settings: the cut thresholds (CameraCore::set_cut_thresholds). The crossfade's length is the
@@ -77,7 +81,8 @@ namespace
 
     // Published by the game thread, read by the hook. Pointers are only compared or read under SEH.
     std::atomic<bool> g_reset{true}; // a hard cut: snap, no crossfade
-    std::atomic<int> g_reset_reason{static_cast<int>(Snap::Startup)}; // why g_reset was set; stored before it (request_cut, lua_api.hpp)
+    // Why g_reset was set; stored before it (request_cut, Authority::release_locked).
+    std::atomic<int> g_reset_reason{static_cast<int>(Snap::Startup)};
     std::atomic<bool> g_hook_timing{false}; // DIAG_HOOK_TIMING: log_stats times the hook
     std::atomic<bool> g_log_verbose{false}; // DIAG_VERBOSE: the core's verbose log lines
     std::atomic<void*> g_player_camera{nullptr};
@@ -127,7 +132,7 @@ namespace
     // Game thread: a hard cut on the next camera update, and why. The first reason since the hook last took a cut is
     // kept: a level change is followed by a new controller and a new pawn, and the level change is the one to show.
     // A hook taking the cut between the load and the stores leaves this cut with the older reason (display only).
-    // release("cut") names its own reason (lua_api.hpp).
+    // release("cut") names its own reason (Authority::release_locked).
     auto request_cut(Snap why) -> void
     {
         if (!g_reset.load()) g_reset_reason.store(static_cast<int>(why));
@@ -216,7 +221,7 @@ namespace
         g_view.invalid_reason = Snap::ViewLost;
         g_view.out_valid = false;
         g_view.blending = false;
-        lua::g_blending.store(false, std::memory_order_relaxed);
+        g_authority.set_blending(false);
         publish_debug_idle();
     }
 
@@ -230,14 +235,14 @@ namespace
         // game thread while this runs on a worker: sampling g_owner_slot after g_release_generation and g_reset
         // could see the release already published and the camera still owned, or the other way round, and write a
         // full follow offset for one frame, which turns a glide into a cut and a cut into a double snap. A lease
-        // that has run out is not a claim; the game thread drops the identity the next time it looks (lua_api.hpp).
+        // that has run out is not a claim; the game thread drops the identity the next time it looks (Authority).
         // The slot is read before the lease, so a fresh claim never pairs with the previous owner's stale expiry.
-        const bool owner_held = lua::g_owner_slot.load(std::memory_order_acquire) >= 0;
-        const int64_t owner_expires = lua::g_owner_expires.load(std::memory_order_relaxed);
-        const bool owned = owner_held && (owner_expires == 0 || lua::qpc_now() < owner_expires);
-        const bool owner_keeps_layers = owned && lua::g_owner_keep_layers.load(std::memory_order_relaxed);
+        const bool owner_held = g_authority.owner_slot() >= 0;
+        const int64_t owner_expires = g_authority.owner_expires();
+        const bool owned = owner_held && (owner_expires == 0 || qpc_now() < owner_expires);
+        const bool owner_keeps_layers = owned && g_authority.owner_keeps_layers();
         // The release generation, sampled here because the falling edge below needs it; `changed` uses this sample.
-        const auto release = lua::g_release_generation.load(std::memory_order_relaxed);
+        const auto release = g_authority.release_generation();
         const bool release_changed = release != g_view.seen_release;
         // The camera stops being owned. A release("cut") has already set g_reset, and a release("glide") has bumped
         // the generation just read, which starts the crossfade from out_*, the game's view as the owner left it. A
@@ -292,7 +297,7 @@ namespace
         // The cut thresholds, the processor's switch and settings, and its mode writes crossfade; a hard cut (player
         // or world change, a gap, a teleport) snaps. A release("glide") lands here too, through the `release_changed`
         // sampled at the top of this update: the fade then starts from the game's view, because out_* tracked it
-        // while the camera was owned (lua_api.hpp). The processor's generation joins below, with the frame it
+        // while the camera was owned (camera/authority.hpp). The processor's generation joins below, with the frame it
         // reports it for.
         bool changed = t.generation != g_view.seen_tuning || toggle != g_view.seen_toggle || release_changed;
         g_view.seen_tuning = t.generation;
@@ -365,7 +370,7 @@ namespace
             g_debug_influence.store(moved.influence, std::memory_order_relaxed);
         }
 
-        // Another mod owns the camera (lua_api.hpp, "authority"; `owned` was sampled at the top of this update).
+        // Another mod owns the camera (camera/authority.hpp; `owned` was sampled at the top of this update).
         // The processor above ran and its state stays warm, but nothing of it is shown: the view goes back to
         // exactly what the game built, so out_* below record a zero offset, an identity rotation and the game's FOV
         // and a later release("glide") starts from there. No crossfade runs while owned either; the release decides
@@ -435,9 +440,9 @@ namespace
             view.location[1] = result.y;
             view.location[2] = result.z;
         }
-        // Other mods' layers (lua_api.hpp), on top of whatever the processor did, its switch included. While another
-        // mod owns the camera they are off too, unless that owner asked to keep them.
-        bool layered = (!owned || owner_keeps_layers) && lua::apply_layers(view.location, view.rotation, view.fov, dt);
+        // Other mods' layers (Authority::apply_layers), on top of whatever the processor did, its switch included.
+        // While another mod owns the camera they are off too, unless that owner asked to keep them.
+        bool layered = (!owned || owner_keeps_layers) && g_authority.apply_layers(view.location, view.rotation, view.fov, dt);
         bool wrote = apply_result || layered;
         if (wrote)
         {
@@ -452,7 +457,7 @@ namespace
         // Owned: the game's FOV, not a layer's, so the glide back starts from the view the owner left on screen.
         g_view.out_fov = fov_ok ? (owned ? game_view.fov : view.fov) : NAN;
         g_view.out_valid = true;
-        lua::g_blending.store(g_view.blending, std::memory_order_relaxed);
+        g_authority.set_blending(g_view.blending);
         g_debug_glide.store(g_view.blending && g_view.blend_glide, std::memory_order_relaxed);
         g_debug_lag_h.store(std::hypot(g_view.out_offset.x, g_view.out_offset.y), std::memory_order_relaxed);
         g_debug_lag_v.store(std::abs(g_view.out_offset.z), std::memory_order_relaxed);
@@ -486,12 +491,12 @@ namespace
         uint64_t toggle = 0;
         const bool enabled = processor && processor->state(toggle);
         // Off and settled: the game's view untouched. The next toggle starts from a fresh output.
-        if (!enabled && !g_view.blending && toggle == g_view.seen_toggle && !lua::g_layers_any.load(std::memory_order_relaxed))
+        if (!enabled && !g_view.blending && toggle == g_view.seen_toggle && !g_authority.layers_any())
         {
             g_view.valid = false;
             g_view.invalid_reason = Snap::Toggle;
             g_view.out_valid = false;
-            lua::g_blending.store(false, std::memory_order_relaxed);
+            g_authority.set_blending(false);
             publish_debug_idle();
             ViewHead view{};
             if (guarded_read(desired_view, &view, VIEW_BYTES)) publish_api_view(view, view, nullptr);
@@ -519,7 +524,7 @@ namespace
         return last != 0 && static_cast<double>(now.QuadPart - last) / static_cast<double>(g_qpc_frequency.QuadPart) < 0.25;
     }
 
-    // Lua's Smoothwalker.enabled() (lua::g_enabled): the processor's switch, false without one.
+    // Lua's Smoothwalker.enabled() (Authority::enabled, linked by the core): the processor's switch, false without one.
     auto processor_enabled() -> bool
     {
         Counted in_processor(g_in_processor);
@@ -608,7 +613,7 @@ namespace
         auto view_updates() const -> uint64_t override { return g_view_updates.load(); }
         auto view_seconds() const -> double override { return g_view_seconds.load(); }
         auto camera_live() const -> bool override { return dw::camera::camera_live(); }
-        auto game_thread_id() const -> uint32_t override { return lua::g_game_thread.load(std::memory_order_relaxed); }
+        auto game_thread_id() const -> uint32_t override { return g_authority.game_thread(); }
 
         auto take_hook_timing(uint64_t& calls, double& microseconds_per_call) -> void override
         {
@@ -639,19 +644,14 @@ namespace
             return out;
         }
 
-        // Read-only, the way Smoothwalker.owner() reads it: under lua::g_mutex, and an expired lease reads as nobody.
-        // The drop itself stays with claim and release.
+        // Read-only, the way Smoothwalker.owner() reads it (Authority::owner): under the Authority's mutex, and an
+        // expired lease reads as nobody. The drop itself stays with claim and release.
         auto camera_owner() const -> Owner override
         {
-            std::string mod;
             int64_t expires = 0;
-            {
-                std::lock_guard guard(lua::g_mutex);
-                expires = lua::g_owner_expires.load(std::memory_order_relaxed);
-                if (lua::g_owner_state && (expires == 0 || lua::qpc_now() < expires)) mod = lua::g_owner_mod;
-            }
+            std::string mod = g_authority.owner(&expires);
             Owner owner;
-            owner.lease = !mod.empty() && expires != 0 ? std::max(0.0, static_cast<double>(expires - lua::qpc_now()) / lua::qpc_frequency()) : NAN;
+            owner.lease = !mod.empty() && expires != 0 ? std::max(0.0, static_cast<double>(expires - qpc_now()) / qpc_frequency()) : NAN;
             owner.mod = std::move(mod);
             return owner;
         }

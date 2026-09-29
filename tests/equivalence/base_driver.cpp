@@ -20,7 +20,7 @@
 
 namespace
 {
-#include "api_ops.inc"
+#include "base_api_ops.inc"
 
     class BaseDriver final : public harness::Variant
     {
