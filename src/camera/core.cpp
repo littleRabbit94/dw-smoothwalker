@@ -165,7 +165,7 @@ struct Core::Impl
         return true;
     }
 
-    auto forget_player(dw::Snap why = dw::Snap::Player) -> void
+    auto forget_player(Snap why = Snap::Player) -> void
     {
         g_player_camera.store(nullptr);
         g_player_root.store(nullptr);
@@ -177,7 +177,7 @@ struct Core::Impl
     // A level change, called from the LoadMap pre hook and the engine tick; harmless if run twice for one load.
     auto forget_world() -> void
     {
-        forget_player(dw::Snap::World);
+        forget_player(Snap::World);
         // Smoothwalker drops its camera-mode pointers, re-applies in the next world and rebuilds its overlay.
         notify([](const Listener& l) {
             if (l.world_changed) l.world_changed(l.user);
@@ -204,7 +204,7 @@ struct Core::Impl
     {
         g_player_camera.store(nullptr);
         g_player_root.store(nullptr);
-        request_cut(dw::Snap::Pawn);
+        request_cut(Snap::Pawn);
         m_pawn = m_camera = m_root = {};
     }
 
@@ -556,7 +556,7 @@ auto Core::reset_globals() -> void
     g_tuning = DEFAULT_TUNING;
     ReleaseSRWLockExclusive(&g_tuning_lock);
     g_reset.store(true);
-    g_reset_reason.store(static_cast<int>(dw::Snap::Startup));
+    g_reset_reason.store(static_cast<int>(Snap::Startup));
     g_hook_timing.store(false);
     g_log_verbose.store(false);
     g_player_camera.store(nullptr);

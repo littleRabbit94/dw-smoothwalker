@@ -46,6 +46,23 @@ namespace dw::camera
         // The debug overlay's feed, valid only while `feed`; the core keeps it and hands it back (Api::read_debug).
         bool feed = false;
         double keep_follow = 0.0, keep_turn = 0.0, rate_h = 0.0;
-        int32_t influence = 0; // dw::Influence
+        int32_t influence = 0; // follow::Influence
+    };
+
+    // Why the follow last restarted from the capsule (a hard cut), for the debug overlay. Whoever sets the hook's
+    // reset flag names the reason first; the hook works out the rest (a gap, a teleport, the toggle) itself.
+    enum class Snap : int
+    {
+        None,
+        Startup,
+        Teleport,   // pivot moved more than reset_distance in one update
+        Gap,        // no update for more than reset_gap (pause, load, cutscene, free camera)
+        World,      // level change
+        Player,     // player controller found, changed or gone
+        Pawn,       // new or lost pawn
+        Toggle,     // switched back on
+        ApiCut,     // release("cut"), or a claim dropped by an uninstall or a Lua restart
+        ClaimEnded, // a claim's lease ran out, seen by the hook before the game thread dropped it
+        ViewLost,   // the pivot or the view could not be read, or a result was not finite
     };
 } // namespace dw::camera

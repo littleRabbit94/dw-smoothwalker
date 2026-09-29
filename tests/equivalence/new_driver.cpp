@@ -56,7 +56,7 @@ namespace
 
         auto mode_write() -> void override { m_processor.mode_written(); }
 
-        auto request_cut(int reason) -> void override { dw::camera::request_cut(static_cast<dw::Snap>(reason)); }
+        auto request_cut(int reason) -> void override { dw::camera::request_cut(static_cast<dw::camera::Snap>(reason)); }
 
         auto set_player(void* camera, void* root, int32_t translation_offset, int32_t half_height_offset) -> void override
         {

@@ -76,7 +76,7 @@ namespace
 
     // Published by the game thread, read by the hook. Pointers are only compared or read under SEH.
     std::atomic<bool> g_reset{true}; // a hard cut: snap, no crossfade
-    std::atomic<int> g_reset_reason{static_cast<int>(dw::Snap::Startup)}; // why g_reset was set; stored before it (request_cut, lua_api.hpp)
+    std::atomic<int> g_reset_reason{static_cast<int>(Snap::Startup)}; // why g_reset was set; stored before it (request_cut, lua_api.hpp)
     std::atomic<bool> g_hook_timing{false}; // DIAG_HOOK_TIMING: log_stats times the hook
     std::atomic<bool> g_log_verbose{false}; // DIAG_VERBOSE: the core's verbose log lines
     std::atomic<void*> g_player_camera{nullptr};
@@ -97,11 +97,11 @@ namespace
     // NAN: not following (off, or the view was lost).
     std::atomic<double> g_debug_keep_follow{NAN}; // share of the trail shown after the traversal, combat and aiming blends
     std::atomic<double> g_debug_keep_turn{NAN};   // share of the turning smoothing shown
-    std::atomic<int> g_debug_influence{0};        // dw::Influence: the largest weight in those blends
+    std::atomic<int> g_debug_influence{0};        // follow::Influence: the largest weight in those blends
     std::atomic<double> g_debug_lag_h{NAN};       // cm of lag on screen (out_offset), horizontal
     std::atomic<double> g_debug_lag_v{NAN};       // and vertical
     std::atomic<double> g_debug_rate_h{NAN};      // 1/s, the horizontal follow rate after the curve at the current lag
-    std::atomic<int> g_debug_snap{0};             // dw::Snap of the last restart from the capsule
+    std::atomic<int> g_debug_snap{0};             // Snap of the last restart from the capsule
     std::atomic<int64_t> g_debug_snap_qpc{0};     // QPC of it; 0: none yet
     std::atomic<bool> g_debug_glide{false};       // the crossfade running was started by a release("glide")
 
@@ -126,7 +126,7 @@ namespace
     // kept: a level change is followed by a new controller and a new pawn, and the level change is the one to show.
     // A hook taking the cut between the load and the stores leaves this cut with the older reason (display only).
     // release("cut") names its own reason (lua_api.hpp).
-    auto request_cut(dw::Snap why) -> void
+    auto request_cut(Snap why) -> void
     {
         if (!g_reset.load()) g_reset_reason.store(static_cast<int>(why));
         g_reset.store(true);
@@ -181,7 +181,7 @@ namespace
         float from_fov = NAN;
         uint64_t seen_tuning = 0, seen_processor = 0, seen_toggle = 0, seen_release = 0;
         bool was_owned = false; // another mod owned the camera on the last update: the falling edge is a cut
-        dw::Snap invalid_reason = dw::Snap::Startup; // why valid went false, for the debug overlay's last snap
+        Snap invalid_reason = Snap::Startup; // why valid went false, for the debug overlay's last snap
         bool blend_glide = false;                         // the running crossfade came from a release("glide")
     };
     ViewState g_view;
@@ -211,7 +211,7 @@ namespace
     auto lose_view() -> void
     {
         g_view.valid = false;
-        g_view.invalid_reason = dw::Snap::ViewLost;
+        g_view.invalid_reason = Snap::ViewLost;
         g_view.out_valid = false;
         g_view.blending = false;
         lua::g_blending.store(false, std::memory_order_relaxed);
@@ -247,7 +247,7 @@ namespace
         if (g_view.was_owned && !owned && !release_changed)
         {
             g_view.valid = false;
-            g_view.invalid_reason = dw::Snap::ClaimEnded;
+            g_view.invalid_reason = Snap::ClaimEnded;
         }
         g_view.was_owned = owned;
 
@@ -311,7 +311,7 @@ namespace
         if (!enabled)
         {
             g_view.valid = false; // switched back on, the follow restarts from the capsule
-            g_view.invalid_reason = dw::Snap::Toggle;
+            g_view.invalid_reason = Snap::Toggle;
             g_debug_keep_follow.store(NAN, std::memory_order_relaxed);
             g_debug_keep_turn.store(NAN, std::memory_order_relaxed);
             g_debug_rate_h.store(NAN, std::memory_order_relaxed);
@@ -320,11 +320,11 @@ namespace
         {
             // Why, for the debug overlay: switched back on beats a cut still pending from while it was off; then
             // whoever asked for the cut; then why the follow was dropped; then the hook's own gap and teleport checks.
-            auto why = !g_view.valid && g_view.invalid_reason == dw::Snap::Toggle ? dw::Snap::Toggle
-                       : reset                                                    ? static_cast<dw::Snap>(g_reset_reason.load(std::memory_order_relaxed))
-                       : !g_view.valid                                            ? g_view.invalid_reason
-                       : gap                                                      ? dw::Snap::Gap
-                                                                                  : dw::Snap::Teleport;
+            auto why = !g_view.valid && g_view.invalid_reason == Snap::Toggle ? Snap::Toggle
+                       : reset                                                ? static_cast<Snap>(g_reset_reason.load(std::memory_order_relaxed))
+                       : !g_view.valid                                        ? g_view.invalid_reason
+                       : gap                                                  ? Snap::Gap
+                                                                              : Snap::Teleport;
             g_debug_snap_qpc.store(now.QuadPart, std::memory_order_relaxed);
             g_debug_snap.store(static_cast<int>(why), std::memory_order_relaxed);
             g_view.valid = true;
@@ -488,7 +488,7 @@ namespace
         if (!enabled && !g_view.blending && toggle == g_view.seen_toggle && !lua::g_layers_any.load(std::memory_order_relaxed))
         {
             g_view.valid = false;
-            g_view.invalid_reason = dw::Snap::Toggle;
+            g_view.invalid_reason = Snap::Toggle;
             g_view.out_valid = false;
             lua::g_blending.store(false, std::memory_order_relaxed);
             publish_debug_idle();

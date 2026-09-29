@@ -8,6 +8,7 @@
 #include "../../camera/frame.hpp"
 #include "../../camera/wall.hpp"
 #include "../../common/math.hpp"
+#include "curves.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -15,6 +16,15 @@
 
 namespace dw::smoothwalker::follow
 {
+    // Which override the shown trail mostly follows: the largest weight in the traversal, combat, aiming chain.
+    enum class Influence : int
+    {
+        None,
+        Traversal,
+        Combat,
+        Aiming,
+    };
+
     // The follow's settings. Numbers only, so the hook's copy allocates nothing on a worker thread.
     struct FollowTuning
     {
@@ -143,8 +153,8 @@ namespace dw::smoothwalker::follow
 
             double lag_hx = pivot.x - ps.x, lag_hy = pivot.y - ps.y;
             double lag_h = std::sqrt(lag_hx * lag_hx + lag_hy * lag_hy);
-            double a_h = dw::follow_alpha(t.follow_rate_h, t.curve_h, lag_h, t.catchup_distance, t.min_rate_scale, dt);
-            out.rate_h = dw::follow_rate(t.follow_rate_h, t.curve_h, lag_h, t.catchup_distance, t.min_rate_scale);
+            double a_h = follow_alpha(t.follow_rate_h, t.curve_h, lag_h, t.catchup_distance, t.min_rate_scale, dt);
+            out.rate_h = follow_rate(t.follow_rate_h, t.curve_h, lag_h, t.catchup_distance, t.min_rate_scale);
             ps.x += lag_hx * a_h;
             ps.y += lag_hy * a_h;
             lag_hx = pivot.x - ps.x;
@@ -161,7 +171,7 @@ namespace dw::smoothwalker::follow
             }
 
             double lag_v = feet - ps.z;
-            double a_v = dw::follow_alpha(t.follow_rate_v, t.curve_v, std::abs(lag_v), t.catchup_distance, t.min_rate_scale, dt);
+            double a_v = follow_alpha(t.follow_rate_v, t.curve_v, std::abs(lag_v), t.catchup_distance, t.min_rate_scale, dt);
             ps.z += lag_v * a_v;
             lag_v = feet - ps.z;
             if (std::abs(lag_v) > inner_v)
@@ -199,7 +209,7 @@ namespace dw::smoothwalker::follow
                 double w_aim = m_aim;
                 double w_combat = m_combat * (1.0 - m_aim);
                 double w_traversal = m_traversal * (1.0 - m_combat) * (1.0 - m_aim);
-                double weights[4]{1.0 - w_aim - w_combat - w_traversal, w_traversal, w_combat, w_aim}; // in dw::Influence order
+                double weights[4]{1.0 - w_aim - w_combat - w_traversal, w_traversal, w_combat, w_aim}; // in Influence order
                 out.influence = static_cast<int>(std::max_element(std::begin(weights), std::end(weights)) - std::begin(weights));
             }
 
@@ -225,7 +235,7 @@ namespace dw::smoothwalker::follow
                 m_crouch_elapsed += dt;
                 if (m_crouch_elapsed <= 0.6) m_crouch_drop = m_crouch_base - rel;
                 double gap = m_crouch_drop - m_crouch_smoothed;
-                double a_c = dw::follow_alpha(t.follow_rate_v, t.curve_v, std::abs(gap), t.catchup_distance, t.min_rate_scale, dt);
+                double a_c = follow_alpha(t.follow_rate_v, t.curve_v, std::abs(gap), t.catchup_distance, t.min_rate_scale, dt);
                 m_crouch_smoothed += gap * a_c;
                 hold = m_crouch_drop - m_crouch_smoothed;
                 if (m_crouch_elapsed > 0.6 && std::abs(hold) < 0.1) m_crouch_base = NAN;

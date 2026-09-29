@@ -57,9 +57,9 @@ namespace dw::camera
         uint32_t size;                    // set by the caller to sizeof(Debug); nothing is written if smaller
         double keep_follow, keep_turn;    // the processor's feed (FrameOut) as last reported; NAN: not following
         double rate_h;                    // likewise
-        int32_t influence;                // likewise, dw::Influence
+        int32_t influence;                // likewise, follow::Influence
         double lag_h, lag_v;              // cm of lag on screen, horizontal and vertical; NAN: not following
-        int32_t snap;                     // dw::Snap of the last restart from the capsule
+        int32_t snap;                     // Snap of the last restart from the capsule
         double snap_age;                  // s since it; NAN: none yet
         int32_t glide;                    // 1: the running crossfade was started by a release("glide")
     };

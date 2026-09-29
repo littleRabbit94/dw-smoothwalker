@@ -14,6 +14,7 @@
 #pragma once
 
 #include "../common/math.hpp"
+#include "frame.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -54,7 +55,7 @@ namespace dw::camera::lua
     inline Snapshot g_snapshot{};
     inline bool (*g_enabled)() = nullptr;          // the processor's live switch (Processor::state), set by the core; any thread
     inline std::atomic<bool>* g_reset = nullptr;   // the hook's hard-cut flag, set by the core: release("cut")
-    inline std::atomic<int>* g_reset_reason = nullptr; // why g_reset was set (dw::Snap), set by the core; the debug overlay shows it
+    inline std::atomic<int>* g_reset_reason = nullptr; // why g_reset was set (Snap), set by the core; the debug overlay shows it
     inline std::atomic<uint32_t> g_game_thread{0};  // captured on the engine tick
 
     // ---------------------------------------------------------------------------------------------- authority
@@ -508,7 +509,7 @@ namespace dw::camera::lua
         if (glide) g_release_generation.fetch_add(1, std::memory_order_relaxed);
         else if (g_reset)
         {
-            if (g_reset_reason) g_reset_reason->store(static_cast<int>(dw::Snap::ApiCut), std::memory_order_relaxed);
+            if (g_reset_reason) g_reset_reason->store(static_cast<int>(Snap::ApiCut), std::memory_order_relaxed);
             g_reset->store(true, std::memory_order_relaxed);
         }
         g_owner_keep_layers.store(false, std::memory_order_relaxed);

@@ -7,6 +7,8 @@
 
 #include "../settings/settings.hpp"
 #include "../modes/mode_tuner.hpp"
+#include "../../camera/frame.hpp"
+#include "../follow/follow.hpp"
 #include "../../common/math.hpp"
 
 #include <algorithm>
@@ -32,6 +34,8 @@ namespace dw::smoothwalker::ui
     using namespace RC;
     using namespace RC::Unreal;
     using modes::Group;
+    using camera::Snap;
+    using follow::Influence;
     using modes::group_name;
     using modes::ModeListing;
     using settings::g_log_verbose;

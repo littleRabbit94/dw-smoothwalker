@@ -1055,11 +1055,11 @@ struct Smoothwalker::Impl
         m_core.read_debug(&feed);
         p.keep_follow = feed.keep_follow;
         p.keep_turn = feed.keep_turn;
-        p.influence = static_cast<dw::Influence>(feed.influence);
+        p.influence = static_cast<follow::Influence>(feed.influence);
         p.lag_h = feed.lag_h;
         p.lag_v = feed.lag_v;
         p.rate_h = feed.rate_h;
-        p.snap = static_cast<dw::Snap>(feed.snap);
+        p.snap = static_cast<camera::Snap>(feed.snap);
         p.snap_age = feed.snap_age;
         p.api = api_status();
         p.api.glide = feed.glide != 0;
