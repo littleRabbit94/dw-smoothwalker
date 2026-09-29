@@ -13,6 +13,7 @@
 #endif
 #include <Windows.h>
 
+#include "../common/log.hpp"
 #include "../common/math.hpp"
 #include "api.hpp"
 #include "frame.hpp"
@@ -115,7 +116,6 @@ namespace dw::camera
         auto set_translation_offset(int32_t offset) -> void { m_translation_offset.store(offset); }
         auto half_height_offset() const -> int32_t { return m_half_height_offset.load(); }
         auto set_half_height_offset(int32_t offset) -> void { m_half_height_offset.store(offset); }
-        auto log_verbose() const -> bool { return m_log_verbose.load(std::memory_order_relaxed); }
 
         // Game thread: a listener callback, if one is set.
         template <typename Call>
@@ -156,7 +156,7 @@ namespace dw::camera
         // Every field back to its static-init value, for the next instance on the same pinned image
         // (Core::reset_globals). Kept: the tuning lock, m_in_processor and m_in_listener (self-balancing, and a call
         // through a hook left in the chain may be in flight), and the QPC frequency (per boot; the constructor
-        // queries it again).
+        // queries it again). The verbose flag (common/log.hpp), which set_diagnostics writes, goes back to off too.
         auto reset() -> void;
 
         // Read-only copy of what the hook publishes, for a single-threaded check (the equivalence harness).
@@ -190,7 +190,6 @@ namespace dw::camera
         // Why m_reset was set; stored before it (request_cut, Authority::release_locked).
         std::atomic<int> m_reset_reason{static_cast<int>(Snap::Startup)};
         std::atomic<bool> m_hook_timing{false}; // DIAG_HOOK_TIMING: log_stats times the hook
-        std::atomic<bool> m_log_verbose{false}; // DIAG_VERBOSE: the core's verbose log lines
         std::atomic<void*> m_player_camera{nullptr};
         std::atomic<void*> m_player_root{nullptr};
         std::atomic<void*> m_player_controller{nullptr}; // game thread: the controller held

@@ -10,6 +10,7 @@
 #include "ui/debug_overlay.hpp"
 #include "modes/mode_tuner.hpp"
 #include "../common/live_ref.hpp"
+#include "../common/log.hpp"
 #include "../common/math.hpp"
 
 #include <algorithm>
@@ -157,7 +158,7 @@ struct Smoothwalker::Impl
         if (auto content = settings::read_file(SETTINGS_PATH))
         {
             auto numbers = settings::parse_numbers(*content);
-            if (auto found = numbers.find("log_verbose"); found != numbers.end()) settings::g_log_verbose.store(found->second != 0.0);
+            if (auto found = numbers.find("log_verbose"); found != numbers.end()) dw::g_verbose.store(found->second != 0.0);
         }
         load_presets_locked();
         reload_settings_locked(true);
@@ -498,9 +499,9 @@ struct Smoothwalker::Impl
         // off: no per-tick GetState calls either
         auto state = camera && m_processor.enabled() ? m_tuner.mode_state(camera) : modes::ModeState{};
         m_processor.set_aiming(state.aiming);
-        if (state.combat != m_processor.swap_combat(state.combat) && settings::g_log_verbose.load(std::memory_order_relaxed))
+        if (state.combat != m_processor.swap_combat(state.combat) && dw::verbose())
             Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] combat camera {}\n"), state.combat ? STR("on") : STR("off"));
-        if (state.traversal != m_processor.swap_traversal(state.traversal) && settings::g_log_verbose.load(std::memory_order_relaxed))
+        if (state.traversal != m_processor.swap_traversal(state.traversal) && dw::verbose())
             Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] traversal camera {}\n"), state.traversal ? STR("on") : STR("off"));
         if (!camera) return;
         auto generation = m_position_generation.load();
@@ -762,7 +763,7 @@ struct Smoothwalker::Impl
                                             dropins.size());
             dropins.clear();
         }
-        bool verbose = settings::g_log_verbose.load(std::memory_order_relaxed);
+        bool verbose = dw::verbose();
         if (verbose)
         {
             for (auto& p : dropins)
@@ -807,7 +808,7 @@ struct Smoothwalker::Impl
         if (m_menu_host && !m_menu_logged)
         {
             m_menu_logged = true;
-            if (settings::g_log_verbose.load(std::memory_order_relaxed))
+            if (dw::verbose())
                 Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] Mod Menu open: {}\n"), m_menu_host->GetFullName());
         }
         return m_menu_host != nullptr;
@@ -1110,6 +1111,6 @@ auto Smoothwalker::shutdown() -> void
         m_leak = true;
         Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] unload: a camera call did not finish, the component was left allocated\n"));
     }
-    settings::g_log_verbose.store(false);
+    dw::g_verbose.store(false);
 }
 } // namespace dw::smoothwalker

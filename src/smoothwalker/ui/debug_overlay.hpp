@@ -9,6 +9,7 @@
 #include "../modes/mode_tuner.hpp"
 #include "../../camera/frame.hpp"
 #include "../follow/follow.hpp"
+#include "../../common/log.hpp"
 #include "../../common/math.hpp"
 
 #include <algorithm>
@@ -38,7 +39,6 @@ namespace dw::smoothwalker::ui
     using follow::Influence;
     using modes::group_name;
     using modes::ModeListing;
-    using settings::g_log_verbose;
 
     // The camera API as the panel shows it.
     struct ApiStatus
@@ -467,7 +467,7 @@ namespace dw::smoothwalker::ui
             }
 
             m_build_warned = false;
-            if (g_log_verbose.load(std::memory_order_relaxed)) Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] debug overlay shown\n"));
+            if (dw::verbose()) Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] debug overlay shown\n"));
             return true;
         }
 

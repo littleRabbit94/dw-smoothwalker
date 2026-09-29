@@ -10,6 +10,7 @@
 #pragma once
 
 #include "../../common/live_ref.hpp"
+#include "../../common/log.hpp"
 #include "../settings/settings.hpp"
 
 #include <algorithm>
@@ -39,7 +40,6 @@ namespace dw::smoothwalker::modes
 {
     using namespace RC;
     using namespace RC::Unreal;
-    using settings::g_log_verbose;
     using settings::Settings;
 
     enum Group : int
@@ -197,7 +197,7 @@ namespace dw::smoothwalker::modes
                     mode.has_shipped = true;
                     mode.base = mode.shipped;
                     if (std::wstring_view(mode.spec.name) == L"Base_LongRange" && !mode.shipped.offsets.empty() &&
-                        g_log_verbose.load(std::memory_order_relaxed))
+                        dw::verbose())
                     {
                         auto& first = mode.shipped.offsets.front();
                         Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] Base_LongRange: fov {}, game lag {}/{}, pitch {}/{}, {} offsets, key {} at ({}, {}, {})\n"),
@@ -400,7 +400,7 @@ namespace dw::smoothwalker::modes
             // Only CameraOffsets needs the flip; the lag switch and an inactive tuning move none.
             if (tuning.active || m_was_active) request_flip(player_camera);
             m_was_active = tuning.active;
-            if (g_log_verbose.load(std::memory_order_relaxed))
+            if (dw::verbose())
             {
                 auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
                 Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] camera position applied: {} mode classes, {} live modes, {:.1f} ms\n"), classes, live, ms);
@@ -657,7 +657,7 @@ namespace dw::smoothwalker::modes
             }
             m_map_layout = FScriptMap::GetScriptLayout(1, 1, m_off.offset_size, m_off.offset_align); // ECameraType key: one byte
             m_layout_ok = true;
-            if (g_log_verbose.load(std::memory_order_relaxed))
+            if (dw::verbose())
             {
                 Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] camera mode layout: offsets map 0x{:X}, CameraOffset {} bytes, value at 0x{:X}\n"),
                                                m_off.offsets_map, m_off.offset_size, m_map_layout.ValueOffset);
@@ -812,7 +812,7 @@ namespace dw::smoothwalker::modes
                 if (name != std::wstring(L"BP_CameraMode_") + mode.spec.name + L"_C") continue;
                 mode.missing = false;
                 capture();
-                if (g_log_verbose.load(std::memory_order_relaxed))
+                if (dw::verbose())
                     Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] {} loaded late: {}\n"), mode.spec.name, mode.captured ? STR("tuned") : STR("not found"));
                 if (!mode.captured || !keep_if_mode(ref, true)) return false;
                 std::vector<Original> seen(2);

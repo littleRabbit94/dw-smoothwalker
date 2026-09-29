@@ -64,7 +64,7 @@ namespace dw::camera
     };
 
     // set_diagnostics flags.
-    constexpr uint32_t DIAG_VERBOSE = 1u;     // log_verbose: discovery, offsets, hook install
+    constexpr uint32_t DIAG_VERBOSE = 1u;     // log_verbose: the one verbose flag (common/log.hpp)
     constexpr uint32_t DIAG_HOOK_TIMING = 2u; // log_stats: time the hook (take_hook_timing)
 
     // The debug overlay's feed as the hook left it (read_debug). Relaxed reads: one call may pair values from two

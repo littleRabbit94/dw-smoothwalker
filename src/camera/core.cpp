@@ -155,7 +155,7 @@ struct Core::Impl
     {
         forget_player();
         hold_controller(controller);
-        if (g_pipeline.log_verbose()) Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] player controller found\n"));
+        if (dw::verbose()) Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] player controller found\n"));
     }
 
     // GEngine->GameViewport->World, both reflected properties (not hard offsets); compared only, never followed.
@@ -227,7 +227,7 @@ struct Core::Impl
         {
             adopt_controller(candidate);
         }
-        else if (requested && g_pipeline.log_verbose())
+        else if (requested && dw::verbose())
         {
             Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] player controller not found yet\n"));
         }
@@ -240,7 +240,7 @@ struct Core::Impl
         check_world(engine);
         if (m_controller.object && !m_controller.alive())
         {
-            if (g_pipeline.log_verbose()) Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] player controller gone\n"));
+            if (dw::verbose()) Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] player controller gone\n"));
             forget_player();
             rescan_now();
         }
@@ -311,7 +311,7 @@ struct Core::Impl
         // Smoothwalker: a new pawn's modes get the current camera position, found by a fresh scan.
         g_pipeline.notify([](Listener& l) { l.camera_changed(); });
         m_offset_wait = std::chrono::seconds(2);
-        if (g_pipeline.log_verbose())
+        if (dw::verbose())
             Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] following {} (CapsuleHalfHeight at 0x{:X})\n"), pawn->GetName(), g_pipeline.half_height_offset());
     }
 
@@ -350,7 +350,7 @@ struct Core::Impl
             return false;
         }
         g_pipeline.set_translation_offset(found);
-        if (g_pipeline.log_verbose())
+        if (dw::verbose())
             Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] ComponentToWorld translation at 0x{:X} (RelativeLocation 0x{:X})\n"), found,
                                            relative_offset);
         return true;
@@ -417,7 +417,7 @@ auto Core::start() -> bool
     bool engine_tick =
             hooks.bHookEngineTick && add(Hook::RegisterEngineTickPostCallback([self](auto&, UEngine* engine, float, bool) { self->on_engine_tick(engine); }, options));
     auto state = [](bool on) { return on ? STR("on") : STR("off"); };
-    if (g_pipeline.log_verbose())
+    if (dw::verbose())
     {
         Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] player discovery: new-object callback {}, BeginPlay {}, EndPlay {}, LoadMap {}; engine tick "
                                            "checks world and liveness, FindFirstOf fallback from 2 s backing off to 60 s without a controller\n"),

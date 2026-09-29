@@ -6,6 +6,7 @@
 #pragma once
 
 #include "../../camera/api.hpp"
+#include "../../common/log.hpp"
 #include "../settings/settings.hpp"
 #include "follow.hpp"
 
@@ -177,7 +178,7 @@ namespace dw::smoothwalker::follow
         processor.publish(follow_tuning_of(s));
         core.set_cut_thresholds(s.reset_distance, s.reset_gap);
         processor.set_log_stats(s.log_stats);
-        settings::g_log_verbose.store(s.log_verbose);
+        dw::g_verbose.store(s.log_verbose);
         core.set_diagnostics((s.log_verbose ? camera::DIAG_VERBOSE : 0u) | (s.log_stats ? camera::DIAG_HOOK_TIMING : 0u));
     }
 } // namespace dw::smoothwalker::follow

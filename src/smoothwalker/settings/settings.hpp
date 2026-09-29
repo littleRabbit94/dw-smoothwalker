@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -79,10 +78,6 @@ namespace dw::smoothwalker::settings
         bool debug_overlay = false; // the live panel at the top right of the screen (debug_overlay.hpp)
         std::string debug_key;      // shows and hides it; empty: not bound
     };
-
-    // Settings::log_verbose as published, for the headers that log without the settings (mode_tuner.hpp,
-    // debug_overlay.hpp). A Verbose line is sent only while it is set.
-    inline std::atomic<bool> g_log_verbose{false};
 
     // A preset is a camera look: follow, turning, the look limits and camera position. Not the switches (enabled,
     // camera_tuning, shoulder_swap, show_banner, log_stats, log_verbose, debug_overlay), the safety values (wall_clamp,

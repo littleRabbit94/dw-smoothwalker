@@ -432,7 +432,7 @@ namespace
 
     auto Pipeline::set_diagnostics(uint32_t flags) -> void
     {
-        m_log_verbose.store((flags & DIAG_VERBOSE) != 0);
+        dw::g_verbose.store((flags & DIAG_VERBOSE) != 0);
         m_hook_timing.store((flags & DIAG_HOOK_TIMING) != 0);
     }
 
@@ -473,7 +473,7 @@ namespace
         m_reset.store(true);
         m_reset_reason.store(static_cast<int>(Snap::Startup));
         m_hook_timing.store(false);
-        m_log_verbose.store(false);
+        dw::g_verbose.store(false); // not the Pipeline's (common/log.hpp), but set_diagnostics writes it
         m_player_camera.store(nullptr);
         m_player_root.store(nullptr);
         m_player_controller.store(nullptr);
