@@ -44,8 +44,9 @@ class DWSmoothwalker : public CppUserModBase
     }
 
     // UE4SS FreeLibrary's the DLL right after this (hot reload); pinned, the image stays mapped (core.cpp,
-    // pin_module). UnregisterCallback waits for running callbacks, so the game thread is out of both components
-    // before the modes are restored; a call already in the hook returns before any global is reset.
+    // pin_module). The Lua functions and the hook leave the core's slots first; UnregisterCallback waits for running
+    // callbacks, so the game thread is out of both components before the modes are restored; the members go last,
+    // and the next instance starts from fresh ones.
     ~DWSmoothwalker() override
     {
         m_core->stop_lua();
@@ -53,7 +54,6 @@ class DWSmoothwalker : public CppUserModBase
         m_core->unregister_callbacks();
         m_core->unhook();
         m_smoothwalker->shutdown();
-        m_core->reset_globals();
     }
 
     auto on_lua_start(StringViewType mod_name, LuaMadeSimple::Lua& lua, LuaMadeSimple::Lua&, LuaMadeSimple::Lua&, LuaMadeSimple::Lua*) -> void override

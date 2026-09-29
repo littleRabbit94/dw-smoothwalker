@@ -1,6 +1,6 @@
 // The split build: the core's hook side (camera/hook.cpp's hook over camera/pipeline.cpp and camera/authority.cpp,
 // linked in) and Smoothwalker's processor (smoothwalker/follow/processor.hpp), joined only through the core's
-// interface (dw::camera::core_api(), what Core::api() returns), as the DLL runs them. The UE4SS-bound code that feeds them (core.cpp's constructor lines,
+// interface (a CoreApi over the driver's Pipeline and Authority, what Core::api() returns), as the DLL runs them. The UE4SS-bound code that feeds them (core.cpp's constructor lines,
 // smoothwalker.cpp's apply_position, update and api_status) is quoted below. Namespaces are renamed new_* on the
 // command line so both builds link into one program.
 
@@ -35,20 +35,23 @@ namespace
     class NewDriver final : public harness::Variant
     {
       public:
+        // The hook's slot is image-level: nothing may reach this driver's Pipeline once it is gone.
+        ~NewDriver() override
+        {
+            if (!unpublish_pipeline()) std::abort();
+        }
+
         auto init(const harness::HSettings& settings, bool enabled) -> void override
         {
-            // Core::Core (core.cpp).
-            g_authority.link(&processor_enabled, &g_pipeline.reset_flag(), &g_pipeline.reset_reason(), &g_pipeline.snapshot());
-            g_pipeline.set_clock(HARNESS_CLOCK);
-            g_pipeline.set_guarded_copy(&harness_copy);
-            g_authority.set_clock(HARNESS_CLOCK);
+            // Core::Core (core.cpp): the members are constructed with the driver, the Pipeline goes to the hook.
+            publish_pipeline(m_pipeline);
             // Core::Impl::install_hook (core.cpp), on a slot of the harness's that holds the game's GetCameraView.
             m_slot = reinterpret_cast<uintptr_t*>(&harness::original_view);
             if (!hook_slot(&m_slot)) std::abort();
-            ops::install(0);
-            ops::install(1);
+            ops::install(m_authority, 0);
+            ops::install(m_authority, 1);
             // Smoothwalker::Impl's constructor (smoothwalker.cpp): register, then the startup publish and switch.
-            m_core = &core_api();
+            m_core = &m_api;
             if (!m_core->register_processor(m_processor)) std::abort();
             publish(settings);
             m_processor.store_enabled(enabled);
@@ -71,24 +74,24 @@ namespace
 
         auto mode_write() -> void override { m_processor.mode_written(); }
 
-        auto request_cut(int reason) -> void override { g_pipeline.request_cut(static_cast<dw::camera::Snap>(reason)); }
+        auto request_cut(int reason) -> void override { m_pipeline.request_cut(static_cast<dw::camera::Snap>(reason)); }
 
         auto set_player(void* camera, void* root, int32_t translation_offset, int32_t half_height_offset) -> void override
         {
-            g_pipeline.set_player_camera(camera);
-            g_pipeline.set_player_root(root);
-            g_pipeline.set_translation_offset(translation_offset);
-            g_pipeline.set_half_height_offset(half_height_offset);
+            m_pipeline.set_player_camera(camera);
+            m_pipeline.set_player_root(root);
+            m_pipeline.set_translation_offset(translation_offset);
+            m_pipeline.set_half_height_offset(half_height_offset);
         }
 
         auto hook(void* self, float delta_time, void* desired_view) -> void override { get_camera_view_hook(self, delta_time, desired_view); }
 
-        auto claim(int consumer, bool keep_layers, double ttl) -> int override { return ops::claim(consumer, keep_layers, ttl); }
-        auto release(int consumer, bool glide) -> int override { return ops::release(consumer, glide); }
-        auto uninstall(int consumer) -> void override { ops::uninstall(consumer); }
-        auto install(int consumer) -> void override { ops::install(consumer); }
-        auto layer_set(int consumer, const harness::LayerArgs& args) -> int override { return ops::layer_set(consumer, args); }
-        auto layer_clear(int consumer) -> int override { return ops::layer_clear(consumer); }
+        auto claim(int consumer, bool keep_layers, double ttl) -> int override { return ops::claim(m_authority, consumer, keep_layers, ttl); }
+        auto release(int consumer, bool glide) -> int override { return ops::release(m_authority, consumer, glide); }
+        auto uninstall(int consumer) -> void override { ops::uninstall(m_authority, consumer); }
+        auto install(int consumer) -> void override { ops::install(m_authority, consumer); }
+        auto layer_set(int consumer, const harness::LayerArgs& args) -> int override { return ops::layer_set(m_authority, consumer, args); }
+        auto layer_clear(int consumer) -> int override { return ops::layer_clear(m_authority, consumer); }
 
         auto take_stats(harness::Record& r) -> void override
         {
@@ -143,7 +146,7 @@ namespace
 
         auto state(harness::Record& r) -> void override
         {
-            const Pipeline::Inspect p = g_pipeline.inspect();
+            const Pipeline::Inspect p = m_pipeline.inspect();
             r.put("debug.keep_follow", p.keep_follow);
             r.put("debug.keep_turn", p.keep_turn);
             r.put("debug.influence", p.influence);
@@ -158,11 +161,15 @@ namespace
             r.put("hook.last_view_qpc", p.last_view_qpc);
             r.put("hook.reset", p.reset);
             r.put("hook.reset_reason", p.reset_reason);
-            r.put("lua.enabled", g_authority.enabled());
-            ops::api_state(r);
+            r.put("lua.enabled", m_authority.enabled());
+            ops::api_state(r, m_pipeline, m_authority);
         }
 
       private:
+        // Core::Impl's members (core.cpp), with the harness's clock and guarded copy.
+        Authority m_authority{m_pipeline, HARNESS_CLOCK};
+        Pipeline m_pipeline{m_authority, HARNESS_CLOCK, &harness_copy};
+        CoreApi m_api{m_pipeline, m_authority};
         uintptr_t* m_slot = nullptr; // the harness's vtable slot 214
         CameraCore* m_core = nullptr;
         dw::smoothwalker::follow::FollowProcessor m_processor;

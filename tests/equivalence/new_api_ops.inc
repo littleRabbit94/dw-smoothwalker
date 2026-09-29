@@ -1,7 +1,7 @@
 // The working tree's camera API game-thread operations without Lua (new_driver.cpp includes this inside
 // `using namespace dw::camera`). Each is what the matching lua_api.hpp function does after its argument parsing:
-// the Authority's own method, called (install / uninstall for on_lua_start / on_lua_stop, claim, release, layer_set,
-// layer_clear). Only the Lua argument checks are mirrored: a non-finite number is refused before the Authority is
+// the Authority's own method, called on the driver's Authority (install / uninstall for on_lua_start / on_lua_stop,
+// claim, release, layer_set, layer_clear). Only the Lua argument checks are mirrored: a non-finite number is refused before the Authority is
 // called, as num_field makes l_claim and l_layer_set do. Consumers are fake keys, the same numbers as the baseline's
 // fake lua_State pointers; the harness never enters Lua.
 
@@ -29,19 +29,19 @@ namespace ops
         std::abort();
     }
 
-    inline auto install(int consumer) -> void { g_authority.install(key_of(consumer), CONSUMER_NAMES[consumer], "0.10.1"); }
+    inline auto install(Authority& api, int consumer) -> void { api.install(key_of(consumer), CONSUMER_NAMES[consumer], "0.10.1"); }
 
-    inline auto uninstall(int consumer) -> void { g_authority.uninstall(key_of(consumer)); }
+    inline auto uninstall(Authority& api, int consumer) -> void { api.uninstall(key_of(consumer)); }
 
-    inline auto claim(int consumer, bool keep, double ttl) -> int
+    inline auto claim(Authority& api, int consumer, bool keep, double ttl) -> int
     {
         if (!std::isfinite(ttl)) return harness::NotFinite;
-        return code(g_authority.claim(key_of(consumer), keep, ttl));
+        return code(api.claim(key_of(consumer), keep, ttl));
     }
 
-    inline auto release(int consumer, bool glide) -> int { return code(g_authority.release(key_of(consumer), glide)); }
+    inline auto release(Authority& api, int consumer, bool glide) -> int { return code(api.release(key_of(consumer), glide)); }
 
-    inline auto layer_set(int consumer, const harness::LayerArgs& a) -> int
+    inline auto layer_set(Authority& api, int consumer, const harness::LayerArgs& a) -> int
     {
         bool bad = false;
         auto number = [&](double v) {
@@ -57,16 +57,16 @@ namespace ops
         l.blend = number(a.blend);
         double ttl = number(a.ttl);
         if (bad) return harness::NotFinite;
-        return code(g_authority.layer_set(key_of(consumer), l, ttl));
+        return code(api.layer_set(key_of(consumer), l, ttl));
     }
 
-    inline auto layer_clear(int consumer) -> int { return code(g_authority.layer_clear(key_of(consumer))); }
+    inline auto layer_clear(Authority& api, int consumer) -> int { return code(api.layer_clear(key_of(consumer))); }
 
     // Everything the API side holds that the hook reads or writes, in base_api_ops.inc's record order.
-    inline auto api_state(harness::Record& r) -> void
+    inline auto api_state(harness::Record& r, const Pipeline& pipeline, const Authority& api) -> void
     {
-        r.put("api.seq", g_pipeline.snapshot().seq());
-        const Snapshot& snapshot = g_pipeline.snapshot().data();
+        r.put("api.seq", pipeline.snapshot().seq());
+        const Snapshot& snapshot = pipeline.snapshot().data();
         auto view = [&](const char* label, const View& v) {
             r.put(label, v.location);
             r.put(label, v.rotation);
@@ -76,7 +76,7 @@ namespace ops
         view("api.snapshot.shown", snapshot.shown);
         r.put("api.snapshot.pivot", snapshot.pivot);
         r.put("api.snapshot.qpc", snapshot.qpc);
-        const Authority::Inspect a = g_authority.inspect();
+        const Authority::Inspect a = api.inspect();
         r.put("api.blending", a.blending);
         r.put("api.layers_any", a.layers_any);
         r.put("api.owner_slot", a.owner_slot);

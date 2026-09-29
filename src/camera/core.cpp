@@ -49,7 +49,7 @@ namespace
     // callback GC thread (one detour per 3 s pass) or when a reader drops its snapshot. With the image unmapped that
     // destructor read a freed vtable (AV at UE4SS.dll+0x43B83A, RTTI: the on_unreal_init BeginPlay lambda). Pinned,
     // FreeLibrary leaves the image mapped and the next LoadLibrary returns it: no new code, and no static
-    // initializer runs again (reset_globals). docs/design.md, "The DLL is pinned".
+    // initializer runs again (camera/hook.cpp lists the statics). docs/design.md, "The DLL is pinned".
     auto pin_module() -> void
     {
         HMODULE self{};
@@ -63,6 +63,12 @@ namespace
 
 struct Core::Impl
 {
+    // The hook side and the API state, each bound to the other; CoreApi forwards to both. First, so they outlive
+    // everything below that calls them.
+    Authority m_authority{m_pipeline, QPC_CLOCK};
+    Pipeline m_pipeline{m_authority, QPC_CLOCK, &seh_copy};
+    CoreApi m_api{m_pipeline, m_authority};
+
     std::vector<Hook::GlobalCallbackId> m_callbacks;
     bool m_hooked = false; // this instance installed the slot 214 hook or kept the previous instance's
     FName m_player_controller_name{};
@@ -86,7 +92,7 @@ struct Core::Impl
     auto hold_controller(dw::LiveRef controller) -> void
     {
         m_controller = controller;
-        g_pipeline.set_player_controller(controller.object);
+        m_pipeline.set_player_controller(controller.object);
     }
 
     auto install_hook() -> bool
@@ -113,9 +119,9 @@ struct Core::Impl
 
     auto forget_player(Snap why = Snap::Player) -> void
     {
-        g_pipeline.set_player_camera(nullptr);
-        g_pipeline.set_player_root(nullptr);
-        g_pipeline.request_cut(why);
+        m_pipeline.set_player_camera(nullptr);
+        m_pipeline.set_player_root(nullptr);
+        m_pipeline.request_cut(why);
         m_pawn = m_camera = m_root = {};
         hold_controller({});
     }
@@ -125,7 +131,7 @@ struct Core::Impl
     {
         forget_player(Snap::World);
         // Smoothwalker drops its camera-mode pointers, re-applies in the next world and rebuilds its overlay.
-        g_pipeline.notify([](Listener& l) { l.world_changed(); });
+        m_pipeline.notify([](Listener& l) { l.world_changed(); });
     }
 
     // A duplicate of the new-object path where UE4SS installs BeginPlay. Game thread.
@@ -146,9 +152,9 @@ struct Core::Impl
 
     auto forget_pawn() -> void
     {
-        g_pipeline.set_player_camera(nullptr);
-        g_pipeline.set_player_root(nullptr);
-        g_pipeline.request_cut(Snap::Pawn);
+        m_pipeline.set_player_camera(nullptr);
+        m_pipeline.set_player_root(nullptr);
+        m_pipeline.request_cut(Snap::Pawn);
         m_pawn = m_camera = m_root = {};
     }
 
@@ -237,7 +243,7 @@ struct Core::Impl
     // Pointer reads and object array lookups only, before anything reads through a possibly-freed held pointer.
     auto on_engine_tick(UEngine* engine) -> void
     {
-        if (g_authority.game_thread() == 0) g_authority.set_game_thread(GetCurrentThreadId());
+        if (m_pipeline.game_thread() == 0) m_pipeline.set_game_thread(GetCurrentThreadId());
         check_world(engine);
         if (m_controller.object && !m_controller.alive())
         {
@@ -252,7 +258,7 @@ struct Core::Impl
         discover_controller();
 
         // Smoothwalker's banners, camera-mode tuning and overlay, with the controller checked and before the pawn is.
-        g_pipeline.notify([](Listener& l) { l.tick(); });
+        m_pipeline.notify([](Listener& l) { l.tick(); });
         if (!m_controller.object) return;
 
         // Name lookup once per controller class, then a plain read.
@@ -286,7 +292,7 @@ struct Core::Impl
             Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] pawn {} has no FollowCamera or RootComponent\n"), pawn->GetName());
             return;
         }
-        if (g_pipeline.translation_offset() < 0 && !find_translation_offset(root.object))
+        if (m_pipeline.translation_offset() < 0 && !find_translation_offset(root.object))
         {
             m_offset_retry = true;
             m_next_offset_scan = std::chrono::steady_clock::now() + m_offset_wait;
@@ -297,23 +303,23 @@ struct Core::Impl
         // The root is the capsule: its half height gives the feet point the vertical follow tracks.
         if (auto* half = root.object->GetValuePtrByPropertyNameInChain<float>(STR("CapsuleHalfHeight")))
         {
-            g_pipeline.set_half_height_offset(static_cast<int32_t>(reinterpret_cast<uint8_t*>(half) - reinterpret_cast<uint8_t*>(root.object)));
+            m_pipeline.set_half_height_offset(static_cast<int32_t>(reinterpret_cast<uint8_t*>(half) - reinterpret_cast<uint8_t*>(root.object)));
         }
         else
         {
-            g_pipeline.set_half_height_offset(-1);
+            m_pipeline.set_half_height_offset(-1);
             Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] CapsuleHalfHeight not found: the vertical follow tracks the capsule centre\n"));
         }
 
         m_camera = camera;
         m_root = root;
-        g_pipeline.set_player_root(root.object);
-        g_pipeline.set_player_camera(camera.object);
+        m_pipeline.set_player_root(root.object);
+        m_pipeline.set_player_camera(camera.object);
         // Smoothwalker: a new pawn's modes get the current camera position, found by a fresh scan.
-        g_pipeline.notify([](Listener& l) { l.camera_changed(); });
+        m_pipeline.notify([](Listener& l) { l.camera_changed(); });
         m_offset_wait = std::chrono::seconds(2);
         if (dw::verbose())
-            Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] following {} (CapsuleHalfHeight at 0x{:X})\n"), pawn->GetName(), g_pipeline.half_height_offset());
+            Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] following {} (CapsuleHalfHeight at 0x{:X})\n"), pawn->GetName(), m_pipeline.half_height_offset());
     }
 
     // ComponentToWorld is not reflected. A root's world translation equals its RelativeLocation, so the offset
@@ -350,7 +356,7 @@ struct Core::Impl
             Output::send<LogLevel::Error>(STR("[DWSmoothwalker] ComponentToWorld translation: {} matches, smoothing inactive\n"), matches);
             return false;
         }
-        g_pipeline.set_translation_offset(found);
+        m_pipeline.set_translation_offset(found);
         if (dw::verbose())
             Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] ComponentToWorld translation at 0x{:X} (RelativeLocation 0x{:X})\n"), found,
                                            relative_offset);
@@ -365,15 +371,17 @@ Core::Core() : m(std::make_unique<Impl>())
     {
         Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] hot reload: restarted on the DLL already loaded (pinned); a rebuilt DLL needs the game restarted\n"));
     }
-    // release("cut") snaps through the same flag a teleport sets.
-    g_authority.link(&processor_enabled, &g_pipeline.reset_flag(), &g_pipeline.reset_reason(), &g_pipeline.snapshot());
+    // A call through a hook a previous instance left in the chain may arrive from here on; it returns at once while
+    // no player camera is known.
+    publish_pipeline(m->m_pipeline);
+    lua::attach(m->m_authority);
 }
 
 Core::~Core() = default;
 
 auto Core::api() -> CameraCore&
 {
-    return core_api();
+    return m->m_api;
 }
 
 auto Core::start() -> bool
@@ -433,17 +441,22 @@ auto Core::start() -> bool
 // C++ mods are started first (docs/design.md, "Checks run 2026-09-22").
 auto Core::lua_start(lua_State* L, const std::string& mod, const std::string& mod_version) -> void
 {
-    lua::install(L, mod, mod_version);
+    lua::install(L, m->m_authority, mod, mod_version);
 }
 
 auto Core::lua_stop(lua_State* L) -> void
 {
-    lua::uninstall(L);
+    lua::uninstall(L, m->m_authority);
 }
 
-auto Core::stop_lua() -> void
+// The tables first (stubs, consumers released), then the slot: a Lua call already inside the Authority returns
+// before the Core can go.
+auto Core::stop_lua() -> bool
 {
-    lua::uninstall_all();
+    lua::uninstall_all(m->m_authority);
+    if (lua::detach()) return true;
+    Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] unload: a Lua call is still in the camera API\n"));
+    return false;
 }
 
 auto Core::unregister_callbacks() -> void
@@ -453,28 +466,14 @@ auto Core::unregister_callbacks() -> void
 }
 
 // UE4SS FreeLibrary's the DLL right after the mod's destructor (hot reload); pinned, the image stays mapped
-// (pin_module). A call already in the hook must return before the core's state is reset (restore_slot).
-auto Core::unhook() -> void
+// (pin_module), and the hook stays reachable through a hook another mod left over it. The hook's Pipeline slot is
+// cleared and drained whether or not this instance hooked: the constructor published the Pipeline either way.
+auto Core::unhook() -> bool
 {
-    // From here a camera update that still reaches the hook returns right after the original.
-    g_pipeline.set_player_camera(nullptr);
-    g_pipeline.set_player_root(nullptr);
-    if (!m->m_hooked) return;
-    restore_slot();
-}
-
-// Every static of the core holding per-instance state, back to its static-init value. The image is pinned, so the
-// next instance after a hot reload starts on it with no static initializer run: whatever is left out here carries
-// the previous instance's state into it. Any new namespace-scope, class-static or function-local static that holds
-// state goes here (docs/design.md, "The DLL is pinned"). Today that is the one Pipeline (camera/hook.cpp) and the one
-// Authority (camera/authority.cpp), each through its reset(), which lists what it keeps; the hook's own statics are
-// kept on purpose (camera/hook.cpp). The Authority goes last, after every Lua table holds stubs. Called last by the
-// mod's destructor: the player camera is already null and the in-hook wait is done, so a hook that is still reached
-// returns after the original and never touches any of this. Smoothwalker's side resets its own
-// (smoothwalker/smoothwalker.cpp, shutdown).
-auto Core::reset_globals() -> void
-{
-    g_pipeline.reset();
-    g_authority.reset();
+    // From here a camera update that still reaches the Pipeline returns right after the original.
+    m->m_pipeline.set_player_camera(nullptr);
+    m->m_pipeline.set_player_root(nullptr);
+    if (m->m_hooked) restore_slot();
+    return unpublish_pipeline();
 }
 } // namespace dw::camera

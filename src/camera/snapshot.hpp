@@ -68,13 +68,6 @@ namespace dw::camera
             return false;
         }
 
-        // Back to the static-init state (Core::reset_globals), with the hook no longer reaching publish.
-        auto reset() -> void
-        {
-            m_seq.store(0);
-            m_data = Snapshot{};
-        }
-
         // Read-only, no seqlock: for a single-threaded check of the published state (the equivalence harness).
         auto seq() const -> uint64_t { return m_seq.load(); }
         auto data() const -> const Snapshot& { return m_data; }

@@ -4,8 +4,8 @@
 
 #include "pipeline.hpp"
 #include "authority.hpp"
-#include "hook.hpp"
 #include "wall.hpp"
+#include "../common/active_slot.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -21,14 +21,6 @@ namespace
     auto finite(const dw::Vec3& v) -> bool
     {
         return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
-    }
-
-    // Unregistering: after the slot is cleared, until no call counted before the clear is still running.
-    // False: a counted call is still running after 5 s.
-    auto wait_for_zero(const std::atomic<int>& count) -> bool
-    {
-        for (int i = 0; i < 5000 && count.load() != 0; ++i) Sleep(1);
-        return count.load() == 0;
     }
 } // namespace
 
@@ -63,7 +55,7 @@ namespace
         m_view.invalid_reason = Snap::ViewLost;
         m_view.out_valid = false;
         m_view.blending = false;
-        g_authority.set_blending(false);
+        m_authority.set_blending(false);
         publish_debug_idle();
     }
 
@@ -79,12 +71,12 @@ namespace
         // full follow offset for one frame, which turns a glide into a cut and a cut into a double snap. A lease
         // that has run out is not a claim; the game thread drops the identity the next time it looks (Authority).
         // The slot is read before the lease, so a fresh claim never pairs with the previous owner's stale expiry.
-        const bool owner_held = g_authority.owner_slot() >= 0;
-        const int64_t owner_expires = g_authority.owner_expires();
+        const bool owner_held = m_authority.owner_slot() >= 0;
+        const int64_t owner_expires = m_authority.owner_expires();
         const bool owned = owner_held && (owner_expires == 0 || m_clock.now() < owner_expires);
-        const bool owner_keeps_layers = owned && g_authority.owner_keeps_layers();
+        const bool owner_keeps_layers = owned && m_authority.owner_keeps_layers();
         // The release generation, sampled here because the falling edge below needs it; `changed` uses this sample.
-        const auto release = g_authority.release_generation();
+        const auto release = m_authority.release_generation();
         const bool release_changed = release != m_view.seen_release;
         // The camera stops being owned. A release("cut") has already set m_reset, and a release("glide") has bumped
         // the generation just read, which starts the crossfade from out_*, the game's view as the owner left it. A
@@ -284,7 +276,7 @@ namespace
         }
         // Other mods' layers (Authority::apply_layers), on top of whatever the processor did, its switch included.
         // While another mod owns the camera they are off too, unless that owner asked to keep them.
-        bool layered = (!owned || owner_keeps_layers) && g_authority.apply_layers(view.location, view.rotation, view.fov, dt);
+        bool layered = (!owned || owner_keeps_layers) && m_authority.apply_layers(view.location, view.rotation, view.fov, dt);
         bool wrote = apply_result || layered;
         if (wrote)
         {
@@ -299,7 +291,7 @@ namespace
         // Owned: the game's FOV, not a layer's, so the glide back starts from the view the owner left on screen.
         m_view.out_fov = fov_ok ? (owned ? game_view.fov : view.fov) : NAN;
         m_view.out_valid = true;
-        g_authority.set_blending(m_view.blending);
+        m_authority.set_blending(m_view.blending);
         m_debug_glide.store(m_view.blending && m_view.blend_glide, std::memory_order_relaxed);
         m_debug_lag_h.store(std::hypot(m_view.out_offset.x, m_view.out_offset.y), std::memory_order_relaxed);
         m_debug_lag_v.store(std::abs(m_view.out_offset.z), std::memory_order_relaxed);
@@ -323,12 +315,12 @@ namespace
         uint64_t toggle = 0;
         const bool enabled = processor && processor->state(toggle);
         // Off and settled: the game's view untouched. The next toggle starts from a fresh output.
-        if (!enabled && !m_view.blending && toggle == m_view.seen_toggle && !g_authority.layers_any())
+        if (!enabled && !m_view.blending && toggle == m_view.seen_toggle && !m_authority.layers_any())
         {
             m_view.valid = false;
             m_view.invalid_reason = Snap::Toggle;
             m_view.out_valid = false;
-            g_authority.set_blending(false);
+            m_authority.set_blending(false);
             publish_debug_idle();
             ViewHead view{};
             if (m_copy(&view, desired_view, VIEW_BYTES)) publish_api_view(view, view, nullptr);
@@ -371,7 +363,7 @@ namespace
     {
         Processor* held = &p;
         if (!m_processor.compare_exchange_strong(held, nullptr)) return true; // not registered: nothing can call p
-        return wait_for_zero(m_in_processor);
+        return dw::wait_for_zero(m_in_processor, 5000);
     }
 
     auto Pipeline::set_listener(Listener& l) -> bool
@@ -384,7 +376,7 @@ namespace
     {
         Listener* held = &l;
         if (!m_listener.compare_exchange_strong(held, nullptr)) return true; // not set: nothing can call l
-        return wait_for_zero(m_in_listener);
+        return dw::wait_for_zero(m_in_listener, 5000);
     }
 
     auto Pipeline::set_cut_thresholds(double reset_distance, double reset_gap) -> void
@@ -434,43 +426,6 @@ namespace
         return out;
     }
 
-    auto Pipeline::reset() -> void
-    {
-        AcquireSRWLockExclusive(&m_tuning_lock);
-        m_tuning = DEFAULT_TUNING;
-        ReleaseSRWLockExclusive(&m_tuning_lock);
-        m_reset.store(true);
-        m_reset_reason.store(static_cast<int>(Snap::Startup));
-        m_hook_timing.store(false);
-        dw::g_verbose.store(false); // not the Pipeline's (common/log.hpp), but set_diagnostics writes it
-        m_player_camera.store(nullptr);
-        m_player_root.store(nullptr);
-        m_player_controller.store(nullptr);
-        m_player_known.store(false);
-        m_translation_offset.store(-1);
-        m_half_height_offset.store(-1);
-        m_view_updates.store(0);
-        m_last_view_qpc.store(0);
-        m_view_seconds.store(0.0);
-        m_calls_timed.store(0);
-        m_ticks_spent.store(0);
-        m_debug_keep_follow.store(NAN);
-        m_debug_keep_turn.store(NAN);
-        m_debug_influence.store(0);
-        m_debug_lag_h.store(NAN);
-        m_debug_lag_v.store(NAN);
-        m_debug_rate_h.store(NAN);
-        m_debug_snap.store(0);
-        m_debug_snap_qpc.store(0);
-        m_debug_glide.store(false);
-        m_view = ViewState{};
-        m_processor.store(nullptr);
-        m_listener.store(nullptr);
-        m_snapshot.reset();
-        m_clock = QPC_CLOCK;
-        m_copy = &seh_copy;
-    }
-
     auto Pipeline::inspect() const -> Inspect
     {
         Inspect out{};
@@ -493,58 +448,35 @@ namespace
 
     // ------------------------------------------------------------------------------------------ the interface
 
-namespace
-{
-    // The core's CameraCore (camera/api.hpp): methods over the static Pipeline (camera/hook.cpp) and the Authority, no
-    // state of its own.
-    class CoreApi final : public CameraCore
+    auto CoreApi::register_processor(Processor& p) -> bool { return m_pipeline.register_processor(p); }
+    auto CoreApi::unregister_processor(Processor& p) -> bool { return m_pipeline.unregister_processor(p); }
+    auto CoreApi::set_listener(Listener& l) -> bool { return m_pipeline.set_listener(l); }
+    auto CoreApi::clear_listener(Listener& l) -> bool { return m_pipeline.clear_listener(l); }
+    auto CoreApi::set_cut_thresholds(double reset_distance, double reset_gap) -> void { m_pipeline.set_cut_thresholds(reset_distance, reset_gap); }
+    auto CoreApi::set_diagnostics(uint32_t flags) -> void { m_pipeline.set_diagnostics(flags); }
+
+    // The hook compares the player camera with its untyped `self`, so the Pipeline's slots stay void*; the type is put
+    // back here.
+    auto CoreApi::player_camera() const -> RC::Unreal::UObject* { return static_cast<RC::Unreal::UObject*>(m_pipeline.player_camera()); }
+    auto CoreApi::player_controller() const -> RC::Unreal::UObject* { return static_cast<RC::Unreal::UObject*>(m_pipeline.player_controller()); }
+    auto CoreApi::player_known() const -> bool { return m_pipeline.player_known(); }
+    auto CoreApi::view_updates() const -> uint64_t { return m_pipeline.view_updates(); }
+    auto CoreApi::view_seconds() const -> double { return m_pipeline.view_seconds(); }
+    auto CoreApi::camera_live() const -> bool { return m_pipeline.camera_live(); }
+    auto CoreApi::game_thread_id() const -> uint32_t { return m_pipeline.game_thread(); }
+    auto CoreApi::take_hook_timing(uint64_t& calls, double& microseconds_per_call) -> void { m_pipeline.take_hook_timing(calls, microseconds_per_call); }
+    auto CoreApi::read_debug() const -> DebugFeed { return m_pipeline.read_debug(); }
+
+    // Read-only, the way Smoothwalker.owner() reads it (Authority::owner): under the Authority's mutex, and an expired
+    // lease reads as nobody. The drop itself stays with claim and release.
+    auto CoreApi::camera_owner() const -> Owner
     {
-      public:
-        auto register_processor(Processor& p) -> bool override { return g_pipeline.register_processor(p); }
-        auto unregister_processor(Processor& p) -> bool override { return g_pipeline.unregister_processor(p); }
-        auto set_listener(Listener& l) -> bool override { return g_pipeline.set_listener(l); }
-        auto clear_listener(Listener& l) -> bool override { return g_pipeline.clear_listener(l); }
-        auto set_cut_thresholds(double reset_distance, double reset_gap) -> void override { g_pipeline.set_cut_thresholds(reset_distance, reset_gap); }
-        auto set_diagnostics(uint32_t flags) -> void override { g_pipeline.set_diagnostics(flags); }
-
-        // The hook compares the player camera with its untyped `self`, so the Pipeline's slots stay void*; the type is
-        // put back here.
-        auto player_camera() const -> RC::Unreal::UObject* override { return static_cast<RC::Unreal::UObject*>(g_pipeline.player_camera()); }
-        auto player_controller() const -> RC::Unreal::UObject* override
-        {
-            return static_cast<RC::Unreal::UObject*>(g_pipeline.player_controller());
-        }
-        auto player_known() const -> bool override { return g_pipeline.player_known(); }
-        auto view_updates() const -> uint64_t override { return g_pipeline.view_updates(); }
-        auto view_seconds() const -> double override { return g_pipeline.view_seconds(); }
-        auto camera_live() const -> bool override { return g_pipeline.camera_live(); }
-        auto game_thread_id() const -> uint32_t override { return g_authority.game_thread(); }
-        auto take_hook_timing(uint64_t& calls, double& microseconds_per_call) -> void override { g_pipeline.take_hook_timing(calls, microseconds_per_call); }
-        auto read_debug() const -> DebugFeed override { return g_pipeline.read_debug(); }
-
-        // Read-only, the way Smoothwalker.owner() reads it (Authority::owner): under the Authority's mutex, and an
-        // expired lease reads as nobody. The drop itself stays with claim and release.
-        auto camera_owner() const -> Owner override
-        {
-            int64_t expires = 0;
-            std::string mod = g_authority.owner(&expires);
-            Owner owner;
-            const Clock& clock = g_authority.clock();
-            owner.lease = !mod.empty() && expires != 0 ? std::max(0.0, static_cast<double>(expires - clock.now()) / clock.frequency()) : NAN;
-            owner.mod = std::move(mod);
-            return owner;
-        }
-    };
-    CoreApi g_core_api; // stateless, trivially destructible: nothing to reset, nothing run at unload
-} // namespace
-
-    auto core_api() -> CameraCore&
-    {
-        return g_core_api;
-    }
-
-    auto processor_enabled() -> bool
-    {
-        return g_pipeline.processor_enabled();
+        int64_t expires = 0;
+        std::string mod = m_authority.owner(&expires);
+        Owner owner;
+        const Clock& clock = m_authority.clock();
+        owner.lease = !mod.empty() && expires != 0 ? std::max(0.0, static_cast<double>(expires - clock.now()) / clock.frequency()) : NAN;
+        owner.mod = std::move(mod);
+        return owner;
     }
 } // namespace dw::camera

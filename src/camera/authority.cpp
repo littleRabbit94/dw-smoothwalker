@@ -12,6 +12,7 @@
 
 #include "authority.hpp"
 #include "frame.hpp"
+#include "pipeline.hpp"
 #include "../common/math.hpp"
 
 #include <algorithm>
@@ -21,14 +22,19 @@
 
 namespace dw::camera
 {
-    Authority g_authority;
-
-    auto Authority::link(bool (*enabled)(), std::atomic<bool>* reset, std::atomic<int>* reset_reason, const ViewSnapshot* snapshot) -> void
+    auto Authority::enabled() const -> bool
     {
-        m_enabled = enabled;
-        m_reset = reset;
-        m_reset_reason = reset_reason;
-        m_snapshot = snapshot;
+        return m_pipeline.processor_enabled();
+    }
+
+    auto Authority::read_view(Snapshot& out) const -> bool
+    {
+        return m_pipeline.snapshot().read(out);
+    }
+
+    auto Authority::game_thread() const -> uint32_t
+    {
+        return m_pipeline.game_thread();
     }
 
     auto Authority::owner(int64_t* expires_out) const -> std::string
@@ -71,10 +77,10 @@ namespace dw::camera
         // How to come back goes out first: the hook's acquire-load of the slot then implies this is visible, so an
         // update that sees the claim dropped always sees the glide too and never takes the falling edge's cut.
         if (glide) m_release_generation.fetch_add(1, std::memory_order_relaxed);
-        else if (m_reset)
+        else
         {
-            if (m_reset_reason) m_reset_reason->store(static_cast<int>(Snap::ApiCut), std::memory_order_relaxed);
-            m_reset->store(true, std::memory_order_relaxed);
+            m_pipeline.reset_reason().store(static_cast<int>(Snap::ApiCut), std::memory_order_relaxed);
+            m_pipeline.reset_flag().store(true, std::memory_order_relaxed);
         }
         m_owner_keep_layers.store(false, std::memory_order_relaxed);
         m_owner_expires.store(0, std::memory_order_relaxed);
@@ -287,31 +293,6 @@ namespace dw::camera
         for (int k = 0; k < 3; ++k) rotation[k] += sum[3 + k];
         fov = std::clamp(fov + static_cast<float>(sum[6]), 5.0f, 170.0f);
         return true;
-    }
-
-    auto Authority::reset() -> void
-    {
-        {
-            std::lock_guard guard(m_mutex);
-            m_states.clear();
-            for (auto& owner : m_slot_owner) owner.clear();
-            m_mod_version.clear();
-            m_owner_state = nullptr;
-            m_owner_mod.clear();
-            m_owner_keep_layers.store(false);
-            m_owner_expires.store(0);
-            m_release_generation.store(0);
-            m_owner_slot.store(-1);
-        }
-        AcquireSRWLockExclusive(&m_layers_lock);
-        for (auto& layer : m_layers) layer = Layer{};
-        m_layer_generation = 0;
-        ReleaseSRWLockExclusive(&m_layers_lock);
-        for (auto& state : m_layer_state) state = LayerState{};
-        m_layers_any.store(false);
-        m_blending.store(false);
-        m_game_thread.store(0);
-        m_clock = QPC_CLOCK;
     }
 
     auto Authority::inspect() const -> Inspect

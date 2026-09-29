@@ -154,12 +154,16 @@ struct Smoothwalker::Impl
 
         std::lock_guard guard(m_file_mutex);
         // log_verbose is read once here, ahead of load_presets_locked(), so its per-preset lines are gated from
-        // the start; reload_settings_locked(true) below re-derives the same value from the full parse.
+        // the start; reload_settings_locked(true) below re-derives the same value from the full parse. Written
+        // whatever the file holds (off without the key or the file): the flag is image-level (common/log.hpp), and
+        // this write, not an unload reset, is what starts each instance from its own ini.
+        bool verbose = false;
         if (auto content = settings::read_file(SETTINGS_PATH))
         {
             auto numbers = settings::parse_numbers(*content);
-            if (auto found = numbers.find("log_verbose"); found != numbers.end()) dw::g_verbose.store(found->second != 0.0);
+            if (auto found = numbers.find("log_verbose"); found != numbers.end()) verbose = found->second != 0.0;
         }
+        dw::g_verbose.store(verbose);
         load_presets_locked();
         reload_settings_locked(true);
         add_missing_keys_locked();
@@ -1071,8 +1075,8 @@ Smoothwalker::Smoothwalker(camera::CameraCore& core, BindKey bind_key, std::wstr
 }
 
 // A leaked Impl is owned by nothing afterwards: the core cleared its processor and listener slots before it timed out
-// (so no new call can reach it) and reset_globals holds no pointer to it, so the next instance neither reuses nor
-// frees it. Only the call the core still has in flight touches it.
+// (so no new call can reach it), and no static holds a pointer to it, so the next instance neither reuses nor frees
+// it. Only the call the core still has in flight touches it.
 Smoothwalker::~Smoothwalker()
 {
     if (m_leak) (void)m.release();
@@ -1096,8 +1100,8 @@ auto Smoothwalker::unregister_callbacks() -> void
 
 // After the core unhooked and waited for the hook (mod.cpp): the game thread is out of m_tuner (the callbacks
 // are gone), and no hook call is inside the processor. The CDOs get their base back; then the follow and the
-// listener leave the core, and the one namespace-scope global this side holds goes back to its static-init value
-// (docs/design.md, "The DLL is pinned"). Everything else of this side lives in this object and goes with it.
+// listener leave the core. Everything of this side lives in this object and goes with it; the verbose flag it
+// writes is rewritten by the next instance's constructor.
 auto Smoothwalker::shutdown() -> void
 {
     m->m_tuner.restore();
@@ -1111,6 +1115,5 @@ auto Smoothwalker::shutdown() -> void
         m_leak = true;
         Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] unload: a camera call did not finish, the component was left allocated\n"));
     }
-    dw::g_verbose.store(false);
 }
 } // namespace dw::smoothwalker

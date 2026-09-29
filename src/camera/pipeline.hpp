@@ -28,6 +28,8 @@
 
 namespace dw::camera
 {
+    class Authority;
+
     // Prefix of UE 5.5 FMinimalViewInfo: Location, Rotation, FOV.
     struct ViewHead
     {
@@ -85,12 +87,13 @@ namespace dw::camera
     class Pipeline
     {
       public:
-        explicit Pipeline(Clock clock = QPC_CLOCK, GuardedCopy copy = &seh_copy) : m_clock(clock), m_copy(copy) {}
-
-        // The clock every stamp, gap and age is read on, and the copy every read of the player's objects and the
-        // write of the view go through. Set before first use (a test's); reset() puts the defaults back.
-        auto set_clock(Clock clock) -> void { m_clock = clock; }
-        auto set_guarded_copy(GuardedCopy copy) -> void { m_copy = copy; }
+        // `authority`: the API state the hook reads and writes (the owner, layers, the blending flag); only bound
+        // here, so the two may be constructed in either order. `clock`: every stamp, gap and age is read on it.
+        // `copy`: every read of the player's objects and the write of the view go through it. The Core passes
+        // QPC_CLOCK and seh_copy; a test its own.
+        Pipeline(Authority& authority, Clock clock, GuardedCopy copy) : m_authority(authority), m_clock(clock), m_copy(copy) {}
+        Pipeline(const Pipeline&) = delete;
+        auto operator=(const Pipeline&) -> Pipeline& = delete;
 
         // The hook (camera/hook.cpp), after the game's own GetCameraView: the rest of one camera update. Returns at
         // once for any camera but the player's.
@@ -120,6 +123,9 @@ namespace dw::camera
         auto set_translation_offset(int32_t offset) -> void { m_translation_offset.store(offset); }
         auto half_height_offset() const -> int32_t { return m_half_height_offset.load(); }
         auto set_half_height_offset(int32_t offset) -> void { m_half_height_offset.store(offset); }
+        // The game thread's id, captured on the engine tick; 0 before the first. Any thread reads it.
+        auto game_thread() const -> uint32_t { return m_game_thread.load(std::memory_order_relaxed); }
+        auto set_game_thread(uint32_t id) -> void { m_game_thread.store(id); }
 
         // Game thread: a listener callback, if one is set.
         template <typename Call>
@@ -129,8 +135,7 @@ namespace dw::camera
             if (Listener* listener = m_listener.load()) call(*listener);
         }
 
-        // Lua's Smoothwalker.enabled() (Authority::enabled, through processor_enabled()): the processor's switch,
-        // false without one.
+        // Lua's Smoothwalker.enabled() (Authority::enabled): the processor's switch, false without one.
         auto processor_enabled() -> bool;
 
         // ----------------------------------------------------------------------- CameraCore (CoreApi forwards)
@@ -151,17 +156,13 @@ namespace dw::camera
         auto take_hook_timing(uint64_t& calls, double& microseconds_per_call) -> void;
         auto read_debug() const -> DebugFeed;
 
-        // --------------------------------------------------------------------------- the Authority's links
+        // ------------------------------------------------------------------------------ the Authority's reads
 
+        // The hard-cut flag and its reason (release("cut") snaps through the same flag a teleport sets), and the
+        // view snapshot (Lua's view() and live(), claim()'s fade check).
         auto reset_flag() -> std::atomic<bool>& { return m_reset; }
         auto reset_reason() -> std::atomic<int>& { return m_reset_reason; }
         auto snapshot() const -> const ViewSnapshot& { return m_snapshot; }
-
-        // Every field back to its static-init value, for the next instance on the same pinned image
-        // (Core::reset_globals), the clock and the copy included. Kept: the tuning lock, m_in_processor and
-        // m_in_listener (self-balancing, and a call through a hook left in the chain may be in flight). The verbose
-        // flag (common/log.hpp), which set_diagnostics writes, goes back to off too.
-        auto reset() -> void;
 
         // Read-only copy of what the hook publishes, for a single-threaded check (the equivalence harness).
         struct Inspect
@@ -187,8 +188,10 @@ namespace dw::camera
         auto lose_view() -> void;
         auto update_view(void* desired_view, float delta_time, Processor* processor, bool enabled, uint64_t toggle) -> void;
 
+        Authority& m_authority;
         Clock m_clock;
         GuardedCopy m_copy;
+        std::atomic<uint32_t> m_game_thread{0};
 
         SRWLOCK m_tuning_lock = SRWLOCK_INIT; // m_tuning
         Tuning m_tuning = DEFAULT_TUNING;
@@ -225,8 +228,7 @@ namespace dw::camera
 
         // The processor and listener slots (CameraCore::register_processor, CameraCore::set_listener). A caller counts
         // itself in before it loads the slot, so unregistering (store null, then wait for 0) never returns while a call
-        // into the old one is in flight. m_in_processor and m_in_listener balance themselves and are kept across a hot
-        // reload.
+        // into the old one is in flight.
         std::atomic<Processor*> m_processor{nullptr};
         std::atomic<Listener*> m_listener{nullptr};
         std::atomic<int> m_in_processor{0}; // the hook and Lua's enabled() inside m_processor
@@ -236,9 +238,32 @@ namespace dw::camera
         ViewSnapshot m_snapshot; // the API snapshot: published here, read by Lua's view() and live() through the Authority
     };
 
-    // Lua's Smoothwalker.enabled() through Authority::link: the static Pipeline's processor_enabled().
-    auto processor_enabled() -> bool;
+    // The core's interface (camera/api.hpp) over one Pipeline and its Authority, for Core::api() and the equivalence
+    // harness: forwards only, no state of its own. Any thread, as each method says.
+    class CoreApi final : public CameraCore
+    {
+      public:
+        CoreApi(Pipeline& pipeline, const Authority& authority) : m_pipeline(pipeline), m_authority(authority) {}
 
-    // The core's interface, for Core::api() (and the equivalence harness). Any thread.
-    auto core_api() -> CameraCore&;
+        auto register_processor(Processor& p) -> bool override;
+        auto unregister_processor(Processor& p) -> bool override;
+        auto set_listener(Listener& l) -> bool override;
+        auto clear_listener(Listener& l) -> bool override;
+        auto set_cut_thresholds(double reset_distance, double reset_gap) -> void override;
+        auto set_diagnostics(uint32_t flags) -> void override;
+        auto player_camera() const -> RC::Unreal::UObject* override;
+        auto player_controller() const -> RC::Unreal::UObject* override;
+        auto player_known() const -> bool override;
+        auto view_updates() const -> uint64_t override;
+        auto view_seconds() const -> double override;
+        auto camera_live() const -> bool override;
+        auto game_thread_id() const -> uint32_t override;
+        auto take_hook_timing(uint64_t& calls, double& microseconds_per_call) -> void override;
+        auto read_debug() const -> DebugFeed override;
+        auto camera_owner() const -> Owner override;
+
+      private:
+        Pipeline& m_pipeline;
+        const Authority& m_authority;
+    };
 } // namespace dw::camera

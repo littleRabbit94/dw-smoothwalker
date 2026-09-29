@@ -26,10 +26,10 @@ Exit 0 and `PASS` only if every session matched. Mutations (`core`, `follow`, `p
 - **Split:** the working tree's camera and `smoothwalker/follow/processor.hpp`, joined only through the core's
   interface (`new_driver.cpp`). The camera's own translation units are compiled as the DLL builds them (`NEW_SOURCES`
   in `run.sh`: `camera/authority.cpp`, `camera/guarded.cpp`, `camera/hook.cpp`, `camera/pipeline.cpp`, each with
-  `shim/prelude.hpp` first); the driver gives the Pipeline and the Authority the harness's clock (`Clock` over
-  `harness::qpc_tick`) and the Pipeline a guarded copy that fails where `harness::fault_now()` says, installs the hook
-  on a slot of its own with `hook_slot` and calls `get_camera_view_hook`, and the API operations call the product's
-  `Authority` (`new_api_ops.inc`).
+  `shim/prelude.hpp` first); the driver owns a Pipeline and an Authority as the Core does, constructed with the
+  harness's clock (`Clock` over `harness::qpc_tick`) and, for the Pipeline, a guarded copy that fails where
+  `harness::fault_now()` says; it publishes the Pipeline to the hook's slot, installs the hook on a slot of its own
+  with `hook_slot` and calls `get_camera_view_hook`, and the API operations call its `Authority` (`new_api_ops.inc`).
 - Both link into one program (the baseline's four namespaces renamed `base_*`, the split's root `dw` renamed `new_dw`, on the command line) and get the same events in
   lockstep from one seeded session (`main.cpp`): walking, jumps, teleports under and over `reset_distance`, pauses,
   slow motion, crouches, implausible half heights, a missing half-height offset, NaN and infinite views, odd

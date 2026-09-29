@@ -34,7 +34,7 @@ namespace dw::smoothwalker
 
         // Unload, called by the mod's destructor in this order around the core's own steps (mod.cpp):
         auto unregister_callbacks() -> void; // UnregisterCallback waits for running callbacks
-        auto shutdown() -> void;             // after the core unhooked: modes restored, off the core, globals reset
+        auto shutdown() -> void;             // after the core unhooked: modes restored, off the core
 
       private:
         struct Impl;

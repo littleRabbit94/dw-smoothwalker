@@ -24,6 +24,8 @@
 
 namespace dw::camera
 {
+    class Pipeline;
+
     constexpr int MAX_LAYERS = 8;
 
     // What a consumer asked for. Numbers only: the hook copies the array under a shared lock every update.
@@ -89,27 +91,24 @@ namespace dw::camera
             size_t consumers;
         };
 
-        explicit Authority(Clock clock = QPC_CLOCK) : m_clock(clock) {}
+        // `pipeline`: the core's hook side, only bound here (the two may be constructed in either order): the
+        // processor's live switch, the hook's hard-cut flag and its reason (release("cut") snaps through the same
+        // flag a teleport sets), the view snapshot claim() checks, the game thread's id. `clock`: every lease,
+        // expiry and age is read on it (the Core's QPC_CLOCK, or a test's).
+        Authority(Pipeline& pipeline, Clock clock) : m_pipeline(pipeline), m_clock(clock) {}
+        Authority(const Authority&) = delete;
+        auto operator=(const Authority&) -> Authority& = delete;
 
-        // The clock every lease, expiry and age is read on. Set before first use (a test's clock); reset() puts
-        // QPC_CLOCK back.
-        auto set_clock(Clock clock) -> void { m_clock = clock; }
         auto clock() const -> const Clock& { return m_clock; }
-
-        // The core's pipeline, set by the core at construction and kept across reset(): the processor's live switch
-        // (any thread), the hook's hard-cut flag and its reason (release("cut") snaps through the same flag a
-        // teleport sets), and the view snapshot claim() checks.
-        auto link(bool (*enabled)(), std::atomic<bool>* reset, std::atomic<int>* reset_reason, const ViewSnapshot* snapshot) -> void;
 
         // ------------------------------------------------------------------------------------------ any thread
 
-        // Smoothwalker.enabled(): the processor's live switch; false with no processor registered or no link.
-        auto enabled() const -> bool { return m_enabled && m_enabled(); }
-        // The view snapshot (view(), live()); false as ViewSnapshot::read, and before link().
-        auto read_view(Snapshot& out) const -> bool { return m_snapshot && m_snapshot->read(out); }
-        // The game thread's id, captured on the engine tick; 0 before the first.
-        auto game_thread() const -> uint32_t { return m_game_thread.load(std::memory_order_relaxed); }
-        auto set_game_thread(uint32_t id) -> void { m_game_thread.store(id); }
+        // Smoothwalker.enabled(): the processor's live switch; false with no processor registered.
+        auto enabled() const -> bool;
+        // The view snapshot (view(), live()); false as ViewSnapshot::read.
+        auto read_view(Snapshot& out) const -> bool;
+        // The game thread's id, the Pipeline's (captured on the engine tick); 0 before the first.
+        auto game_thread() const -> uint32_t;
         // The owner's mod name, empty for nobody, under the mutex only: an expired lease reads as nobody here, and
         // the drop itself is left to claim and release. Writes the lease's expiry QPC (0: none) when asked.
         auto owner(int64_t* expires_out) const -> std::string;
@@ -156,11 +155,6 @@ namespace dw::camera
         // changed the view or is still fading, so the caller writes the view back.
         auto apply_layers(double* location, double* rotation, float& fov, double dt) -> bool;
 
-        // Every field back to its static-init value, for the next instance on the same pinned image
-        // (Core::reset_globals), the clock included. After every Lua table holds stubs and the hook stopped following
-        // the player. Kept: the locks and the link() pointers.
-        auto reset() -> void;
-
         auto inspect() const -> Inspect;
 
       private:
@@ -168,12 +162,8 @@ namespace dw::camera
         auto drop_expired_locked() -> void;
         auto clear_slot_locked(int slot) -> void;
 
+        Pipeline& m_pipeline;
         Clock m_clock;
-        bool (*m_enabled)() = nullptr;
-        std::atomic<bool>* m_reset = nullptr;
-        std::atomic<int>* m_reset_reason = nullptr;
-        const ViewSnapshot* m_snapshot = nullptr;
-        std::atomic<uint32_t> m_game_thread{0};
 
         // The owner's index in the owner table, -1 when nobody owns. The table is one entry wide (one owner at a
         // time, no priorities), so the published value is 0 or -1.
@@ -196,8 +186,4 @@ namespace dw::camera
         const void* m_owner_state = nullptr; // the camera owner's key, under m_mutex; nullptr: nobody
         std::string m_owner_mod;             // its mod name, under m_mutex
     };
-
-    // The one instance, image-level for now: reset by Core::reset_globals, since a hot reload runs no static
-    // initializer on the pinned image.
-    extern Authority g_authority;
 } // namespace dw::camera
