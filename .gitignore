@@ -3,6 +3,7 @@ release/dist/
 release/art/
 __pycache__/
 build/
+build-tests/
 out/
 .vs/
 CMakeUserPresets.json
