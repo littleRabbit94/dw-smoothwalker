@@ -295,7 +295,16 @@ crossfade eased linearly (core, first difference at frame 35 to 1,018), the foll
 (frame 15,402 to 113,952), mode writes not folded into the processor's generation (frame 114 to 1,341). Built with
 MSVC: the 4 known C4996 warnings, no others. Not yet played.
 
-### Plan: DWCameraCore as its own mod (chosen 2026-09-28)
+### Plan: DWCameraCore as its own mod (chosen 2026-09-28, deferred the same day)
+
+**Deferred after stage 2.** The free camera was the reason for a second mod, and it turned out not to need one:
+slot 214 is never called while the photo camera holds the view, and FOV and roll reach the photo camera from Lua
+(`PlayerController:FOV`, control rotation), measured 2026-09-28 ("After the hook: camera modifiers and
+`LockedFOV`"). So stage 2 stays as Smoothwalker's internal structure and Smoothwalker ships as one mod. Stages 3 and
+4 wait for a mod that needs continuous per-frame control of the gameplay camera and should ship without
+Smoothwalker; until then such a mod uses Smoothwalker's layers (they apply with smoothing off too). Before stage 3:
+`api_camera_owner` builds a `std::string` and locks a mutex, so an exception could cross the table; make the table
+functions `noexcept` and catch inside.
 
 **Why a second mod.** The two fights this API was built for are handled inside one DLL: a free camera against the
 follow (`claim` / `release`, api_version 4) and the mode writes against other camera mods ("Writes from other
@@ -345,7 +354,8 @@ nothing, and nothing writes a camera mode.
 1. Done: the follow behind `core/frame.hpp`.
 2. Done 2026-09-28: the boundary inside one DLL ("Core and processors"): the core behind `dwcc_get_api`'s table,
    Smoothwalker a component that calls nothing else. Checked with the rebuilt harness (`tests/equivalence/`, 8 x
-   300,000 frames identical, three planted changes caught) and an MSVC build; the in-game list is still owed.
+   300,000 frames identical, three planted changes caught), an adversarial review (14 checks, none failed) and an
+   MSVC build, then played through the in-game list, three DWFreeCam claim / glide cycles included.
 3. Two DLLs from this repo: a second CMake target, the export, discovery, pinning. Check: core alone equals the
    game (hook output bytes equal the game's view, mode values read back shipped through the bridge); core plus
    Smoothwalker on the in-game list; Ctrl+R; both start orders; Smoothwalker without the core shows the banner.
@@ -360,10 +370,9 @@ hook install), `log_stats` (hook cost and calls per second, its half of today's 
 register, claim, release, layer and lease expiry with the consumer's name, for mod authors). Cut thresholds stay
 in `smoothwalker.ini`. Nothing is pushed until stage 4 is done.
 
-**Open.** Two checks are owed whatever the plan: "Writes from other
-mods" against a real mod (Farther and Centered Camera, 236, is the simplest), and whether slot 214 is on the
-render path during photo mode (`docs/live-levers.md` in dawnwalker-toolkit, 2026-09-22, says yes; "Two
-surfaces" above says the photo camera never reaches the hook). The recorder's FOV depends on the answer.
+**Both open checks answered 2026-09-28.** "Writes from other mods" ran against Farther and Centered Camera (236)
+and held. Slot 214 is not on the render path in photo mode ("After the hook: camera modifiers and `LockedFOV`"), so
+the recorder's FOV goes through `PlayerController:FOV`, not the hook.
 
 ## Camera modes and position tuning
 
@@ -941,9 +950,11 @@ everything; the mode writes share their fields with at least eight other mods.
   The player gets two layers of softness, and the 90 degree trail cap (0.9.0) is what keeps a fast
   auto-yaw from reversing the follow.
 - **Photo-mode mods**: FreeCam (350), PhotoMode with OSD (361), Photo Mode Unlocked (595), PhotoModeBoD
-  (369). The photo camera is its own actor with its own component, so the hook returns on the pointer
-  compare; `camera_live()` goes false while it holds the view, V and N are ignored, and the return is a
-  `reset_gap` snap. No work needed.
+  (369). The photo camera (`PhotoCameraActor`) moves the pawn's own `FollowCamera` but never asks it for a view, so
+  the hook is not called at all while it holds the view (measured 2026-09-28, paused and running; see "After the
+  hook"); `camera_live()` goes false, V and N are ignored, and the return is a `reset_gap` snap, or a glide
+  through `claim` / `release` (DWFreeCam 1.5). The photo-mode mods zoom through `PlayerController:FOV` and tilt
+  through control rotation, neither of which touches the hook.
 - **Targeting hooks**: Free Combat Camera (340 and 568), AXIS (588). They hook lock-on and target
   selection, not the view. The standalone build of 340 ships its own `version.dll` or `winmm.dll`
   proxy, a second injector beside the UE4SS one: an install note for the page, not a Smoothwalker issue.
@@ -1029,10 +1040,36 @@ became the captured values and the log stayed silent (see "Limits"). A later cha
 
 The final `FMinimalViewInfo` once per frame, the smoothed pivot, the aiming flag, and a proven
 game-thread-to-worker handoff (`Tuning` under an SRW lock, the atomics). It is the one mod at the point
-where the view is produced. A per-frame FOV or roll ramp is not reachable from Lua at all
-(dawnwalker-toolkit `docs/mods.md`, "Driving the camera from a mod", 2026-09-22: `DefaultFieldOfView`
-needs a two-callback type flip and `CapturedCameraComponent.FieldOfView` is dead), so anything
-continuous other mods want has to come through this hook.
+where the view is produced. A per-frame FOV or roll change that composes with the game's own view is not
+reachable from Lua (dawnwalker-toolkit `docs/mods.md`, "Driving the camera from a mod", 2026-09-22:
+`DefaultFieldOfView` needs a two-callback type flip and `CapturedCameraComponent.FieldOfView` is dead), so anything
+continuous other mods want on the gameplay camera comes through this hook. Lua does have one absolute FOV:
+`PlayerController:FOV` (`LockedFOV`) replaces every FOV, the game's sprint and parry kicks included, on any view
+target ("After the hook").
+
+### After the hook: camera modifiers and `LockedFOV` (measured 2026-09-28)
+
+- **Modifiers run after slot 214.** `RebelPlayerCameraManager` is native (no Blueprint subclass) and runs
+  `CameraAnimationCameraModifier` and `CameraModifier_CameraShake` (priority 127 each). UE 5.5.4
+  `APlayerCameraManager::UpdateViewTarget` calls the view target's `CalcCamera` (which reaches `GetCameraView`),
+  then `ApplyCameraModifiers`. Measured: with nothing playing, the final view (`GetCameraLocation`, `Rotation`,
+  `GetFOVAngle`) equals the hook's written view to the bit; `StartCameraShake(BP_Coen_Landing_Heavy_Shake_C, 3)`
+  put up to 22 cm and 4.3 degrees on top of it and swung the FOV (down to -16 at that scale), back to exactly 0
+  after. So the game's shakes and FOV kicks (about 24 classes, `BP_ParryImpactFov` and
+  `BP_WeaponArtCamera_SlowMoFOV` among them) play on top of Smoothwalker's output, not under it.
+- **Slot 214 is silent in photo mode.** With the view target a `PhotoCameraActor` whose `CapturedCameraComponent`
+  is the pawn's `FollowCamera` (0 cm from the final view), `view().age` kept growing for over 170 s, world paused
+  and with world time running, with and without a DWFreeCam claim. A `layer_set{ fov_abs = 60 }` left the photo
+  camera at 90 in both states; leaving photo mode, the gameplay camera zoomed to 60 at once. A shake started with
+  the camera out moved `GetFOVAngle()` 90 -> 55 -> 59 -> 75, so modifiers do reach the photo camera. Whether they run
+  while photo mode is paused is open: a pause cleared the test shake (0 entries in `ActiveShakes`).
+- **`LockedFOV` renders.** `APlayerController::FOV` sets `PlayerCameraManager.LockedFOV`; `GetFOVAngle()` returns it
+  when set, and `ULocalPlayer::GetViewPoint` sets the rendered FOV from `GetFOVAngle()` (`LocalPlayer.cpp:685`). It
+  is absolute and overrides every FOV upstream, for any view target; `FOV(0)` gives it back. PhotoMode with OSD
+  1.6.1 and Photo Mode Unlocked 1.2.5 (both Lua only) zoom this way and roll through `SetControlRotation`.
+- **So:** a per-frame change to the gameplay camera that has to compose with the game's view belongs in slot 214
+  (this hook, or its layers); a free camera or path recorder uses the photo actor's transform, control rotation
+  and `LockedFOV`; new shake shapes are Blueprint shake assets played through `StartCameraShake`.
 
 ### Transport
 
@@ -1635,8 +1672,8 @@ written to the native value (the lag switch), so they were copied all along.
 Stage 1 of splitting Smoothwalker into a camera core and the follow as one optional processor. No behaviour
 change: the follow moved out of `update_view` into `follow/follow.hpp` behind `core/frame.hpp`, its settings
 into their own struct and generation, and the wall helpers into `core/wall.hpp`. See "Core and processors" for
-the seam and how it was checked. Next: the core as its own mod, DWCameraCore ("Plan: DWCameraCore as its own
-mod").
+the seam and how it was checked. The split into its own mod, DWCameraCore, was planned and then deferred ("Plan:
+DWCameraCore as its own mod"); Smoothwalker stays one mod.
 
 Stage 2, the same day, again with no behaviour change: the boundary drawn inside the one DLL. The core
 (`src/core/`) and Smoothwalker (`src/sw/`) are separate translation units and components, each with its own UE4SS
