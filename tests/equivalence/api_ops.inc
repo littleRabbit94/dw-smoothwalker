@@ -18,7 +18,7 @@ namespace ops
         lua_State* main = state_of(consumer);
         std::lock_guard guard(dwapi::g_mutex);
 #if defined(EQ_BASELINE) && !defined(EQ_BASELINE_FIXED)
-        // 47f6645 as it was: no install_locked yet, and a re-key leaves the consumer's layer slot taken.
+        // f22aa8e as it was: no install_locked yet, and a re-key leaves the consumer's layer slot taken.
         if (dwapi::g_owner_state == main) dwapi::release_locked(false);
         dwapi::g_mod_version = "0.10.1";
         dwapi::g_states[main] = dwapi::Consumer{CONSUMER_NAMES[consumer], false, -1};

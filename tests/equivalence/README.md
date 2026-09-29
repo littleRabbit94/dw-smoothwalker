@@ -1,6 +1,6 @@
 # Equivalence harness (core split, stage 2)
 
-Checks that the split build's hook behaves exactly as the one-piece hook of commit `47f6645` (stage 1 done, before
+Checks that the split build's hook behaves exactly as the one-piece hook of commit `f22aa8e` (stage 1 done, before
 the split). Never shipped: `mod/` is what ships. See `docs/design.md`, "Core and processors".
 
 ## Run
@@ -21,7 +21,7 @@ Exit 0 and `PASS` only if every session matched. Mutations (`core`, `follow`, `p
 
 ## What it compares
 
-- **Baseline:** `47f6645`'s headers and its `dllmain.cpp` from `namespace` to the end of `camera_live`, extracted by
+- **Baseline:** `f22aa8e`'s headers and its `dllmain.cpp` from `namespace` to the end of `camera_live`, extracted by
   `run.sh`, patched with `baseline-fixes/*.patch` (below), and compiled (`base_driver.cpp`).
 - **Split:** the working tree's `core/pipeline.hpp` and `sw/processor.hpp`, joined only through the core's table
   (`new_driver.cpp`).
@@ -40,7 +40,7 @@ Exit 0 and `PASS` only if every session matched. Mutations (`core`, `follow`, `p
   two NaNs returns follows operand order, which the compiler may swap). The clocks must match too: the fake
   `QueryPerformanceCounter` advances one tick per call, so both builds must make the same calls in the same order.
 
-## Intended changes since 47f6645
+## Intended changes since f22aa8e
 
 A change to the mod that the baseline cannot agree with is not a harness failure to wave through: it goes in as a
 patch on the extracted baseline, so baseline and working tree again agree bit for bit and the harness keeps its
@@ -48,11 +48,11 @@ teeth for everything else. `run.sh` applies `baseline-fixes/*.patch` (in name or
 `src` parent) right after `git archive`. `--no-baseline-fixes` skips them and defines nothing extra: that run must
 FAIL, which shows the harness sees the change. A patch's leading text says what it changes and why. Where the
 harness's own operation code (`api_ops.inc`) mirrors baseline bookkeeping, it calls the function the patch adds when
-`EQ_BASELINE_FIXED` is defined (`run.sh` does that only with the patches applied) and keeps the 47f6645 copy otherwise.
+`EQ_BASELINE_FIXED` is defined (`run.sh` does that only with the patches applied) and keeps the f22aa8e copy otherwise.
 
 | Patch | Changes | Why |
 |---|---|---|
-| `0001-rekey-frees-layer-slot.patch` | `lua_api.hpp`: `install` moves its locked bookkeeping into `install_locked`, which frees the layer slot the consumer held (`clear_slot`, then `g_slot_owner[slot].clear()`, as `uninstall` does) before replacing the consumer | 47f6645 replaced the consumer on a re-key (a hot reload or a script error at load, no `on_lua_stop`) and left its slot taken: the old layer kept applying and repeated re-keys used up the 8 slots. The re-key event now differs by design: `api.layers_any` set, `api.layer_generation` and `layer.generation` bumped by the fade-out, but only when the consumer held a layer |
+| `0001-rekey-frees-layer-slot.patch` | `lua_api.hpp`: `install` moves its locked bookkeeping into `install_locked`, which frees the layer slot the consumer held (`clear_slot`, then `g_slot_owner[slot].clear()`, as `uninstall` does) before replacing the consumer | f22aa8e replaced the consumer on a re-key (a hot reload or a script error at load, no `on_lua_stop`) and left its slot taken: the old layer kept applying and repeated re-keys used up the 8 slots. The re-key event now differs by design: `api.layers_any` set, `api.layer_generation` and `layer.generation` bumped by the fade-out, but only when the consumer held a layer |
 
 Without the patch, each of the 8 default 8 x 300,000 sessions fails at a re-key event (frame 4,485 to 146,294; a
 session has 2 to 8 re-keys, and the first one whose consumer held a layer is the mismatch).
@@ -62,7 +62,7 @@ session has 2 to 8 re-keys, and the first one whose consumer held a layer is the
 | File | Contents |
 |---|---|
 | `run.sh` | Extracts the baseline, applies the baseline fixes, copies the tree (and plants a mutation), builds, runs the sessions in parallel |
-| `baseline-fixes/` | Patches for the intended changes since 47f6645 (above) |
+| `baseline-fixes/` | Patches for the intended changes since f22aa8e (above) |
 | `main.cpp` | Session generator, lockstep driver, comparison, coverage counts; optional third argument (`EQ_REKEY_CHANCE` in `run.sh`) is the re-key chance |
 | `harness.hpp` | The driver interface, settings, records |
 | `base_driver.cpp`, `new_driver.cpp` | Each build behind that interface; UE4SS-bound feeding code is quoted from the mod |

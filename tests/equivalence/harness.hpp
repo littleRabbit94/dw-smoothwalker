@@ -1,5 +1,5 @@
 // The equivalence harness's interface between the session driver (main.cpp) and the two builds of the hook it
-// compares: the baseline (base_driver.cpp, the hook region of commit 47f6645) and the split (new_driver.cpp,
+// compares: the baseline (base_driver.cpp, the hook region of commit f22aa8e) and the split (new_driver.cpp,
 // core/pipeline.hpp with Smoothwalker's processor). Each driver turns the same session events into calls on its
 // own build and writes what that build then holds into a Record; main.cpp compares the records byte for byte.
 #pragma once

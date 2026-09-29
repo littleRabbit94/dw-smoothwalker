@@ -1,10 +1,10 @@
 #!/bin/sh
-# The stage 2 equivalence check (README.md): builds the baseline hook (commit 47f6645) and the working tree's split
+# The stage 2 equivalence check (README.md): builds the baseline hook (commit f22aa8e) and the working tree's split
 # build side by side and runs seeded sessions through both, in parallel. Exit 0 only if every session matches.
 #
 #   tests/equivalence/run.sh [--mutate core|follow|processor] [--no-baseline-fixes] [sessions] [frames]
 #
-# The baseline gets the patches in baseline-fixes/ (the intended changes since 47f6645) unless --no-baseline-fixes:
+# The baseline gets the patches in baseline-fixes/ (the intended changes since f22aa8e) unless --no-baseline-fixes:
 # that run must FAIL at the first event a fix changes. EQ_REKEY_CHANCE=p raises the per-event re-key chance (default
 # 0.00001) so a verification run reaches re-keys that hold a layer.
 #
@@ -13,7 +13,7 @@ set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
-BASELINE=47f6645
+BASELINE=f22aa8e
 MUTATE=""
 FIXES=1
 while :; do
@@ -32,7 +32,7 @@ BUILD="$HERE/build"
 rm -rf "$BUILD"
 mkdir -p "$BUILD/base" "$BUILD/new" "$BUILD/log"
 
-# The baseline: 47f6645's sources, and its dllmain.cpp's hook region, from `namespace` to the end of camera_live.
+# The baseline: f22aa8e's sources, and its dllmain.cpp's hook region, from `namespace` to the end of camera_live.
 git -C "$ROOT" archive "$BASELINE" src | tar -x -C "$BUILD/base"
 BASE_DEFS="-DEQ_BASELINE"
 if [ "$FIXES" -eq 1 ]; then

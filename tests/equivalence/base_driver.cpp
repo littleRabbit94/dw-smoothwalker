@@ -1,6 +1,6 @@
-// The baseline build: commit 47f6645's headers and the hook region of its dllmain.cpp (from `namespace` to the end
+// The baseline build: commit f22aa8e's headers and the hook region of its dllmain.cpp (from `namespace` to the end
 // of camera_live), extracted by run.sh into base_region.inc and compiled unchanged. The mod-object code that fed the
-// hook at 47f6645 (publish_locked's hook part, set_enabled_locked, apply_position's flags and write, on_update's
+// hook at f22aa8e (publish_locked's hook part, set_enabled_locked, apply_position's flags and write, on_update's
 // report, debug_panel's reads) is quoted below where the region cannot supply it. Namespaces are renamed base_* on
 // the command line so both builds link into one program.
 
@@ -27,7 +27,7 @@ namespace
       public:
         auto init(const harness::HSettings& settings, bool enabled) -> void override
         {
-            // The constructor at 47f6645.
+            // The constructor at f22aa8e.
             dwapi::g_enabled = &g_enabled;
             dwapi::g_reset = &g_reset;
             dwapi::g_reset_reason = &g_reset_reason;
@@ -42,7 +42,7 @@ namespace
         auto publish(const harness::HSettings& h) -> void override
         {
             auto settings = harness::to_settings<dwsc::Settings>(h);
-            // publish_locked at 47f6645, up to the hook's last setting.
+            // publish_locked at f22aa8e, up to the hook's last setting.
             auto tuning = tuning_of(settings);
             auto follow = follow_tuning_of(settings);
             AcquireSRWLockExclusive(&g_tuning_lock);
@@ -63,7 +63,7 @@ namespace
 
         auto set_enabled(bool on) -> void override
         {
-            // set_enabled_locked at 47f6645.
+            // set_enabled_locked at f22aa8e.
             if (g_enabled.load() == on) return;
             g_toggle_generation.fetch_add(1);
             g_enabled.store(on);
@@ -71,7 +71,7 @@ namespace
 
         auto set_modes(bool aiming, bool combat, bool traversal, harness::Record& out) -> void override
         {
-            // apply_position at 47f6645.
+            // apply_position at f22aa8e.
             g_aiming.store(aiming);
             out.put("modes.combat_was", g_combat.exchange(combat));
             out.put("modes.traversal_was", g_traversal.exchange(traversal));
@@ -100,7 +100,7 @@ namespace
 
         auto take_stats(harness::Record& r) -> void override
         {
-            // on_update's report at 47f6645, over a fixed 5 s.
+            // on_update's report at f22aa8e, over a fixed 5 s.
             r.put("stats.log_stats", g_log_stats.load());
             auto frames = g_frames.exchange(0);
             auto clamped = g_clamped.exchange(0);
@@ -121,7 +121,7 @@ namespace
 
         auto panel(harness::Record& r) -> void override
         {
-            // debug_panel at 47f6645 (the parts off UObjects), in its order, then the keys' reads.
+            // debug_panel at f22aa8e (the parts off UObjects), in its order, then the keys' reads.
             r.put("panel.enabled", g_enabled.load());
             AcquireSRWLockShared(&g_tuning_lock);
             r.put("panel.max_lag_h", g_follow_tuning.max_lag_h);
@@ -143,7 +143,7 @@ namespace
                 snap_age = static_cast<double>(now.QuadPart - at) / static_cast<double>(g_qpc_frequency.QuadPart);
             }
             r.put("panel.snap_age", snap_age);
-            // dwsc::api_status at 47f6645 (debug_overlay.hpp).
+            // dwsc::api_status at f22aa8e (debug_overlay.hpp).
             std::string mod;
             int64_t expires = 0;
             {

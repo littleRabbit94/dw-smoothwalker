@@ -278,7 +278,7 @@ presets and slots, Mod Menu apply, shoulder swap, the overlay and two DWFreeCam 
 difference seen and no errors in the log.
 
 **Stage 2, checked 2026-09-28.** The stage 1 harness was rebuilt and committed (`tests/equivalence/`, one
-command: `wsl -d archlinux -- sh tests/equivalence/run.sh`). 47f6645's headers and hook region, and the split's
+command: `wsl -d archlinux -- sh tests/equivalence/run.sh`). f22aa8e's headers and hook region, and the split's
 `core/pipeline.hpp` with `sw/processor.hpp` joined only through the table, link into one program and take the same
 seeded events in lockstep: everything stage 1 fed, plus odd `DeltaTime` (0, negative, NaN, infinite), other cameras'
 updates, a lost root, camera or translation offset, an injected fault on each guarded memory access, unchanged

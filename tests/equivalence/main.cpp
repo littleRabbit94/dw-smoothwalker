@@ -416,7 +416,7 @@ namespace
                     continue;
                 }
                 // Rare: a re-key without on_lua_stop. It frees the layer slot the consumer held (lua_api.hpp,
-                // install_locked); 47f6645 leaked it, so the baseline carries baseline-fixes/0001 to agree.
+                // install_locked); f22aa8e leaked it, so the baseline carries baseline-fixes/0001 to agree.
                 if (chance(m_rekey_chance))
                 {
                     ++m_counters.rekeys;
