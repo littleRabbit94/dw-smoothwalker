@@ -2,7 +2,7 @@
 
 Game page: https://www.nexusmods.com/thebloodofdawnwalker (game id 9719, domain
 `thebloodofdawnwalker`). Source: `src/` (DLL) and `mod/` (mod folder).
-Archive: `Build-Package.py` (version from `ModVersion` in `dllmain.cpp`).
+Archive: `Build-Package.py` (version from `ModVersion` in `mod.cpp`).
 
 Posted: https://www.nexusmods.com/thebloodofdawnwalker/mods/613 (mod 613). Nexus strips backslashes in the Files-tab description; use forward slashes there.
 
@@ -137,7 +137,7 @@ differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 
 ## Maintenance
 
-- Version: `ModVersion` in `dllmain.cpp`. It also appears in `[Mod] Version` in `mod_settings.ini`,
+- Version: `ModVersion` in `mod.cpp`. It also appears in `[Mod] Version` in `mod_settings.ini`,
   the newest changelog entry above (the build checks all three), and in places the build does not
   check: the BBCode log-line `[code]` block and the version rows in the tables above.
 - `Build-Package.py` fails when a `ConfigKey` in `mod_settings.ini` is missing from `smoothwalker.ini`

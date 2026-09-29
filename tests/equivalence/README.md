@@ -25,7 +25,7 @@ Exit 0 and `PASS` only if every session matched. Mutations (`core`, `follow`, `p
   `run.sh`, patched with `baseline-fixes/*.patch` (below), and compiled (`base_driver.cpp`).
 - **Split:** the working tree's `camera/pipeline.hpp` and `smoothwalker/follow/processor.hpp`, joined only through
   the core's table (`new_driver.cpp`).
-- Both link into one program (namespaces renamed `base_*` / `new_*` on the command line) and get the same events in
+- Both link into one program (the baseline's four namespaces renamed `base_*`, the split's root `dw` renamed `new_dw`, on the command line) and get the same events in
   lockstep from one seeded session (`main.cpp`): walking, jumps, teleports under and over `reset_distance`, pauses,
   slow motion, crouches, implausible half heights, a missing half-height offset, NaN and infinite views, odd
   `DeltaTime` (0, negative, NaN, infinite), other cameras' updates, lost root / camera / translation offset, injected
@@ -66,7 +66,7 @@ session has 2 to 8 re-keys, and the first one whose consumer held a layer is the
 | `main.cpp` | Session generator, lockstep driver, comparison, coverage counts; optional third argument (`EQ_REKEY_CHANCE` in `run.sh`) is the re-key chance |
 | `harness.hpp` | The driver interface, settings, records |
 | `base_driver.cpp`, `new_driver.cpp` | Each build behind that interface; UE4SS-bound feeding code is quoted from the mod |
-| `api_ops.inc` | The Lua API's game-thread operations without Lua, over either build's state |
+| `api_ops.inc` | The Lua API's game-thread operations without Lua, over either build's state (written against `dwapi::`; `new_driver.cpp` aliases it to `dw::camera::lua`) |
 | `shim/` | Windows, Lua, UE4SS log stubs; `prelude.hpp` maps SEH to injectable faults |
 
 Out of reach (UObjects, UE4SS): discovery, the engine tick, `mode_tuner.hpp`, banners, the overlay widget, the

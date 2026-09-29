@@ -43,10 +43,10 @@ will not open while a `ConfigKey` is missing from it.
 | Path | Contents |
 |---|---|
 | `CMakeLists.txt` | Superbuild: RE-UE4SS from `DW_RE_UE4SS_SOURCE_DIR`, then the `DWSmoothwalker` target |
-| `src/` | The DLL source: one mod, one DLL, made of two components, the camera core and Smoothwalker (docs/design.md, "Core and processors"): `dllmain.cpp` (the one mod class, owning both) |
-| `src/core/` | The camera core: `core.cpp` (hook install, player discovery, Lua injection), `pipeline.hpp` (the hook: cuts, crossfade, layers, the write), `api.hpp` (the C table Smoothwalker uses, internal to the DLL), `frame.hpp` (the contract with a view processor), `lua_api.hpp` (the Lua API), `wall.hpp` |
-| `src/sw/` | Smoothwalker: `smoothwalker.cpp` (settings, presets, keys, banners, the overlay's data), `processor.hpp` (the follow as the core's processor), `follow/follow.hpp` (the follow), `config.hpp` (settings and presets), `mode_tuning.hpp` (camera position in the game's modes, aiming, combat and traversal state), `debug_overlay.hpp` |
-| `src/smoothing.hpp`, `src/live_ref.hpp` | Shared by both sides: math, `LiveRef` |
+| `src/` | The DLL source: one mod, one DLL, made of two components, the camera core and Smoothwalker (docs/design.md, "Core and processors"): `mod.cpp` (the one mod class, owning both) |
+| `src/camera/` | The camera core, namespace `dw::camera`: `core.cpp` (hook install, player discovery, Lua injection), `pipeline.hpp` (the hook: cuts, crossfade, layers, the write), `api.hpp` (the C table Smoothwalker uses, internal to the DLL), `frame.hpp` (the contract with a view processor, `Snap`), `lua_api.hpp` (the Lua API), `wall.hpp` |
+| `src/smoothwalker/` | Smoothwalker, namespace `dw::smoothwalker`: `smoothwalker.cpp` (settings, presets, keys, banners, the overlay's data), `follow/` (`processor.hpp`, the follow as the core's processor; `follow.hpp`, the follow and `Influence`; `curves.hpp`), `settings/settings.hpp` (settings and presets), `modes/mode_tuner.hpp` (camera position in the game's modes, aiming, combat and traversal state), `ui/debug_overlay.hpp` |
+| `src/common/` | Shared by both sides, namespace `dw`: `math.hpp`, `live_ref.hpp` (`LiveRef`) |
 | `tests/equivalence/` | Never shipped: checks the hook against an earlier commit byte for byte (`run.sh`, README) |
 | `mod/` | Exactly what ships under `ue4ss/Mods/DWSmoothwalker/`: `enabled.txt`, `LICENSE`, `mod_settings.ini` (Mod Menu page), `config/smoothwalker.ini`; `dlls/` is build output |
 | `release/` | `Build-Package.py`, the Nexus page description and metadata, `example-preset/`, `example-consumer/` (a drop-in Lua mod using the camera API) |

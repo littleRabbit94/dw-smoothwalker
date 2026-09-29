@@ -140,7 +140,7 @@ still ambiguous, as it is for any smoothing.
   smoothed toward the game's (visible only with rotation smoothing on). The smoothed pivot and rotation run
   on underneath, so the trail is back once all three factors ease to zero, with no edge either way. A cut
   snaps all three factors. Focus mode is its own group, not combat (see "Position tuning
-  (`mode_tuning.hpp`)"), so `combat_follow` / `combat_rotation` leave it alone. Guessing from the arm length
+  (`mode_tuner.hpp`)"), so `combat_follow` / `combat_rotation` leave it alone. Guessing from the arm length
   was rejected: a close `exploration_distance` reads the same as aiming.
 - **Soft leash** (`soft_leash = 1`, 0.5.0): the internal lag may run to 3x `max_lag`, and the camera shows
   `max_lag * tanh(lag / max_lag)`, so reaching the limit has no edge. With `soft_leash = 0` the leash is a
@@ -181,20 +181,22 @@ fade they started held part of the old lag for the transition time.
 
 A camera core that a camera mod can use without the follow (a photo mode needs `claim` / `release`, not smoothing),
 kept apart from Smoothwalker inside the one DLL (stage 2, 2026-09-28). The mod is one DLL: two components under one
-`CppUserModBase` (`dllmain.cpp`, which owns both, forwards UE4SS's calls and orders the unload), each registering its
+`CppUserModBase` (`mod.cpp`, which owns both, forwards UE4SS's calls and orders the unload), each registering its
 own UE4SS callbacks; Smoothwalker reaches the core only through a C table. The boundary is internal structure, not a
 packaging line: shipping the core as a second DLL is deferred indefinitely ("Deferred").
 
 | Side | Files | Owns |
 |---|---|---|
-| Core | `core/core.cpp` (the component), `core/pipeline.hpp` (the hook side and the table), `core/lua_api.hpp`, `core/api.hpp`, `core/frame.hpp` | Slot 214 and its pin, player and camera discovery, `g_view_updates` / `g_view_seconds`, cuts, the crossfade, layers, the write and the API snapshot, `claim` / `release` / `owner`, `view()` / `live()`, the Lua injection, the processor and listener slots |
-| Smoothwalker | `sw/smoothwalker.cpp` (the component), `sw/processor.hpp`, `sw/follow/follow.hpp`, `sw/mode_tuning.hpp`, `sw/config.hpp`, `sw/debug_overlay.hpp` | The follow as a processor, mode classification and writes, the flip, the lag switch, other mods' writes, presets and slots, `smoothwalker.ini`, keys, banners, the debug overlay |
-| Shared, header-only, no state | `smoothing.hpp`, `core/wall.hpp`, `live_ref.hpp` | Math, the wall clamp, `LiveRef` |
+| Core | `camera/core.cpp` (the component), `camera/pipeline.hpp` (the hook side and the table), `camera/lua_api.hpp`, `camera/api.hpp`, `camera/frame.hpp` (with `Snap`) | Slot 214 and its pin, player and camera discovery, `g_view_updates` / `g_view_seconds`, cuts, the crossfade, layers, the write and the API snapshot, `claim` / `release` / `owner`, `view()` / `live()`, the Lua injection, the processor and listener slots |
+| Smoothwalker | `smoothwalker/smoothwalker.cpp` (the component), `smoothwalker/follow/processor.hpp`, `smoothwalker/follow/follow.hpp` (with `Influence`), `smoothwalker/follow/curves.hpp`, `smoothwalker/modes/mode_tuner.hpp`, `smoothwalker/settings/settings.hpp`, `smoothwalker/ui/debug_overlay.hpp` | The follow as a processor, mode classification and writes, the flip, the lag switch, other mods' writes, presets and slots, `smoothwalker.ini`, keys, banners, the debug overlay |
+| Shared, header-only, no state | `common/math.hpp`, `camera/wall.hpp`, `common/live_ref.hpp` | Math, the wall clamp, `LiveRef` |
 
-Core files include no Smoothwalker header; Smoothwalker's include only `core/api.hpp` (and through it
-`core/frame.hpp`) and the shared headers. The two sides are separate translation units, so the compiler holds the line.
+Core files include no Smoothwalker header; Smoothwalker's include only `camera/api.hpp` (and through it
+`camera/frame.hpp`) and the shared headers. The two sides are separate translation units, so the compiler holds the line.
+Namespaces follow the folders under the root `dw`: `common/` is `dw` itself, `camera/` is `dw::camera` (the Lua API in
+`dw::camera::lua`), `smoothwalker/` is `dw::smoothwalker` with `follow`, `settings`, `modes` and `ui` inside it.
 
-**The table** (`core/api.hpp`). `dwcc_get_api(uint32_t version)` returns a `dwcam::Api`: `size` and `version`
+**The table** (`camera/api.hpp`). `dwcc_get_api(uint32_t version)` returns a `dw::camera::Api`: `size` and `version`
 (`API_VERSION` 1) at its head, then plain C function pointers; the table only ever grows at the end. Across it:
 pointers, fixed-width numbers and standard-layout structs, no C++ references, std types or exceptions.
 `dwcc_get_api` is an ordinary `extern "C"` function inside the DLL, not a DLL export.
@@ -228,14 +230,14 @@ count too and leaks its own `Impl` the same way while the call is stuck. The unh
 does not gate the release: a hook call that is not counted in the processor never touches the `Impl`, and one that
 is, is covered by the processor wait.
 
-**Processor contract** (`core/frame.hpp`). Once per update that reaches the pipeline, on the hook thread, the core
+**Processor contract** (`camera/frame.hpp`). Once per update that reaches the pipeline, on the hook thread, the core
 hands a `FrameIn` (`size`, the processor's switch as sampled for this update, restart, dt, pivot, half height, the
 game's camera and rotation) and takes back a `FrameOut` (`size`, location, rotation, whether it rotated, its
 `generation`, its `transition`, the wall-clamp inputs for the crossfade, the overlay feed). Callbacks take
 pointers. The processor owns what used to be the core's switches: its on/off, its toggle generation and
 `position_transition`; the core crossfades on any change of its own cut thresholds, the processor's toggle
 generation or generation, or a `release("glide")`, over the processor's transition. Aiming, combat, traversal and
-mode writes never cross: `dwsw::FollowProcessor` (`sw/processor.hpp`) holds the flags `apply_position` sets and the
+mode writes never cross: `dw::smoothwalker::follow::FollowProcessor` (`smoothwalker/follow/processor.hpp`) holds the flags `apply_position` sets and the
 mode-write generation, gives the follow its `FollowInputs`, and folds a mode write into the generation it reports.
 The generation comes back with the frame it was read for: asked for separately, a publish between the two reads
 would show the new settings for one frame before their crossfade started. The processor also counts its own
@@ -261,7 +263,7 @@ core calls a `Listener` at those exact points:
 for camera modes pushed on the player camera; the core's own one only hands over the controller.
 
 **Settings.** The core's `Tuning` is the cut thresholds and their generation. A Smoothwalker publish
-(`dwsw::publish_view`) writes the follow's settings (`FollowTuning`, now with `transition`) under the processor's
+(`dw::smoothwalker::follow::publish_view`) writes the follow's settings (`FollowTuning`, now with `transition`) under the processor's
 own lock and generation, pushes `reset_distance` and `reset_gap` through `set_cut_thresholds`, and the log
 switches through `set_diagnostics`, on the startup publish and every one after. `smoothwalker.ini`, its keys and the
 Mod Menu page are unchanged. The log_stats line is still one line, written by Smoothwalker: frames, lag and clamp
@@ -280,7 +282,7 @@ difference seen and no errors in the log.
 
 **Stage 2, checked 2026-09-28.** The stage 1 harness was rebuilt and committed (`tests/equivalence/`, one
 command: `wsl -d archlinux -- sh tests/equivalence/run.sh`). f22aa8e's headers and hook region, and the split's
-`core/pipeline.hpp` with `sw/processor.hpp` joined only through the table, link into one program and take the same
+`camera/pipeline.hpp` with `smoothwalker/follow/processor.hpp` joined only through the table, link into one program and take the same
 seeded events in lockstep: everything stage 1 fed, plus odd `DeltaTime` (0, negative, NaN, infinite), other cameras'
 updates, a lost root, camera or translation offset, an injected fault on each guarded memory access, unchanged
 publishes, two consumers, lease renewals, uninstalls and re-keys, and the overlay's and the keys' reads. After every
@@ -366,7 +368,7 @@ Measured live on the running game.
 - All test values restored (LongRange -250 / FOV 90 / type blend 1.0, Sprint CDO and instance 95).
 - A world paused under the pause menu does not update the camera: reads there prove nothing.
 
-### Position tuning (`mode_tuning.hpp`)
+### Position tuning (`mode_tuner.hpp`)
 
 Per group (exploring, sprinting, combat, focus, aiming, claw ride and anti-grav): distance %, height, shoulder
 and FOV. For every mode: a shoulder swap (`N`), the
@@ -473,7 +475,7 @@ Shadowstep_2_Base. The other 14 ship -89 / 89, except AimingOnLadder at -40 / 89
 ### The settings file
 
 - **Live settings without Lua** (0.5.0). `on_update` (UE4SS thread) checks `smoothwalker.ini`'s write time every
-  250 ms. The hook copies numbers-only structs (`Tuning` for the core, `dwsw::FollowTuning` for the follow; see "Core and
+  250 ms. The hook copies numbers-only structs (`Tuning` for the core, `dw::smoothwalker::follow::FollowTuning` for the follow; see "Core and
   processors") under a shared SRW lock, so nothing allocates on the worker thread. `toggle_key` and `preset_key` stay startup-only. UE4SS runs key callbacks on the same
   thread as `on_update` (`UE4SSProgram.cpp`, `process_event` then `fire_update`).
 - **Robust reads** (0.7.4). Non-finite ini values (`std::stod` takes `nan`/`inf`) are ignored, and a
@@ -576,7 +578,7 @@ Shadowstep_2_Base. The other 14 ship -89 / 89, except AimingOnLadder at -40 / 89
   than distance (110). Balanced still leaves the camera where the game puts it.
 - **Six slots** (0.7 had 6, 0.8 drafts 10; back to 6 on 2026-09-19 with names). A slot's display name is the
   `name` line of its `Slot N.ini`, read at startup, shown in the picker and the banner, and kept when the
-  slot is saved again (picker order, rename after restart and name kept on re-save confirmed in game 2026-09-19). One constant, `dwsc::MAX_SLOTS = 6` in `config.hpp`, bounds the slot file
+  slot is saved again (picker order, rename after restart and name kept on re-save confirmed in game 2026-09-19). One constant, `dw::smoothwalker::settings::MAX_SLOTS = 6` in `settings.hpp`, bounds the slot file
   names, the save range and the slot ids. The menu caps a picker at 64 values (`choices.lua`), and the
   Preset picker also carries Custom and the three built-ins, so 60 slots is the ceiling.
 - **Presets folder** (`config/presets/`, replaces `presets.ini`; created at startup if missing). A
@@ -778,12 +780,12 @@ loaded" line from the second start on.
 
 **Globals.** `DllMain` and static initializers do not run again, so every namespace-scope, class-static and
 function-local static keeps the previous instance's value. The mod's destructor ends with `Core::reset_globals`
-(`core/core.cpp`, which calls `dwapi::reset_state` in `core/lua_api.hpp`): every variable holding per-instance state
+(`camera/core.cpp`, which calls `dw::camera::lua::reset_state` in `camera/lua_api.hpp`): every variable holding per-instance state
 goes back to exactly its static-init value, atomics by store, the rest under the lock that guards them. It
 runs after the slot is restored and the in-hook wait, and `g_player_camera` is nulled before the restore, so
 a hook that is still reached returns after the original and touches none of it. Just before it,
-`Smoothwalker::shutdown` (`sw/smoothwalker.cpp`) restores the modes, leaves the core's processor and listener
-slots and resets `dwsc::g_log_verbose`, the one namespace-scope global of that side: the rest of Smoothwalker's
+`Smoothwalker::shutdown` (`smoothwalker/smoothwalker.cpp`) restores the modes, leaves the core's processor and listener
+slots and resets `dw::smoothwalker::settings::g_log_verbose`, the one namespace-scope global of that side: the rest of Smoothwalker's
 state (the follow's settings, switch, flags and counters in `FollowProcessor`) lives in its component and is built
 anew with it. Added with the split and reset there: `g_player_controller`, `g_player_known`, `g_hook_timing`, the
 core's `g_log_verbose`, `g_processor`, `g_listener`. Kept on purpose: constants, the locks, the QPC frequency,
@@ -860,7 +862,7 @@ yet; the two open checks are at the end.
 ### Two surfaces, two compatibility stories
 
 Smoothwalker touches the camera in two places. The **view hook** (slot 214) edits the final view after
-the game has built it. The **mode writes** (`mode_tuning.hpp`) put distance, height, shoulder and FOV into
+the game has built it. The **mode writes** (`mode_tuner.hpp`) put distance, height, shoulder and FOV into
 the game's camera-mode CDOs and live instances, with the type flip. The hook composes with nearly
 everything; the mode writes share their fields with at least eight other mods.
 
@@ -896,7 +898,7 @@ Smoothwalker. Bites on hot reload only. Cheap fix: on unload, restore only if th
 | Centered Exploration Camera (245), Zelda-Inspired Camera (343), Camera Tweaks (162, 201), Centered Lock-On Camera (218) | Offsets on exploration or combat modes | Same fields as the position groups |
 | Wider Lock-On Camera FOV (105) | `DefaultFieldOfView` on the lock-on modes | The FOV group collides |
 
-The specific risk is the baseline. `mode_tuning.hpp` computes every write from "the CDO values captured
+The specific risk is the baseline. `mode_tuner.hpp` computes every write from "the CDO values captured
 the first time a class is seen". If a Lua mod has written the CDO before Smoothwalker first sees that
 class, the captured baseline is the other mod's value and every percentage applies on top of it. The
 smoothing itself and the lag switch are contested by nobody.
@@ -1057,7 +1059,7 @@ the owner opts in, as SmoothCam pauses its interpolators unless asked.
 
 ### Slice 1 as built (branch `camera-api`, 2026-09-22)
 
-`src/lua_api.hpp`. `on_lua_start` puts a global `Smoothwalker` table into each Lua mod's state; `on_lua_stop` and
+`src/camera/lua_api.hpp`. `on_lua_start` puts a global `Smoothwalker` table into each Lua mod's state; `on_lua_stop` and
 the destructor replace every function in it with a pure-Lua stub answering `nil, "unloaded"` and set
 `api_version` to 0, so a `local SW = Smoothwalker` held by a consumer never points into an unloaded DLL.
 Consumers are keyed by their main `lua_State*` (from `LUA_RIDX_MAINTHREAD`), never by a string they pass.
@@ -1294,7 +1296,7 @@ source at `97b7e501`, and the public source of Combat Camera - Configurable 3.1.
 
 ## Debug overlay
 
-Since 0.10.0 (`src/debug_overlay.hpp`). `debug_overlay = 1` (ini, or Debug overlay on the Mod Menu page) puts
+Since 0.10.0 (`src/smoothwalker/ui/debug_overlay.hpp`). `debug_overlay = 1` (ini, or Debug overlay on the Mod Menu page) puts
 a text panel at the top right of the screen with the live camera state; `debug_key` (ini only, unbound by
 default) flips the same setting and writes it back like the toggle key. Off by default. Built for tuning
 presets and for bug reports: one screenshot shows what the follow, the game's modes and the API were doing.
@@ -1319,9 +1321,9 @@ api           none
 | camera type | `RebelCameraComponent:GetCameraType` on the player camera; the name from the return value's reflected `UEnum` (the part after `::`), else the number |
 | modes | `ModeTuner::list_modes`: every live `RebelCameraMode` on the player camera, newest first, with `RebelCameraMode:GetState` (0 blend in, 1 active, 2 blend out; 3, popped, is left out). Tracked modes show their group and `tuned` when the last apply wrote the camera position (`camera_tuning` and `enabled` on), else `as shipped`. At most 8 lines, then `+N more`; `(rescan pending)` while a scan is due |
 | follow, turn | the hook's `keep_pos` / `keep_rot` after the eased `aim`, `combat` and `traversal` blends; `turn off` without rotation smoothing. The name in brackets is the largest weight in that chain: aiming `aim`, combat `combat * (1 - aim)`, traversal `traversal * (1 - combat) * (1 - aim)`, none the rest |
-| lag | horizontal and vertical length of `out_offset`, the lag actually on screen (leash, keep share, wall clamp and crossfade included), over `max_lag_h` / `max_lag_v`; `rate` is `follow_rate_h` scaled by the curve at the current horizontal lag (`dwsc::follow_rate`, which `follow_alpha` now uses) |
+| lag | horizontal and vertical length of `out_offset`, the lag actually on screen (leash, keep share, wall clamp and crossfade included), over `max_lag_h` / `max_lag_v`; `rate` is `follow_rate_h` scaled by the curve at the current horizontal lag (`dw::smoothwalker::follow::follow_rate`, which `follow_alpha` now uses) |
 | last snap | the last restart of the follow from the capsule, with its age from QPC |
-| api | the claim as `Smoothwalker.owner()` reads it (`Api::camera_owner`: under `dwapi::g_mutex`, an expired lease reads as nobody) with the lease left; `glide` while the crossfade started by a `release("glide")` runs |
+| api | the claim as `Smoothwalker.owner()` reads it (`Api::camera_owner`: under `dw::camera::lua::g_mutex`, an expired lease reads as nobody) with the lease left; `glide` while the crossfade started by a `release("glide")` runs |
 
 **Snap reasons.** Whoever sets `g_reset` names the reason first (`request_cut`, and `release_locked` for
 `api cut`); the first reason since the hook last took a cut is kept, so a level load reads `world change`,
@@ -1373,7 +1375,7 @@ Switched off, `RemoveFromParent` and the references go; switched on again, a new
 - **Game thread only.** Built, refreshed and removed from the engine tick (`on_engine_tick`, after
   `apply_position`, from the core's `Listener::tick`). The hook touches no UObject for it: it stores numbers in
   relaxed atomics (`g_debug_keep_follow`, `g_debug_keep_turn`, `g_debug_influence`, `g_debug_lag_h`, `g_debug_lag_v`,
-  `g_debug_rate_h`, `g_debug_snap`, `g_debug_snap_qpc`, `g_debug_glide`, in `core/pipeline.hpp`), a few stores per
+  `g_debug_rate_h`, `g_debug_snap`, `g_debug_snap_qpc`, `g_debug_glide`, in `camera/pipeline.hpp`), a few stores per
   camera update whether the overlay is on or not, which the refresh reads through `Api::read_debug`. A refresh may
   pair values from two frames.
 - **Lifecycle.** Built lazily, only while the setting is on and the player camera is known, so the main menu
@@ -1382,7 +1384,7 @@ Switched off, `RemoveFromParent` and the references go; switched on again, a new
   the panel off the viewport, and the next pawn gets a new one. Each refresh also asks `Widget:IsInViewport`,
   so a panel the game took off the screen without a level change is rebuilt instead of waiting for its GC.
 - **Cost.** Off: one atomic load per tick. On: at most one refresh per 250 ms, which calls `IsInViewport` and `GetCameraType` once,
-  `GetState` once per listed mode, takes `dwapi::g_mutex` (`Api::camera_owner`) and the follow's settings lock
+  `GetState` once per listed mode, takes `dw::camera::lua::g_mutex` (`Api::camera_owner`) and the follow's settings lock
   shared briefly, and calls
   `SetText` only when the text changed. No `FindAllOf`, `ForEachUObject` or object-array walk on the refresh
   path (a per-tick `FindAllOf` sampler froze this game before). The listing also takes the new-object hand-off,
@@ -1425,8 +1427,8 @@ line says what stopped in its own words ("mod inactive", "smoothing inactive").
 - **Verbose**, only with `log_verbose = 1` (ini only): player discovery, the controller found, not found yet
   and gone lines, `following`, the translation offset, `Mod Menu open`, the presets-folder lines, the camera
   mode layout, `Base_LongRange`, `camera position applied` with its duration, a mode loaded late, the debug
-  overlay shown, and combat and traversal camera on and off. The flag is `dwsc::g_log_verbose`
-  (`sw/config.hpp`), published with the other settings and pushed to the core's own copy (`Api::set_diagnostics`),
+  overlay shown, and combat and traversal camera on and off. The flag is `dw::smoothwalker::settings::g_log_verbose`
+  (`smoothwalker/settings/settings.hpp`), published with the other settings and pushed to the core's own copy (`Api::set_diagnostics`),
   which gates the core's discovery, offset and hook lines. At startup it is read from `smoothwalker.ini` before
   `load_presets_locked()`, which runs ahead of the full settings load and logs presets-folder lines.
 
@@ -1480,7 +1482,7 @@ follow, so an existing player adds one requirement and keeps `smoothwalker.ini` 
 | DWCameraCore | DWSmoothwalker |
 |---|---|
 | Slot 214 hook and its pin, player and camera discovery, the view update count and world seconds | The follow, a processor of the core |
-| Cuts (gap, teleport, player swap, API cut), the crossfade, layers | `mode_tuning.hpp`: mode classification (aiming, combat, traversal), the writes, the flip, the lag switch, other mods' writes |
+| Cuts (gap, teleport, player swap, API cut), the crossfade, layers | `mode_tuner.hpp`: mode classification (aiming, combat, traversal), the writes, the flip, the lag switch, other mods' writes |
 | `claim` / `release` / `owner`, `view()` / `live()`, the Lua injection, the processor list | Presets and slots, `smoothwalker.ini`, the Mod Menu page, keys, banners, the debug overlay |
 
 Alone, the core is the game: the hook takes today's "off and settled" path (no processor, no layer), writes
@@ -1514,7 +1516,7 @@ nothing, and nothing writes a camera mode.
 
 **Stages.**
 
-1. Done: the follow behind `core/frame.hpp`.
+1. Done: the follow behind `camera/frame.hpp`.
 2. Done 2026-09-28: the boundary inside one DLL ("Core and processors"): the core behind `dwcc_get_api`'s table,
    Smoothwalker a component that calls nothing else. Checked with the rebuilt harness (`tests/equivalence/`, 8 x
    300,000 frames identical, three planted changes caught), an adversarial review (14 checks, none failed) and an
