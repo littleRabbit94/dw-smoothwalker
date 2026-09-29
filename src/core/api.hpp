@@ -73,14 +73,15 @@ namespace dwcam
         // p is null, too small or missing a callback. The core keeps the pointer: p must stay valid until unregistered.
         int32_t (*register_processor)(const Processor* p);
         // Game thread or the mod's start thread, never inside a processor call: returns once no call into p is in
-        // flight (up to 5 s). Does nothing unless p is the one registered.
-        void (*unregister_processor)(const Processor* p);
+        // flight (up to 5 s). 1: drained, or p was not the one registered (nothing could be calling it). 0: timed out,
+        // a call may still be running inside p, so the caller must not free anything the callbacks reach.
+        int32_t (*unregister_processor)(const Processor* p);
         // Game thread or the mod's start thread: 1 set, 0 when one is set already or l is null or too small. Kept
         // like a processor.
         int32_t (*set_listener)(const Listener* l);
         // Game thread or the mod's start thread, never inside a listener call: returns once no call into l is in
-        // flight (up to 5 s). Does nothing unless l is the one set.
-        void (*clear_listener)(const Listener* l);
+        // flight (up to 5 s). Same result as unregister_processor: 1 drained or not the one set, 0 timed out.
+        int32_t (*clear_listener)(const Listener* l);
 
         // Any thread but the hook (takes the core's settings lock exclusively): the cut thresholds, cm moved in one
         // update that counts as a teleport and s without an update that counts as a gap. A change crossfades like a

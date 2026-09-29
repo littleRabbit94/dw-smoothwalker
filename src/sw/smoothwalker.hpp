@@ -21,6 +21,8 @@ namespace dwsw
 
         // Registers the follow with the core, reads smoothwalker.ini and the presets, logs the load line.
         Smoothwalker(const dwcam::Api& core, BindKey bind_key, std::wstring version);
+        // Destroys the component, unless shutdown() found a core call still running inside it: then the component is
+        // released and left allocated (the core's stuck call may still read it).
         ~Smoothwalker();
         Smoothwalker(const Smoothwalker&) = delete;
         auto operator=(const Smoothwalker&) -> Smoothwalker& = delete;
@@ -37,5 +39,6 @@ namespace dwsw
       private:
         struct Impl;
         std::unique_ptr<Impl> m;
+        bool m_leak = false; // shutdown: a processor or listener call did not drain; ~Smoothwalker leaks m
     };
 } // namespace dwsw

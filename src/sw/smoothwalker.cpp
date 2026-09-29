@@ -1072,7 +1072,13 @@ Smoothwalker::Smoothwalker(const dwcam::Api& core, BindKey bind_key, std::wstrin
 {
 }
 
-Smoothwalker::~Smoothwalker() = default;
+// A leaked Impl is owned by nothing afterwards: the core cleared its processor and listener slots before it timed out
+// (so no new call can reach it) and reset_globals holds no pointer to it, so the next instance neither reuses nor
+// frees it. Only the call the core still has in flight touches it.
+Smoothwalker::~Smoothwalker()
+{
+    if (m_leak) (void)m.release();
+}
 
 auto Smoothwalker::start() -> void
 {
@@ -1097,8 +1103,16 @@ auto Smoothwalker::unregister_callbacks() -> void
 auto Smoothwalker::shutdown() -> void
 {
     m->m_tuner.restore();
-    m->m_core.clear_listener(&m->m_listener);
-    m->m_core.unregister_processor(m->m_processor.registration());
+    // Both waits always run: the second must not be skipped by the first timing out.
+    const bool listener_drained = m->m_core.clear_listener(&m->m_listener) != 0;
+    const bool processor_drained = m->m_core.unregister_processor(m->m_processor.registration()) != 0;
+    if (!listener_drained || !processor_drained)
+    {
+        // A camera call the core made into the follow or the listener is still running, so the Impl (the follow, the
+        // tuner, the listener's target) stays allocated: ~Smoothwalker releases it instead of destroying it.
+        m_leak = true;
+        Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] unload: a camera call did not finish, the component was left allocated\n"));
+    }
     dwsc::g_log_verbose.store(false);
 }
 } // namespace dwsw

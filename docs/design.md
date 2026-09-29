@@ -201,8 +201,8 @@ function is exported as it is in stage 3; today it is an ordinary `extern "C"` f
 
 | Entry | Thread | What |
 |---|---|---|
-| `register_processor(p)` / `unregister_processor(p)` | game or start thread, never the hook | One slot; unregister returns once no call into `p` is in flight (up to 5 s) |
-| `set_listener(l)` / `clear_listener(l)` | game or start thread | Game-thread notifications (below); one slot, the same in-flight wait |
+| `register_processor(p)` / `unregister_processor(p)` | game or start thread, never the hook | One slot; unregister returns once no call into `p` is in flight (up to 5 s): 1 drained (or `p` was not the one registered), 0 timed out, a call may still be inside `p` |
+| `set_listener(l)` / `clear_listener(l)` | game or start thread | Game-thread notifications (below); one slot, the same in-flight wait and the same 1 / 0 result |
 | `set_cut_thresholds(reset_distance, reset_gap)` | any but the hook (exclusive SRW lock) | A change bumps the core's generation and crossfades; the core starts at 500 cm / 0.25 s |
 | `set_diagnostics(flags)` | any | `DIAG_VERBOSE` (the core's verbose lines), `DIAG_HOOK_TIMING` (log_stats times the hook) |
 | `player_camera()` | any; dereference on the game thread only | The camera component, or null |
@@ -216,6 +216,17 @@ function is exported as it is in stage 3; today it is an ordinary `extern "C"` f
 | `camera_owner(name, cap, lease)` | any (takes the Lua API's mutex briefly) | The owner's name and lease as `owner()` reads them |
 
 Smoothwalker makes no cut request of its own: every cut (world, player, pawn, API) comes from the core.
+
+**A wait that times out.** `Smoothwalker::shutdown` runs both waits (the second is not skipped by the first
+failing). If either returns 0, a camera call is still running inside the follow or the listener, which live in
+`Smoothwalker::Impl` (`FollowProcessor` is a member), so `~Smoothwalker` releases the `Impl` instead of
+destroying it: it is leaked, and one Warning line says so. The core cleared both slots before it started waiting,
+so no new call can reach it, and no global holds a pointer to it, so the next instance after a Ctrl+R never
+reuses or frees it. `reset_globals` still resets every global to its static-init value except
+`g_in_processor` and `g_in_listener`, which the stuck call still holds; a later unload therefore waits on that
+count too and leaks its own `Impl` the same way while the call is stuck. The unhook wait for `g_in_hook` (~5.05 s)
+does not gate the release: a hook call that is not counted in the processor never touches the `Impl`, and one that
+is, is covered by the processor wait.
 
 **Processor contract** (`core/frame.hpp`). Once per update that reaches the pipeline, on the hook thread, the core
 hands a `FrameIn` (`size`, the processor's switch as sampled for this update, restart, dt, pivot, half height, the
@@ -1440,7 +1451,8 @@ line says what stopped in its own words ("mod inactive", "smoothing inactive").
   pending settings applied, and a camera value another mod wrote taken as a mode's base. The `log_stats`
   report is Normal too, but opt-in.
 - **Warning**: something is off or falls back, the mod still runs. A missing property with a fallback, a
-  failed write, a skipped preset, banners or the overlay off.
+  failed write, a skipped preset, banners or the overlay off, and at unload `a camera call did not finish, the
+  component was left allocated` (a core call stalled past the 5 s waits; the follow is left allocated on purpose).
 - **Error**: the mod or the follow cannot work. Camera class defaults missing, slot 214 not overridden, a
   failed `VirtualProtect`, `RelativeLocation` or the `ComponentToWorld` translation not found, the UE4SS
   `EngineTick` hook off.
@@ -1625,5 +1637,7 @@ callbacks; Smoothwalker reaches the core only through the C table `dwcc_get_api`
 aiming, combat and traversal flags and the mode write, the processor reports its own switch, toggle generation and
 transition, and the cut thresholds are pushed to the core on every publish. The equivalence harness is committed
 under `tests/equivalence/`. See "Core and processors".
+
+Fix: a processor or listener call stalled past the unload waits (over 5 s) no longer touches freed memory: `unregister_processor` and `clear_listener` return 1 drained / 0 timed out, and on 0 the Smoothwalker component is left allocated (leaked) with one warning instead of destroyed. See "Core and processors".
 
 Fix: an `install` re-key (a Lua mod restarting on its old state without `on_lua_stop`) now frees the layer slot it held, as an uninstall does; before, the slot and its layer stayed and repeated restarts used up the eight slots. The equivalence harness applies `tests/equivalence/baseline-fixes/0001` to its baseline for that one difference.

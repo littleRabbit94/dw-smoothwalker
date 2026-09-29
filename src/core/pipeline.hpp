@@ -536,9 +536,11 @@ namespace
     }
 
     // Unregistering: after the slot is cleared, until no call counted before the clear is still running.
-    auto wait_for_zero(const std::atomic<int>& count) -> void
+    // False: a counted call is still running after 5 s (the table's 0).
+    auto wait_for_zero(const std::atomic<int>& count) -> bool
     {
         for (int i = 0; i < 5000 && count.load() != 0; ++i) Sleep(1);
+        return count.load() == 0;
     }
 
     // ---------------------------------------------------------------------------------------------- the table
@@ -550,11 +552,11 @@ namespace
         return g_processor.compare_exchange_strong(none, p) ? 1 : 0;
     }
 
-    auto api_unregister_processor(const Processor* p) -> void
+    auto api_unregister_processor(const Processor* p) -> int32_t
     {
         const Processor* held = p;
-        if (!p || !g_processor.compare_exchange_strong(held, nullptr)) return;
-        wait_for_zero(g_in_processor);
+        if (!p || !g_processor.compare_exchange_strong(held, nullptr)) return 1; // not registered: nothing can call p
+        return wait_for_zero(g_in_processor) ? 1 : 0;
     }
 
     auto api_set_listener(const Listener* l) -> int32_t
@@ -564,11 +566,11 @@ namespace
         return g_listener.compare_exchange_strong(none, l) ? 1 : 0;
     }
 
-    auto api_clear_listener(const Listener* l) -> void
+    auto api_clear_listener(const Listener* l) -> int32_t
     {
         const Listener* held = l;
-        if (!l || !g_listener.compare_exchange_strong(held, nullptr)) return;
-        wait_for_zero(g_in_listener);
+        if (!l || !g_listener.compare_exchange_strong(held, nullptr)) return 1; // not set: nothing can call l
+        return wait_for_zero(g_in_listener) ? 1 : 0;
     }
 
     auto api_set_cut_thresholds(double reset_distance, double reset_gap) -> void
