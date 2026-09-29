@@ -595,8 +595,15 @@ namespace
             g_hook_timing.store((flags & DIAG_HOOK_TIMING) != 0);
         }
 
-        auto player_camera() const -> void* override { return g_player_camera.load(std::memory_order_relaxed); }
-        auto player_controller() const -> void* override { return g_player_controller.load(std::memory_order_relaxed); }
+        // The hook compares g_player_camera with its untyped `self`, so the slots stay void*; the type is put back here.
+        auto player_camera() const -> RC::Unreal::UObject* override
+        {
+            return static_cast<RC::Unreal::UObject*>(g_player_camera.load(std::memory_order_relaxed));
+        }
+        auto player_controller() const -> RC::Unreal::UObject* override
+        {
+            return static_cast<RC::Unreal::UObject*>(g_player_controller.load(std::memory_order_relaxed));
+        }
         auto player_known() const -> bool override { return g_player_known.load(); }
         auto view_updates() const -> uint64_t override { return g_view_updates.load(); }
         auto view_seconds() const -> double override { return g_view_seconds.load(); }

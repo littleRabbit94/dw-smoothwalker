@@ -2,7 +2,7 @@
 // the core. CameraCore is what the core hands out (Core::api()); Processor and Listener are what a registrant
 // implements and hands in. All three live in the one DLL, and nothing is deleted through them: the core owns no
 // processor or listener, a registrant does not own the core. Per-frame data crosses as the numbers-only structs of
-// camera/frame.hpp.
+// camera/frame.hpp; UObjects only as pointers, declared here and never dereferenced by this header.
 #pragma once
 
 #include "frame.hpp"
@@ -10,6 +10,11 @@
 #include <cmath>
 #include <cstdint>
 #include <string>
+
+namespace RC::Unreal
+{
+    class UObject;
+}
 
 namespace dw::camera
 {
@@ -106,9 +111,9 @@ namespace dw::camera
         virtual auto set_diagnostics(uint32_t flags) -> void = 0;
 
         // Any thread: the player's camera component, or null. Compare it anywhere; dereference it on the game thread only.
-        virtual auto player_camera() const -> void* = 0;
+        virtual auto player_camera() const -> RC::Unreal::UObject* = 0;
         // Game thread: the player controller, checked live on this engine tick, or null.
-        virtual auto player_controller() const -> void* = 0;
+        virtual auto player_controller() const -> RC::Unreal::UObject* = 0;
         // Any thread: true while a player controller is held.
         virtual auto player_known() const -> bool = 0;
         // Any thread: player-camera updates since the core started.

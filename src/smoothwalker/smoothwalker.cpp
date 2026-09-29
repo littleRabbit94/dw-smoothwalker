@@ -273,8 +273,8 @@ struct Smoothwalker::Impl
     {
         show_pending_banner();
         apply_position();
-        auto* controller = static_cast<UObject*>(m_core.player_controller());
-        auto* camera = static_cast<UObject*>(m_core.player_camera());
+        auto* controller = m_core.player_controller();
+        auto* camera = m_core.player_camera();
         m_overlay.tick(m_debug_overlay.load(), controller, camera, [&] { return ui::format_panel(debug_panel(camera)); });
     }
 
@@ -389,7 +389,7 @@ struct Smoothwalker::Impl
 
     auto show_pending_banner() -> void
     {
-        auto* controller = static_cast<UObject*>(m_core.player_controller()); // checked live this tick
+        auto* controller = m_core.player_controller(); // checked live this tick
         if (!controller) return;
         std::wstring line;
         {
@@ -493,7 +493,7 @@ struct Smoothwalker::Impl
     // Game thread.
     auto apply_position() -> void
     {
-        auto* camera = static_cast<UObject*>(m_core.player_camera());
+        auto* camera = m_core.player_camera();
         m_tuner.tick(m_core.view_updates(), m_core.view_seconds(), camera);
         // off: no per-tick GetState calls either
         auto state = camera && m_processor.enabled() ? m_tuner.mode_state(camera) : modes::ModeState{};
