@@ -1,6 +1,6 @@
 // The camera core's side of the DLL (docs/design.md, "Core and processors"): installs the GetCameraView
 // hook on vtable slot 214 (camera/pipeline.hpp), finds the player, its pawn and its camera, injects the Lua API
-// (camera/lua_api.hpp) and hands out the C table (camera/api.hpp). Includes no Smoothwalker header.
+// (camera/lua_api.hpp) and hands out its interface (camera/api.hpp, CameraCore). Includes no Smoothwalker header.
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
 #include "pipeline.hpp"
@@ -28,11 +28,6 @@
 
 using namespace RC;
 using namespace RC::Unreal;
-
-extern "C" const dw::camera::Api* dwcc_get_api(uint32_t version)
-{
-    return dw::camera::get_api(version);
-}
 
 namespace dw::camera
 {
@@ -68,7 +63,7 @@ struct Core::Impl
     bool m_hooked = false; // this instance installed the slot 214 hook or kept the previous instance's
     FName m_player_controller_name{};
     // Game thread only, each checked against the object array every engine tick before use. m_controller is
-    // mirrored in g_player_controller and g_player_known for the table (hold_controller).
+    // mirrored in g_player_controller and g_player_known for the interface (hold_controller).
     dw::LiveRef m_controller, m_pawn, m_camera, m_root;
     int32_t m_pawn_offset = -1; // AController::Pawn, same class every map
     bool m_offset_retry = false; // find_translation_offset failed for m_pawn; game thread only
@@ -179,9 +174,7 @@ struct Core::Impl
     {
         forget_player(Snap::World);
         // Smoothwalker drops its camera-mode pointers, re-applies in the next world and rebuilds its overlay.
-        notify([](const Listener& l) {
-            if (l.world_changed) l.world_changed(l.user);
-        });
+        notify([](Listener& l) { l.world_changed(); });
     }
 
     // A duplicate of the new-object path where UE4SS installs BeginPlay. Game thread.
@@ -308,9 +301,7 @@ struct Core::Impl
         discover_controller();
 
         // Smoothwalker's banners, camera-mode tuning and overlay, with the controller checked and before the pawn is.
-        notify([](const Listener& l) {
-            if (l.tick) l.tick(l.user);
-        });
+        notify([](Listener& l) { l.tick(); });
         if (!m_controller.object) return;
 
         // Name lookup once per controller class, then a plain read.
@@ -368,9 +359,7 @@ struct Core::Impl
         g_player_root.store(root.object);
         g_player_camera.store(camera.object);
         // Smoothwalker: a new pawn's modes get the current camera position, found by a fresh scan.
-        notify([](const Listener& l) {
-            if (l.camera_changed) l.camera_changed(l.user);
-        });
+        notify([](Listener& l) { l.camera_changed(); });
         m_offset_wait = std::chrono::seconds(2);
         if (g_log_verbose.load(std::memory_order_relaxed))
             Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] following {} (CapsuleHalfHeight at 0x{:X})\n"), pawn->GetName(), g_half_height_offset.load());
@@ -432,6 +421,11 @@ Core::Core() : m(std::make_unique<Impl>())
 }
 
 Core::~Core() = default;
+
+auto Core::api() -> CameraCore&
+{
+    return core_api();
+}
 
 auto Core::start() -> bool
 {

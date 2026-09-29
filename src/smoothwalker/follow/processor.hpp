@@ -1,6 +1,6 @@
 // The follow as the camera core's view processor (camera/api.hpp, docs/design.md "Core and processors"): its switch
 // and toggle generation, its settings and their generation, and what the follow reads besides the core's frame
-// (mode writes, the aiming / combat / traversal flags), all on Smoothwalker's side of the table. No Unreal or UE4SS
+// (mode writes, the aiming / combat / traversal flags), all on Smoothwalker's side of the interface. No Unreal or UE4SS
 // types: the core calls frame() and state() on the hook thread. Owned by the Smoothwalker component
 // (smoothwalker/smoothwalker.cpp) and registered with the core for its whole life.
 #pragma once
@@ -38,15 +38,12 @@ namespace dw::smoothwalker::follow
         return t;
     }
 
-    class FollowProcessor
+    class FollowProcessor final : public camera::Processor
     {
       public:
         FollowProcessor() = default;
         FollowProcessor(const FollowProcessor&) = delete;
         auto operator=(const FollowProcessor&) -> FollowProcessor& = delete;
-
-        // What Api::register_processor takes; valid for this object's life.
-        auto registration() const -> const camera::Processor* { return &m_registration; }
 
         // A publish (under Smoothwalker's file mutex). Only a changed value bumps the generation: the core
         // crossfades on it, and a fade the switches or a shoulder swap started would hold part of the old lag for the
@@ -133,53 +130,49 @@ namespace dw::smoothwalker::follow
         uint64_t m_seen_settings = 0, m_seen_position = 0;
         uint64_t m_generation = 0; // FrameOut::generation: bumped by a settings change or a mode write
 
-        // Hook thread, once per player-camera update that reaches the core's pipeline.
-        static auto frame(void* user, const camera::FrameIn* in, camera::FrameOut* out) -> void
+        // Hook thread, once per player-camera update that reaches the core's pipeline (camera::Processor).
+        auto frame(const camera::FrameIn& in, camera::FrameOut& out) -> void override
         {
-            auto& self = *static_cast<FollowProcessor*>(user);
-            AcquireSRWLockShared(&self.m_lock);
-            const FollowTuning t = self.m_tuning;
-            const uint64_t settings = self.m_settings_generation;
-            ReleaseSRWLockShared(&self.m_lock);
+            AcquireSRWLockShared(&m_lock);
+            const FollowTuning t = m_tuning;
+            const uint64_t settings = m_settings_generation;
+            ReleaseSRWLockShared(&m_lock);
 
             FollowInputs sw;
-            const auto position = self.m_position_generation.load(std::memory_order_relaxed);
-            sw.mode_write = position != self.m_seen_position;
-            self.m_seen_position = position;
-            sw.aiming = self.m_aiming.load(std::memory_order_relaxed);
-            sw.combat = self.m_combat.load(std::memory_order_relaxed);
-            sw.traversal = self.m_traversal.load(std::memory_order_relaxed);
-            if (settings != self.m_seen_settings || sw.mode_write) ++self.m_generation;
-            self.m_seen_settings = settings;
+            const auto position = m_position_generation.load(std::memory_order_relaxed);
+            sw.mode_write = position != m_seen_position;
+            m_seen_position = position;
+            sw.aiming = m_aiming.load(std::memory_order_relaxed);
+            sw.combat = m_combat.load(std::memory_order_relaxed);
+            sw.traversal = m_traversal.load(std::memory_order_relaxed);
+            if (settings != m_seen_settings || sw.mode_write) ++m_generation;
+            m_seen_settings = settings;
 
             FollowReport report;
-            self.m_follow.frame(t, sw, *in, *out, report);
-            out->generation = self.m_generation;
-            out->transition = t.transition;
+            m_follow.frame(t, sw, in, out, report);
+            out.generation = m_generation;
+            out.transition = t.transition;
 
-            if (report.clamped) self.m_clamped.fetch_add(1, std::memory_order_relaxed);
-            if (report.stats && self.m_log_stats.load(std::memory_order_relaxed))
+            if (report.clamped) m_clamped.fetch_add(1, std::memory_order_relaxed);
+            if (report.stats && m_log_stats.load(std::memory_order_relaxed))
             {
-                self.m_frames.fetch_add(1, std::memory_order_relaxed);
-                self.m_lag_sum.store(self.m_lag_sum.load(std::memory_order_relaxed) + report.shown_lag, std::memory_order_relaxed);
+                m_frames.fetch_add(1, std::memory_order_relaxed);
+                m_lag_sum.store(m_lag_sum.load(std::memory_order_relaxed) + report.shown_lag, std::memory_order_relaxed);
             }
         }
 
-        // Any thread, lock-free.
-        static auto state(void* user, uint64_t* toggle_generation) -> int32_t
+        // Any thread, lock-free (camera::Processor).
+        auto state(uint64_t& toggle_generation) const -> bool override
         {
-            auto& self = *static_cast<FollowProcessor*>(user);
-            const bool on = self.m_enabled.load(std::memory_order_relaxed);
-            if (toggle_generation) *toggle_generation = self.m_toggle_generation.load(std::memory_order_relaxed);
-            return on ? 1 : 0;
+            const bool on = m_enabled.load(std::memory_order_relaxed);
+            toggle_generation = m_toggle_generation.load(std::memory_order_relaxed);
+            return on;
         }
-
-        const camera::Processor m_registration{sizeof(camera::Processor), this, &FollowProcessor::frame, &FollowProcessor::state};
     };
 
     // The part of a publish the core's hook reads: the follow's settings, the cut thresholds (smoothwalker.ini's,
     // pushed to the core on every publish) and the log switches. Under Smoothwalker's file mutex.
-    inline auto publish_view(FollowProcessor& processor, const camera::Api& core, const settings::Settings& s) -> void
+    inline auto publish_view(FollowProcessor& processor, camera::CameraCore& core, const settings::Settings& s) -> void
     {
         processor.publish(follow_tuning_of(s));
         core.set_cut_thresholds(s.reset_distance, s.reset_gap);

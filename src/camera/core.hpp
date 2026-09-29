@@ -1,5 +1,5 @@
 // The camera core as a component of the one UE4SS mod (mod.cpp): the slot 214 hook and its pin, player and
-// camera discovery, the Lua injection, and the C table the Smoothwalker side uses (camera/api.hpp, dwcc_get_api).
+// camera discovery, the Lua injection, and the interface the Smoothwalker side uses (camera/api.hpp, CameraCore).
 // It registers its own UE4SS callbacks, apart from Smoothwalker's (docs/design.md, "Core and processors").
 // Everything else of it is in core.cpp and camera/pipeline.hpp.
 #pragma once
@@ -25,6 +25,10 @@ namespace dw::camera
         // on_unreal_init: the hook, then the core's UE4SS callbacks and the first controller lookup. False: slot
         // 214 could not be hooked, nothing was registered, and the mod is inactive.
         auto start() -> bool;
+
+        // The core's interface, for the Smoothwalker side. Valid for the life of the DLL image (pinned): it holds no
+        // state of its own, only the core's globals.
+        auto api() -> CameraCore&;
 
         // on_lua_start / on_lua_stop: the Smoothwalker table into each Lua mod's state, and out of it.
         auto lua_start(lua_State* L, const std::string& mod, const std::string& mod_version) -> void;

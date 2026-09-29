@@ -1,8 +1,8 @@
 // The camera core's hook side (docs/design.md, "Core and processors"): the GetCameraView hook on vtable slot 214,
 // the view update count and world seconds, cuts, the crossfade, layers, the write and the API snapshot, the
-// processor and listener slots, and the C table over them (camera/api.hpp). Nothing here calls a UObject or UE4SS:
-// the hook runs on task-graph workers. Included by camera/core.cpp only (and the equivalence harness,
-// tests/equivalence), so its globals live in that one translation unit.
+// processor and listener slots, and CoreApi, the CameraCore over them (camera/api.hpp). Nothing here calls a
+// UObject or UE4SS: the hook runs on task-graph workers. Included by camera/core.cpp only (and the equivalence
+// harness, tests/equivalence), so its globals live in that one translation unit.
 #pragma once
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -27,6 +27,7 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <utility>
 
 namespace dw::camera
 {
@@ -53,7 +54,7 @@ namespace
         lua::publish(g, s, pivot ? p : nullptr);
     }
 
-    // The core's own settings: the cut thresholds (Api::set_cut_thresholds). The crossfade's length is the
+    // The core's own settings: the cut thresholds (CameraCore::set_cut_thresholds). The crossfade's length is the
     // processor's (FrameOut::transition). Numbers only, so the hook's copy allocates nothing on a worker thread.
     struct Tuning
     {
@@ -92,9 +93,9 @@ namespace
     std::atomic<uint64_t> g_calls_timed{0};
     std::atomic<uint64_t> g_ticks_spent{0};
 
-    // The debug overlay's feed (Api::read_debug): written by the hook on the player's camera updates, read on the
-    // game thread at the overlay's refresh. Numbers only and relaxed, so a refresh may pair values from two frames.
-    // NAN: not following (off, or the view was lost).
+    // The debug overlay's feed (CameraCore::read_debug): written by the hook on the player's camera updates, read on
+    // the game thread at the overlay's refresh. Numbers only and relaxed, so a refresh may pair values from two
+    // frames. NAN: not following (off, or the view was lost).
     std::atomic<double> g_debug_keep_follow{NAN}; // share of the trail shown after the traversal, combat and aiming blends
     std::atomic<double> g_debug_keep_turn{NAN};   // share of the turning smoothing shown
     std::atomic<int> g_debug_influence{0};        // follow::Influence: the largest weight in those blends
@@ -105,11 +106,12 @@ namespace
     std::atomic<int64_t> g_debug_snap_qpc{0};     // QPC of it; 0: none yet
     std::atomic<bool> g_debug_glide{false};       // the crossfade running was started by a release("glide")
 
-    // The processor and listener slots (Api::register_processor, Api::set_listener). A caller counts itself in
-    // before it loads the slot, so unregistering (store null, then wait for 0) never returns while a call into the
-    // old one is in flight. g_in_processor and g_in_listener balance themselves and are kept across a hot reload.
-    std::atomic<const Processor*> g_processor{nullptr};
-    std::atomic<const Listener*> g_listener{nullptr};
+    // The processor and listener slots (CameraCore::register_processor, CameraCore::set_listener). A caller counts
+    // itself in before it loads the slot, so unregistering (store null, then wait for 0) never returns while a call
+    // into the old one is in flight. g_in_processor and g_in_listener balance themselves and are kept across a hot
+    // reload.
+    std::atomic<Processor*> g_processor{nullptr};
+    std::atomic<Listener*> g_listener{nullptr};
     std::atomic<int> g_in_processor{0}; // the hook and Lua's enabled() inside g_processor
     std::atomic<int> g_in_listener{0};  // the game thread inside g_listener
 
@@ -222,7 +224,7 @@ namespace
     // ownership, let the processor move the camera, crossfade any change, apply other mods' layers, write the view
     // back and publish it (docs/design.md, "Core and processors"). processor, enabled and toggle: the hook's one
     // sample of the processor slot and its switch for this update.
-    auto update_view(void* desired_view, float delta_time, const Processor* processor, bool enabled, uint64_t toggle) -> void
+    auto update_view(void* desired_view, float delta_time, Processor* processor, bool enabled, uint64_t toggle) -> void
     {
         // Ownership is sampled once, first, and that one sample is used for the whole update. A release runs on the
         // game thread while this runs on a worker: sampling g_owner_slot after g_release_generation and g_reset
@@ -332,7 +334,6 @@ namespace
         }
 
         FrameIn in{};
-        in.size = sizeof(FrameIn);
         in.enabled = enabled;
         in.restart = restart;
         in.dt = dt;
@@ -341,7 +342,7 @@ namespace
         in.camera = camera;
         in.rotation = rotation;
         FrameOut moved{};
-        if (processor) processor->frame(processor->user, &in, &moved);
+        if (processor) processor->frame(in, moved);
         if (moved.generation != g_view.seen_processor) changed = true;
         g_view.seen_processor = moved.generation;
 
@@ -481,9 +482,9 @@ namespace
         // The processor slot and its switch, sampled once for this whole update (Processor::state). No processor
         // reads as off with toggle generation 0: the core alone leaves the game's view alone.
         Counted in_processor(g_in_processor);
-        const Processor* processor = g_processor.load();
+        Processor* processor = g_processor.load();
         uint64_t toggle = 0;
-        const bool enabled = processor && processor->state(processor->user, &toggle) != 0;
+        const bool enabled = processor && processor->state(toggle);
         // Off and settled: the game's view untouched. The next toggle starts from a fresh output.
         if (!enabled && !g_view.blending && toggle == g_view.seen_toggle && !lua::g_layers_any.load(std::memory_order_relaxed))
         {
@@ -522,163 +523,138 @@ namespace
     auto processor_enabled() -> bool
     {
         Counted in_processor(g_in_processor);
-        const Processor* processor = g_processor.load();
+        Processor* processor = g_processor.load();
         uint64_t toggle = 0;
-        return processor && processor->state(processor->user, &toggle) != 0;
+        return processor && processor->state(toggle);
     }
 
-    // Game thread: a listener callback, if one is set and has it.
+    // Game thread: a listener callback, if one is set.
     template <typename Call>
     auto notify(Call&& call) -> void
     {
         Counted in_listener(g_in_listener);
-        if (const Listener* listener = g_listener.load()) call(*listener);
+        if (Listener* listener = g_listener.load()) call(*listener);
     }
 
     // Unregistering: after the slot is cleared, until no call counted before the clear is still running.
-    // False: a counted call is still running after 5 s (the table's 0).
+    // False: a counted call is still running after 5 s.
     auto wait_for_zero(const std::atomic<int>& count) -> bool
     {
         for (int i = 0; i < 5000 && count.load() != 0; ++i) Sleep(1);
         return count.load() == 0;
     }
 
-    // ---------------------------------------------------------------------------------------------- the table
+    // ------------------------------------------------------------------------------------------ the interface
 
-    auto api_register_processor(const Processor* p) -> int32_t
+    // The core's CameraCore (camera/api.hpp): methods over the statics above, no state of its own.
+    class CoreApi final : public CameraCore
     {
-        if (!p || p->size < sizeof(Processor) || !p->frame || !p->state) return 0;
-        const Processor* none = nullptr;
-        return g_processor.compare_exchange_strong(none, p) ? 1 : 0;
-    }
-
-    auto api_unregister_processor(const Processor* p) -> int32_t
-    {
-        const Processor* held = p;
-        if (!p || !g_processor.compare_exchange_strong(held, nullptr)) return 1; // not registered: nothing can call p
-        return wait_for_zero(g_in_processor) ? 1 : 0;
-    }
-
-    auto api_set_listener(const Listener* l) -> int32_t
-    {
-        if (!l || l->size < sizeof(Listener)) return 0;
-        const Listener* none = nullptr;
-        return g_listener.compare_exchange_strong(none, l) ? 1 : 0;
-    }
-
-    auto api_clear_listener(const Listener* l) -> int32_t
-    {
-        const Listener* held = l;
-        if (!l || !g_listener.compare_exchange_strong(held, nullptr)) return 1; // not set: nothing can call l
-        return wait_for_zero(g_in_listener) ? 1 : 0;
-    }
-
-    auto api_set_cut_thresholds(double reset_distance, double reset_gap) -> void
-    {
-        if (!std::isfinite(reset_distance) || !std::isfinite(reset_gap)) return;
-        AcquireSRWLockExclusive(&g_tuning_lock);
-        // No g_reset: the hook crossfades on the new generation instead of snapping the lag away mid-motion. Only a
-        // changed value starts one.
-        if (g_tuning.reset_distance != reset_distance || g_tuning.reset_gap != reset_gap)
+      public:
+        auto register_processor(Processor& p) -> bool override
         {
-            g_tuning = Tuning{reset_distance, reset_gap, g_tuning.generation + 1};
+            Processor* none = nullptr;
+            return g_processor.compare_exchange_strong(none, &p);
         }
-        ReleaseSRWLockExclusive(&g_tuning_lock);
-    }
 
-    auto api_set_diagnostics(uint32_t flags) -> void
-    {
-        g_log_verbose.store((flags & DIAG_VERBOSE) != 0);
-        g_hook_timing.store((flags & DIAG_HOOK_TIMING) != 0);
-    }
-
-    auto api_player_camera() -> void* { return g_player_camera.load(std::memory_order_relaxed); }
-    auto api_player_controller() -> void* { return g_player_controller.load(std::memory_order_relaxed); }
-    auto api_player_known() -> int32_t { return g_player_known.load() ? 1 : 0; }
-    auto api_view_updates() -> uint64_t { return g_view_updates.load(); }
-    auto api_view_seconds() -> double { return g_view_seconds.load(); }
-    auto api_camera_live() -> int32_t { return camera_live() ? 1 : 0; }
-    auto api_game_thread_id() -> uint32_t { return lua::g_game_thread.load(std::memory_order_relaxed); }
-
-    auto api_take_hook_timing(uint64_t* calls, double* microseconds_per_call) -> void
-    {
-        auto timed = g_calls_timed.exchange(0);
-        auto ticks = g_ticks_spent.exchange(0);
-        if (calls) *calls = timed;
-        if (microseconds_per_call)
+        auto unregister_processor(Processor& p) -> bool override
         {
-            *microseconds_per_call = timed ? 1e6 * static_cast<double>(ticks) / static_cast<double>(g_qpc_frequency.QuadPart) / timed : 0.0;
+            Processor* held = &p;
+            if (!g_processor.compare_exchange_strong(held, nullptr)) return true; // not registered: nothing can call p
+            return wait_for_zero(g_in_processor);
         }
-    }
 
-    auto api_read_debug(Debug* out) -> void
-    {
-        if (!out || out->size < sizeof(Debug)) return;
-        out->keep_follow = g_debug_keep_follow.load(std::memory_order_relaxed);
-        out->keep_turn = g_debug_keep_turn.load(std::memory_order_relaxed);
-        out->rate_h = g_debug_rate_h.load(std::memory_order_relaxed);
-        out->influence = g_debug_influence.load(std::memory_order_relaxed);
-        out->lag_h = g_debug_lag_h.load(std::memory_order_relaxed);
-        out->lag_v = g_debug_lag_v.load(std::memory_order_relaxed);
-        out->snap = g_debug_snap.load(std::memory_order_relaxed);
-        out->snap_age = NAN;
-        if (auto at = g_debug_snap_qpc.load(std::memory_order_relaxed))
+        auto set_listener(Listener& l) -> bool override
         {
-            LARGE_INTEGER now{};
-            QueryPerformanceCounter(&now);
-            out->snap_age = static_cast<double>(now.QuadPart - at) / static_cast<double>(g_qpc_frequency.QuadPart);
+            Listener* none = nullptr;
+            return g_listener.compare_exchange_strong(none, &l);
         }
-        out->glide = g_debug_glide.load(std::memory_order_relaxed) ? 1 : 0;
-    }
 
-    // Read-only, the way Smoothwalker.owner() reads it: under lua::g_mutex, and an expired lease reads as nobody.
-    // The drop itself stays with claim and release.
-    auto api_camera_owner(char* name, uint32_t capacity, double* lease_seconds) -> uint32_t
-    {
-        std::string mod;
-        int64_t expires = 0;
+        auto clear_listener(Listener& l) -> bool override
         {
-            std::lock_guard guard(lua::g_mutex);
-            expires = lua::g_owner_expires.load(std::memory_order_relaxed);
-            if (lua::g_owner_state && (expires == 0 || lua::qpc_now() < expires)) mod = lua::g_owner_mod;
+            Listener* held = &l;
+            if (!g_listener.compare_exchange_strong(held, nullptr)) return true; // not set: nothing can call l
+            return wait_for_zero(g_in_listener);
         }
-        if (lease_seconds)
-        {
-            *lease_seconds = !mod.empty() && expires != 0 ? std::max(0.0, static_cast<double>(expires - lua::qpc_now()) / lua::qpc_frequency()) : NAN;
-        }
-        if (name && capacity > 0)
-        {
-            size_t n = std::min<size_t>(mod.size(), capacity - 1);
-            memcpy(name, mod.data(), n);
-            name[n] = '\0';
-        }
-        return static_cast<uint32_t>(mod.size());
-    }
 
-    const Api g_api{
-            sizeof(Api),
-            API_VERSION,
-            &api_register_processor,
-            &api_unregister_processor,
-            &api_set_listener,
-            &api_clear_listener,
-            &api_set_cut_thresholds,
-            &api_set_diagnostics,
-            &api_player_camera,
-            &api_player_controller,
-            &api_player_known,
-            &api_view_updates,
-            &api_view_seconds,
-            &api_camera_live,
-            &api_game_thread_id,
-            &api_take_hook_timing,
-            &api_read_debug,
-            &api_camera_owner,
+        auto set_cut_thresholds(double reset_distance, double reset_gap) -> void override
+        {
+            if (!std::isfinite(reset_distance) || !std::isfinite(reset_gap)) return;
+            AcquireSRWLockExclusive(&g_tuning_lock);
+            // No g_reset: the hook crossfades on the new generation instead of snapping the lag away mid-motion. Only a
+            // changed value starts one.
+            if (g_tuning.reset_distance != reset_distance || g_tuning.reset_gap != reset_gap)
+            {
+                g_tuning = Tuning{reset_distance, reset_gap, g_tuning.generation + 1};
+            }
+            ReleaseSRWLockExclusive(&g_tuning_lock);
+        }
+
+        auto set_diagnostics(uint32_t flags) -> void override
+        {
+            g_log_verbose.store((flags & DIAG_VERBOSE) != 0);
+            g_hook_timing.store((flags & DIAG_HOOK_TIMING) != 0);
+        }
+
+        auto player_camera() const -> void* override { return g_player_camera.load(std::memory_order_relaxed); }
+        auto player_controller() const -> void* override { return g_player_controller.load(std::memory_order_relaxed); }
+        auto player_known() const -> bool override { return g_player_known.load(); }
+        auto view_updates() const -> uint64_t override { return g_view_updates.load(); }
+        auto view_seconds() const -> double override { return g_view_seconds.load(); }
+        auto camera_live() const -> bool override { return dw::camera::camera_live(); }
+        auto game_thread_id() const -> uint32_t override { return lua::g_game_thread.load(std::memory_order_relaxed); }
+
+        auto take_hook_timing(uint64_t& calls, double& microseconds_per_call) -> void override
+        {
+            auto timed = g_calls_timed.exchange(0);
+            auto ticks = g_ticks_spent.exchange(0);
+            calls = timed;
+            microseconds_per_call = timed ? 1e6 * static_cast<double>(ticks) / static_cast<double>(g_qpc_frequency.QuadPart) / timed : 0.0;
+        }
+
+        auto read_debug() const -> DebugFeed override
+        {
+            DebugFeed out{};
+            out.keep_follow = g_debug_keep_follow.load(std::memory_order_relaxed);
+            out.keep_turn = g_debug_keep_turn.load(std::memory_order_relaxed);
+            out.rate_h = g_debug_rate_h.load(std::memory_order_relaxed);
+            out.influence = g_debug_influence.load(std::memory_order_relaxed);
+            out.lag_h = g_debug_lag_h.load(std::memory_order_relaxed);
+            out.lag_v = g_debug_lag_v.load(std::memory_order_relaxed);
+            out.snap = g_debug_snap.load(std::memory_order_relaxed);
+            out.snap_age = NAN;
+            if (auto at = g_debug_snap_qpc.load(std::memory_order_relaxed))
+            {
+                LARGE_INTEGER now{};
+                QueryPerformanceCounter(&now);
+                out.snap_age = static_cast<double>(now.QuadPart - at) / static_cast<double>(g_qpc_frequency.QuadPart);
+            }
+            out.glide = g_debug_glide.load(std::memory_order_relaxed);
+            return out;
+        }
+
+        // Read-only, the way Smoothwalker.owner() reads it: under lua::g_mutex, and an expired lease reads as nobody.
+        // The drop itself stays with claim and release.
+        auto camera_owner() const -> Owner override
+        {
+            std::string mod;
+            int64_t expires = 0;
+            {
+                std::lock_guard guard(lua::g_mutex);
+                expires = lua::g_owner_expires.load(std::memory_order_relaxed);
+                if (lua::g_owner_state && (expires == 0 || lua::qpc_now() < expires)) mod = lua::g_owner_mod;
+            }
+            Owner owner;
+            owner.lease = !mod.empty() && expires != 0 ? std::max(0.0, static_cast<double>(expires - lua::qpc_now()) / lua::qpc_frequency()) : NAN;
+            owner.mod = std::move(mod);
+            return owner;
+        }
     };
+    CoreApi g_core_api; // stateless, trivially destructible: nothing to reset, nothing run at unload
 
-    auto get_api(uint32_t version) -> const Api*
+    // The core's interface, for Core::api() (and the equivalence harness). Any thread.
+    auto core_api() -> CameraCore&
     {
-        return version >= 1 && version <= API_VERSION ? &g_api : nullptr;
+        return g_core_api;
     }
 } // namespace
 } // namespace dw::camera

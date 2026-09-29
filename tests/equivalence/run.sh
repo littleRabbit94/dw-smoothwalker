@@ -67,7 +67,7 @@ case "$MUTATE" in
     "") ;;
     core) plant camera/pipeline.hpp "double w = s * s * (3.0 - 2.0 * s);" "double w = s;" ;;          # the crossfade eased linearly
     follow) plant smoothwalker/follow/follow.hpp "m_nominal_hold = t.transition + 0.3;" "m_nominal_hold = t.transition + 0.35;" ;; # the wall-clamp hold
-    processor) plant smoothwalker/follow/processor.hpp "if (settings != self.m_seen_settings || sw.mode_write)" "if (settings != self.m_seen_settings)" ;; # mode writes do not fade
+    processor) plant smoothwalker/follow/processor.hpp "if (settings != m_seen_settings || sw.mode_write)" "if (settings != m_seen_settings)" ;; # mode writes do not fade
     *) echo "unknown mutation: $MUTATE"; exit 2 ;;
 esac
 

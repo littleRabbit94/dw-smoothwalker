@@ -4,7 +4,7 @@
 // One UE4SS mod, one DLL, made of two components (docs/design.md, "Core and processors"):
 // the camera core (camera/core.hpp: the hook, the player, cuts, the crossfade, layers, the Lua API) and Smoothwalker
 // (smoothwalker/smoothwalker.hpp: the follow, camera position, presets, settings, keys, banners, the overlay),
-// which reaches the core only through its C table (camera/api.hpp). This file is the glue: it owns both, forwards
+// which reaches the core only through its interface (camera/api.hpp). This file is the glue: it owns both, forwards
 // UE4SS's calls, and orders the unload between them.
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
@@ -40,7 +40,7 @@ class DWSmoothwalker : public CppUserModBase
         ModDescription = STR("Frame-interpolated third-person camera");
         ModAuthors = STR("littleRabbit6");
         auto bind_key = [this](int key, std::function<void()> action) { register_keydown_event(static_cast<Input::Key>(key), std::move(action)); };
-        m_smoothwalker = std::make_unique<dw::smoothwalker::Smoothwalker>(*dwcc_get_api(dw::camera::API_VERSION), bind_key, ModVersion);
+        m_smoothwalker = std::make_unique<dw::smoothwalker::Smoothwalker>(m_core->api(), bind_key, ModVersion);
     }
 
     // UE4SS FreeLibrary's the DLL right after this (hot reload); pinned, the image stays mapped (core.cpp,

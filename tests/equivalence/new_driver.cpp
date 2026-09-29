@@ -1,6 +1,6 @@
 // The split build: the core's hook side (camera/pipeline.hpp) with Smoothwalker's processor
-// (smoothwalker/follow/processor.hpp), joined only through the core's C table (dw::camera::get_api, what dwcc_get_api
-// returns), as the DLL runs them. The UE4SS-bound code that feeds them (core.cpp's constructor lines,
+// (smoothwalker/follow/processor.hpp), joined only through the core's interface (dw::camera::core_api(), what
+// Core::api() returns), as the DLL runs them. The UE4SS-bound code that feeds them (core.cpp's constructor lines,
 // smoothwalker.cpp's apply_position, update and api_status) is quoted below. Namespaces are renamed new_* on the
 // command line so both builds link into one program.
 
@@ -33,8 +33,8 @@ namespace
             ops::install(0);
             ops::install(1);
             // Smoothwalker::Impl's constructor (smoothwalker.cpp): register, then the startup publish and switch.
-            m_core = get_api(API_VERSION);
-            if (!m_core || !m_core->register_processor(m_processor.registration())) std::abort();
+            m_core = &core_api();
+            if (!m_core->register_processor(m_processor)) std::abort();
             publish(settings);
             m_processor.store_enabled(enabled);
         }
@@ -85,7 +85,7 @@ namespace
             double lag = stats.lag_sum;
             uint64_t timed = 0;
             double micros = 0.0;
-            m_core->take_hook_timing(&timed, &micros);
+            m_core->take_hook_timing(timed, micros);
             const double elapsed = 5.0;
             r.put("stats.frames", frames);
             r.put("stats.clamped", clamped);
@@ -105,9 +105,7 @@ namespace
             r.put("panel.max_lag_h", follow.max_lag_h);
             r.put("panel.max_lag_v", follow.max_lag_v);
             r.put("panel.rotation_smoothing", follow.rotation_smoothing);
-            Debug feed{};
-            feed.size = sizeof(feed);
-            m_core->read_debug(&feed);
+            const DebugFeed feed = m_core->read_debug();
             r.put("panel.keep_follow", feed.keep_follow);
             r.put("panel.keep_turn", feed.keep_turn);
             r.put("panel.influence", static_cast<int>(feed.influence));
@@ -116,20 +114,13 @@ namespace
             r.put("panel.rate_h", feed.rate_h);
             r.put("panel.snap", static_cast<int>(feed.snap));
             r.put("panel.snap_age", feed.snap_age);
-            double lease = NAN;
-            std::string name(64, '\0');
-            uint32_t n = m_core->camera_owner(name.data(), static_cast<uint32_t>(name.size()), &lease);
-            if (n >= name.size())
-            {
-                name.assign(static_cast<size_t>(n) + 1, '\0');
-                n = m_core->camera_owner(name.data(), static_cast<uint32_t>(name.size()), &lease);
-            }
-            std::string mod = n == 0 ? std::string{} : name.substr(0, std::min<size_t>(n, name.size() - 1));
-            if (mod.empty()) lease = NAN;
+            const Owner owner = m_core->camera_owner();
+            const std::string& mod = owner.mod;
+            const double lease = mod.empty() ? NAN : owner.lease;
             r.put("panel.owner", mod.data(), mod.size());
             r.put("panel.lease", lease);
-            r.put("panel.glide", feed.glide != 0);
-            r.put("keys.camera_live", m_core->camera_live() != 0);
+            r.put("panel.glide", feed.glide);
+            r.put("keys.camera_live", m_core->camera_live());
             r.put("tuner.view_updates", m_core->view_updates());
             r.put("tuner.view_seconds", m_core->view_seconds());
             r.put("tuner.player_camera", m_core->player_camera());
@@ -156,7 +147,7 @@ namespace
         }
 
       private:
-        const Api* m_core = nullptr;
+        CameraCore* m_core = nullptr;
         dw::smoothwalker::follow::FollowProcessor m_processor;
     };
 } // namespace

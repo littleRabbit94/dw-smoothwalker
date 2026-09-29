@@ -1,7 +1,7 @@
 // Smoothwalker's side of the DLL (docs/design.md, "Core and processors"): the follow as the camera core's processor
 // (follow/processor.hpp), camera position in the game's modes (modes/mode_tuner.hpp), presets and slots,
-// smoothwalker.ini, keys, banners and the debug overlay (ui/debug_overlay.hpp). Reaches the core only through its C
-// table (camera/api.hpp).
+// smoothwalker.ini, keys, banners and the debug overlay (ui/debug_overlay.hpp). Reaches the core only through its
+// interface (camera/api.hpp).
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
 #include "follow/processor.hpp"
@@ -82,7 +82,7 @@ namespace
 
 struct Smoothwalker::Impl
 {
-    const camera::Api& m_core;             // the camera core's table: everything this side knows of the core
+    camera::CameraCore& m_core;            // the camera core's interface: everything this side knows of the core
     BindKey m_bind_key;
     std::wstring m_version;
     std::vector<Hook::GlobalCallbackId> m_callbacks;
@@ -132,14 +132,23 @@ struct Smoothwalker::Impl
     std::wstring m_debug_preset;           // the active preset's name, or Custom
     bool m_debug_tuning = true;            // camera_tuning
 
-    // The core's game-thread notifications (camera::Listener), kept for this object's life.
-    const camera::Listener m_listener{sizeof(camera::Listener), this, &Impl::on_world_changed, &Impl::on_camera_changed, &Impl::on_tick};
-
-    Impl(const camera::Api& core, BindKey bind_key, std::wstring version) : m_core(core), m_bind_key(std::move(bind_key)), m_version(std::move(version))
+    // The core's game-thread notifications (camera::Listener), kept for this object's life. A member, so Impl itself
+    // stays non-virtual.
+    struct Hooks final : camera::Listener
     {
-        if (!m_core.register_processor(m_processor.registration()))
+        Impl& self;
+        explicit Hooks(Impl& impl) : self(impl) {}
+        auto world_changed() -> void override { self.on_world_changed(); }
+        auto camera_changed() -> void override { self.on_camera_changed(); }
+        auto tick() -> void override { self.on_tick(); }
+    };
+    Hooks m_hooks{*this};
+
+    Impl(camera::CameraCore& core, BindKey bind_key, std::wstring version) : m_core(core), m_bind_key(std::move(bind_key)), m_version(std::move(version))
+    {
+        if (!m_core.register_processor(m_processor))
             Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] the camera core already runs another view processor: smoothing inactive\n"));
-        if (!m_core.set_listener(&m_listener))
+        if (!m_core.set_listener(m_hooks))
             Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] the camera core already has a listener: camera position tuning inactive\n"));
 
         std::lock_guard guard(m_file_mutex);
@@ -238,56 +247,45 @@ struct Smoothwalker::Impl
         double lag = stats.lag_sum;
         uint64_t timed = 0;
         double micros = 0.0;
-        m_core.take_hook_timing(&timed, &micros);
+        m_core.take_hook_timing(timed, micros);
         Output::send<LogLevel::Normal>(
                 STR("[DWSmoothwalker] {:.1f} smoothed frames/s, mean shown lag {:.1f} cm, wall clamp {:.0f}%, {:.1f} us per frame in the hook\n"),
                 frames / elapsed, frames ? lag / frames : 0.0, frames ? 100.0 * clamped / frames : 0.0, micros);
     }
 
     // Game thread, from the core's LoadMap callback or engine tick: the player is already forgotten.
-    static auto on_world_changed(void* user) -> void
+    auto on_world_changed() -> void
     {
-        auto& self = *static_cast<Impl*>(user);
-        self.m_tuner.forget();
-        self.m_position_applied_generation = 0; // re-apply in the next world
-        self.m_overlay.forget();                // the level took the panel off the viewport; the next pawn gets a new one
+        m_tuner.forget();
+        m_position_applied_generation = 0; // re-apply in the next world
+        m_overlay.forget();                // the level took the panel off the viewport; the next pawn gets a new one
     }
 
     // Game thread: a new pawn's camera.
-    static auto on_camera_changed(void* user) -> void
+    auto on_camera_changed() -> void
     {
-        auto& self = *static_cast<Impl*>(user);
-        self.m_position_applied_generation = 0; // a new pawn: its modes get the current position
-        self.m_tuner.camera_changed();
+        m_position_applied_generation = 0; // a new pawn: its modes get the current position
+        m_tuner.camera_changed();
     }
 
     // Game thread, every engine tick, after the core checked and discovered the controller.
-    static auto on_tick(void* user) -> void
+    auto on_tick() -> void
     {
-        auto& self = *static_cast<Impl*>(user);
-        self.show_pending_banner();
-        self.apply_position();
-        auto* controller = static_cast<UObject*>(self.m_core.player_controller());
-        auto* camera = static_cast<UObject*>(self.m_core.player_camera());
-        self.m_overlay.tick(self.m_debug_overlay.load(), controller, camera, [&] { return ui::format_panel(self.debug_panel(camera)); });
+        show_pending_banner();
+        apply_position();
+        auto* controller = static_cast<UObject*>(m_core.player_controller());
+        auto* camera = static_cast<UObject*>(m_core.player_camera());
+        m_overlay.tick(m_debug_overlay.load(), controller, camera, [&] { return ui::format_panel(debug_panel(camera)); });
     }
 
-    // The camera API as the panel shows it (Api::camera_owner).
+    // The camera API as the panel shows it (CameraCore::camera_owner).
     auto api_status() -> ui::ApiStatus
     {
         ui::ApiStatus s;
-        double lease = NAN;
-        std::string name(64, '\0');
-        uint32_t n = m_core.camera_owner(name.data(), static_cast<uint32_t>(name.size()), &lease);
-        if (n >= name.size())
-        {
-            name.assign(static_cast<size_t>(n) + 1, '\0');
-            n = m_core.camera_owner(name.data(), static_cast<uint32_t>(name.size()), &lease);
-        }
-        if (n == 0) return s;
-        name.resize(std::min<size_t>(n, name.size() - 1));
-        s.owner = settings::to_wide(name);
-        s.lease = lease;
+        camera::Owner owner = m_core.camera_owner();
+        if (owner.mod.empty()) return s;
+        s.owner = settings::to_wide(owner.mod);
+        s.lease = owner.lease;
         return s;
     }
 
@@ -1033,8 +1031,9 @@ struct Smoothwalker::Impl
     }
 
     // The debug overlay's panel, gathered at its refresh (a quarter second apart) on the game thread: the core's feed
-    // (Api::read_debug), the follow's settings under their shared lock, the copy publish_locked leaves in m_debug_*,
-    // the tuner and the API claim (Api::camera_owner). Never m_file_mutex, which the engine tick does not take.
+    // (CameraCore::read_debug), the follow's settings under their shared lock, the copy publish_locked leaves in
+    // m_debug_*, the tuner and the API claim (CameraCore::camera_owner). Never m_file_mutex, which the engine tick
+    // does not take.
     auto debug_panel(UObject* camera) -> ui::DebugPanel
     {
         ui::DebugPanel p;
@@ -1050,9 +1049,7 @@ struct Smoothwalker::Impl
         p.max_lag_h = follow.max_lag_h;
         p.max_lag_v = follow.max_lag_v;
         p.rotation_smoothing = follow.rotation_smoothing;
-        camera::Debug feed{};
-        feed.size = sizeof(feed);
-        m_core.read_debug(&feed);
+        const camera::DebugFeed feed = m_core.read_debug();
         p.keep_follow = feed.keep_follow;
         p.keep_turn = feed.keep_turn;
         p.influence = static_cast<follow::Influence>(feed.influence);
@@ -1062,12 +1059,12 @@ struct Smoothwalker::Impl
         p.snap = static_cast<camera::Snap>(feed.snap);
         p.snap_age = feed.snap_age;
         p.api = api_status();
-        p.api.glide = feed.glide != 0;
+        p.api.glide = feed.glide;
         return p;
     }
 };
 
-Smoothwalker::Smoothwalker(const camera::Api& core, BindKey bind_key, std::wstring version)
+Smoothwalker::Smoothwalker(camera::CameraCore& core, BindKey bind_key, std::wstring version)
     : m(std::make_unique<Impl>(core, std::move(bind_key), std::move(version)))
 {
 }
@@ -1104,8 +1101,8 @@ auto Smoothwalker::shutdown() -> void
 {
     m->m_tuner.restore();
     // Both waits always run: the second must not be skipped by the first timing out.
-    const bool listener_drained = m->m_core.clear_listener(&m->m_listener) != 0;
-    const bool processor_drained = m->m_core.unregister_processor(m->m_processor.registration()) != 0;
+    const bool listener_drained = m->m_core.clear_listener(m->m_hooks);
+    const bool processor_drained = m->m_core.unregister_processor(m->m_processor);
     if (!listener_drained || !processor_drained)
     {
         // A camera call the core made into the follow or the listener is still running, so the Impl (the follow, the

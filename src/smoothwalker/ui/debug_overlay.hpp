@@ -1,7 +1,7 @@
 // Debug overlay (debug_overlay, debug_key): a UMG text panel at the top right of the screen with the live follow,
 // the player's camera modes, the last hard cut and the camera API claim (docs/design.md, "Debug overlay").
 // Built, refreshed and removed on the game thread only, from the engine tick. The GetCameraView hook never touches
-// it: the core publishes numbers that the refresh reads through its table (Api::read_debug, Api::camera_owner;
+// it: the core publishes numbers that the refresh reads through its interface (CameraCore::read_debug, camera_owner;
 // smoothwalker/smoothwalker.cpp, debug_panel).
 #pragma once
 
