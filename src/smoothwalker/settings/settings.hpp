@@ -55,6 +55,8 @@ namespace dw::smoothwalker::settings
         double focus_distance = 100, focus_height = 0, focus_shoulder = 0, focus_fov = 0; // 0.9.0; a file without them takes combat's
         double aiming_distance = 100, aiming_height = 0, aiming_shoulder = 0, aiming_fov = 0;
         double traversal_distance = 100, traversal_height = 0, traversal_fov = 0;
+        // On top of the groups above, on the camera type the game selects inside buildings (modes/position.hpp, InteriorTuning).
+        double interior_distance = 100, interior_height = 0, interior_shoulder = 0, interior_fov = 0;
         bool shoulder_swap = false;
         double pitch_min = -60, pitch_max = 40;
         double position_transition = 0.5; // s; 0 snaps
@@ -72,23 +74,23 @@ namespace dw::smoothwalker::settings
     // A preset is a camera look: follow, turning, the look limits and camera position. Not the switches (enabled,
     // camera_tuning, shoulder_swap, show_banner, log_stats, log_verbose, debug_overlay, debug_markers), the safety values
     // (wall_clamp, reset_distance, reset_gap), position_transition, the key names, or preset.
-    inline const std::array<const char*, 41> PRESET_KEYS{
+    inline const std::array<const char*, 45> PRESET_KEYS{
             "follow_rate_h", "follow_rate_v", "curve_h", "curve_v", "catchup_distance", "min_rate_scale", "max_lag_h", "max_lag_v",
             "soft_leash", "aiming_follow", "combat_follow", "traversal_follow", "rotation_smoothing", "rotation_rate", "combat_rotation",
             "traversal_rotation", "pitch_min", "pitch_max", "exploration_distance", "exploration_height", "exploration_shoulder",
             "exploration_fov", "sprint_distance", "sprint_height", "sprint_shoulder", "sprint_fov", "combat_distance", "combat_height",
             "combat_shoulder", "combat_fov", "focus_distance", "focus_height", "focus_shoulder", "focus_fov", "aiming_distance", "aiming_height", "aiming_shoulder", "aiming_fov", "traversal_distance",
-            "traversal_height", "traversal_fov"};
+            "traversal_height", "traversal_fov", "interior_distance", "interior_height", "interior_shoulder", "interior_fov"};
 
     // Every numeric setting: the ones the Mod Menu can move and the mod writes back.
-    inline const std::array<const char*, 54> NUMERIC_KEYS{
+    inline const std::array<const char*, 58> NUMERIC_KEYS{
             "enabled", "follow_rate_h", "follow_rate_v", "curve_h", "curve_v", "catchup_distance", "min_rate_scale", "max_lag_h",
             "max_lag_v", "soft_leash", "aiming_follow", "combat_follow", "traversal_follow", "rotation_smoothing", "rotation_rate", "combat_rotation",
             "traversal_rotation", "wall_clamp", "reset_distance", "reset_gap", "show_banner",
             "camera_tuning", "exploration_distance", "exploration_height", "exploration_shoulder", "exploration_fov", "sprint_distance",
             "sprint_height", "sprint_shoulder", "sprint_fov", "combat_distance", "combat_height", "combat_shoulder", "combat_fov", "focus_distance", "focus_height", "focus_shoulder", "focus_fov",
             "aiming_distance", "aiming_height", "aiming_shoulder", "aiming_fov", "traversal_distance", "traversal_height", "traversal_fov",
-            "shoulder_swap", "pitch_min", "pitch_max", "position_transition", "preset", "log_stats", "log_verbose", "debug_overlay",
+            "interior_distance", "interior_height", "interior_shoulder", "interior_fov", "shoulder_swap", "pitch_min", "pitch_max", "position_transition", "preset", "log_stats", "log_verbose", "debug_overlay",
             "debug_markers"};
 
     inline auto is_preset_key(const std::string& key) -> bool
@@ -180,6 +182,10 @@ namespace dw::smoothwalker::settings
         else if (key == "traversal_distance") number(s.traversal_distance);
         else if (key == "traversal_height") number(s.traversal_height);
         else if (key == "traversal_fov") number(s.traversal_fov);
+        else if (key == "interior_distance") number(s.interior_distance);
+        else if (key == "interior_height") number(s.interior_height);
+        else if (key == "interior_shoulder") number(s.interior_shoulder);
+        else if (key == "interior_fov") number(s.interior_fov);
         else if (key == "pitch_min") number(s.pitch_min);
         else if (key == "pitch_max") number(s.pitch_max);
         else if (key == "preset") integer(s.preset);
@@ -226,6 +232,10 @@ namespace dw::smoothwalker::settings
         {
             *f = std::clamp(*f, -30.0, 30.0);
         }
+        s.interior_distance = std::clamp(s.interior_distance, 50.0, 200.0);
+        s.interior_height = std::clamp(s.interior_height, -50.0, 50.0);
+        s.interior_shoulder = std::clamp(s.interior_shoulder, -60.0, 60.0);
+        s.interior_fov = std::clamp(s.interior_fov, -30.0, 30.0);
         s.pitch_min = std::clamp(s.pitch_min, -89.0, -30.0);
         s.pitch_max = std::clamp(s.pitch_max, 20.0, 89.0);
         s.position_transition = std::clamp(s.position_transition, 0.0, 2.0);
@@ -279,6 +289,10 @@ namespace dw::smoothwalker::settings
         if (key == "traversal_distance") return s.traversal_distance;
         if (key == "traversal_height") return s.traversal_height;
         if (key == "traversal_fov") return s.traversal_fov;
+        if (key == "interior_distance") return s.interior_distance;
+        if (key == "interior_height") return s.interior_height;
+        if (key == "interior_shoulder") return s.interior_shoulder;
+        if (key == "interior_fov") return s.interior_fov;
         if (key == "shoulder_swap") return flag(s.shoulder_swap);
         if (key == "pitch_min") return s.pitch_min;
         if (key == "pitch_max") return s.pitch_max;

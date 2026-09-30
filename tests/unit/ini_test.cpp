@@ -124,7 +124,8 @@ TEST(ini, sanitize_ranges)
     Settings s = parse_settings("follow_rate_h = 100\nfollow_rate_v = 0\ncurve_h = 9\ncurve_v = -2\ncatchup_distance = 1\n"
                                 "min_rate_scale = 2\nmax_lag_h = 999\nmax_lag_v = -1\naiming_follow = 150\nrotation_rate = 0\n"
                                 "reset_distance = 5\nreset_gap = 9\nexploration_distance = 10\nsprint_height = 500\n"
-                                "aiming_shoulder = -100\ntraversal_fov = 45\npitch_min = 0\npitch_max = 95\nposition_transition = -1\n");
+                                "aiming_shoulder = -100\ntraversal_fov = 45\ninterior_distance = 10\ninterior_height = 80\n"
+                                "interior_shoulder = -99\ninterior_fov = 45\npitch_min = 0\npitch_max = 95\nposition_transition = -1\n");
     CHECK_EQ(s.follow_rate_h, 30.0);
     CHECK_EQ(s.follow_rate_v, 0.5);
     CHECK_EQ(s.curve_h, 3);
@@ -141,6 +142,10 @@ TEST(ini, sanitize_ranges)
     CHECK_EQ(s.sprint_height, 100.0);
     CHECK_EQ(s.aiming_shoulder, -60.0);
     CHECK_EQ(s.traversal_fov, 30.0);
+    CHECK_EQ(s.interior_distance, 50.0);
+    CHECK_EQ(s.interior_height, 50.0);
+    CHECK_EQ(s.interior_shoulder, -60.0);
+    CHECK_EQ(s.interior_fov, 30.0);
     CHECK_EQ(s.pitch_min, -30.0);
     CHECK_EQ(s.pitch_max, 89.0);
     CHECK_EQ(s.position_transition, 0.0);

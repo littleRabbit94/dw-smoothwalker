@@ -456,7 +456,8 @@ Measured live on the running game.
 
 Per group (exploring, sprinting, combat, focus, aiming, claw ride and anti-grav): distance %, height, shoulder
 and FOV. For every mode: a shoulder swap (`N`), the
-look up/down limits and a transition time. 48 settings on the menu page (the three safety keys and `game_lag_scale` left it on 2026-09-19; the safety keys stay in the ini), validated with the menu's
+look up/down limits and a transition time. Indoors, four more on the Interior camera type (see "Indoors
+(`interior_*`)"). 52 settings on the menu page (the three safety keys and `game_lag_scale` left it on 2026-09-19; the safety keys stay in the ini; the four `interior_` keys joined 2026-09-30), validated with the menu's
 parser. The groups cover 23 `BP_CameraMode_*` classes; the finisher and shadowstep attack cameras are
 left alone. 22 are loaded at session start (21 checked 2026-09-16, `Shadowstep_2_Base` 2026-09-20).
 `CombatSprinting` is day Coen's camera for sprinting with a weapon drawn, and its class is loaded by day only
@@ -492,7 +493,8 @@ Shadowstep_2_Base. The other 14 ship -89 / 89, except AimingOnLadder at -40 / 89
 - **Layout from reflection, then a plausibility gate.** Offsets are looked up by name: `DefaultFieldOfView`
   0x54, `ViewPitchMin/Max` 0x58/0x5C, lag speeds 0x68/0x6C (`RebelCameraMode`), `CameraOffsets` 0x898 and
   `CameraTypeBlendArgs` 0x8E8 (`RebelCameraModeTPP`), `BlendTime` +0x08 in `AlphaBlendArgs`, `TargetOffset`
-  0x10 and `OverriddenFieldOfView` 0x08 in `CameraOffset` (584 bytes). The lag enables are bitfields sharing
+  0x10, `OverriddenFieldOfView` 0x08 and the `bOverrideFOV` bit (through its `FBoolProperty`, part of the layout
+  check since 2026-09-30) in `CameraOffset` (584 bytes). The lag enables are bitfields sharing
   the byte at 0x64, written through `FBoolProperty` and its mask, never as a byte: the game's lag is switched
   off while `enabled` is 1 (independent of `camera_tuning`) and put back at 0 and at unload. Tested live
   2026-09-19: with both speeds at 1.0 the camera floated on jumps, and clearing the two bits on the live
@@ -538,6 +540,44 @@ Shadowstep_2_Base. The other 14 ship -89 / 89, except AimingOnLadder at -40 / 89
   value 0.25 s after the blend ends, counted in the world time of the player's camera updates (the hook sums
   its `DeltaTime`), since the blend runs on world time: a pause or slow motion mid-glide must not put the
   blend time back early. An unload mid-glide restores it too. Verified afterwards: live mode and CDO back at 1.00.
+
+### Indoors (`interior_*`)
+
+Measured 2026-09-30 over all 23 CDOs, live. The game picks `ECameraType` from the environment (a building is
+Interior, 2) and blends the offsets of the new key over `CameraTypeBlendArgs` (1.0 s). Which modes ship an Interior
+key, as shipped (`X Y Z` of `TargetOffset`):
+
+| Interior key | Modes |
+|---|---|
+| Differs from Default | Base (-115 63 0 against -135 70 0), Base_LongRange (-190 70 10 against -250 30 0), Base_CloseRange and Base_CloseRange_Mantle2m (-160 40 15 against -215 70 0), Sprint (-210 55 0 against -230 70 0), Sprint_VampiricFastTraversal (-210 55 0 against -400 100 0), FocusMode (shoulder only), AntiGrav (-165 0 0 against -300 0 0), Shadowstep_2_Base (-115 63 0 against -400 70 50) |
+| Same on all three keys | GapSqueeze (-100 0 0), Aiming, AimingOnLadder |
+| None (key 1 only) | the six Combat modes, AimingClawRide, AimingClawRideLedge, AntiGravAiming, ClawRide, ClawRideLedge |
+
+- **A missing key falls back to Default.** Indoors (type 2) with a weapon drawn, `CombatFromArm_VeryLongRange` (key 1
+  only) put the camera 120.0 cm to the side in the view frame: key 1's Y as written (110 shipped plus a 10 cm
+  shoulder). So combat has no indoor camera in the game.
+- **Far and Close** are a vanilla menu option: it picks `Base_LongRange` (Far, the default) or `Base_CloseRange` as
+  the standing camera. Both ship their own Interior key.
+- **A per-type FOV blends.** `bOverrideFOV` ships false on every key of every mode, so the FOV is the mode's
+  `DefaultFieldOfView`, the same on every type. Switched on for key 2 of the live `Base_LongRange` with
+  `OverriddenFieldOfView` 60, the FOV eased 90 -> 60 over about 1 s on walking in and back on walking out, sampled
+  at 250 ms on `FollowCamera.FieldOfView` (a reflected float equal to `GetFOVAngle()` at every read). A
+  `DefaultFieldOfView` change goes in with a type flip and snaps ("How writes land"); the override is another path.
+- **The settings** apply on key 2 only, of the nine modes whose Interior key differs (`ModeClassSpec::interior`, a
+  name list for the reason `player_pitch` is one), on top of the group's: X times the group's and then
+  `interior_distance`'s percent, Y out by the group's plus `interior_shoulder` (stopping at the centre, centred
+  modes left alone), Z up by the group's plus `interior_height`. `interior_fov` 0 leaves the override as shipped;
+  any other value switches it on at the mode's FOV as written plus `interior_fov` (from the override value plus the
+  group's FOV if a base already overrides). Neutral values (100, 0, 0, 0) write exactly what the group writes.
+  One pure function, `offset_of()` in `position.hpp`, computes every entry, so the unit tests cover it.
+- **Known limit:** while `interior_fov` is not 0 the mod writes `bOverrideFOV` true on those keys, so another mod's
+  `true` there reads as the mod's own and is not adopted (a bool matches the last write half the time); its override
+  value still is. With `interior_fov` back at 0 that other mod's switch is written false. No mod known to set it is
+  enabled.
+- **Aiming and GapSqueeze are left out** although they ship a key 2: it equals key 1, so the game keeps them the
+  same indoors, and a 1 s glide through a doorway mid-shot would move the aim framing.
+- Before these settings the Interior key already followed the group settings like every key, so indoor stayed in
+  proportion to outdoor (Base_LongRange at 75 %: -142 against -188).
 
 ## Presets and the Mod Menu page
 
@@ -630,19 +670,19 @@ Shadowstep_2_Base. The other 14 ship -89 / 89, except AimingOnLadder at -40 / 89
 
 ### Presets
 
-- **Presets carry 41 keys** (32 in 0.8.0; four `focus_` keys since 0.9.0, when focus left the combat group; a file or preset without them takes its combat values, in `parse_settings` and `fill_focus`; 36 from 2026-09-19, when `wall_clamp`, `reset_distance`, `reset_gap` and
+- **Presets carry 45 keys** (32 in 0.8.0; four `focus_` keys since 0.9.0, when focus left the combat group; a file or preset without them takes its combat values, in `parse_settings` and `fill_focus`; 36 from 2026-09-19, when `wall_clamp`, `reset_distance`, `reset_gap` and
   `position_transition` left: a preset is a camera look, and the first three are off the menu page, so a
   preset would have changed settings the player cannot see; 39 from 2026-09-22, when `aiming_follow` joined
   and `combat_follow` / `combat_rotation` were added, both new settings for the combat camera, split into
   position and turning like aiming's; 41 later that day, when `traversal_follow` / `traversal_rotation` were
-  added, the same pair for the traversal camera): follow, turning, the look limits and every group's distance, height, shoulder and
-  FOV. Not `enabled`, `camera_tuning`, `shoulder_swap`, `show_banner`, `log_stats`, the key names,
+  added, the same pair for the traversal camera; 45 from 2026-09-30, when the four `interior_` keys were added): follow,
+  turning, the look limits, every group's distance, height, shoulder and FOV, and the indoor adjustment. Not `enabled`, `camera_tuning`, `shoulder_swap`, `show_banner`, `log_stats`, the key names,
   or `preset`. A preset file holding fewer keys loads and matches on the keys it has.
 - **Built-ins** (cycle order): Tight, Balanced, Cinematic. Follow values, horizontal retuned 2026-09-19 for the game's lag being off (it had
   added up to 30 cm of trail; before: 25 cm 18/s, 70 cm 8/s; Cinematic was tried at 145 cm 3/s, too much, and kept as it was): Tight (lag 40/20 cm,
   12/20 per s, constant), Balanced (the shipped default: 85/50 cm, 6.5/10 per s; 95 cm 5.5/s was tried and read too loose, smoothstep h), Cinematic
   (120/80 cm, 4/6 per s, ease in-out, floor 0.35, turning smoothed at 25). Balanced equals the shipped
-  `smoothwalker.ini` on all 41 keys.
+  `smoothwalker.ini` on all 45 keys.
 
   | Key | Tight | Balanced | Cinematic |
   |---|---|---|---|
@@ -653,6 +693,7 @@ Shadowstep_2_Base. The other 14 ship -89 / 89, except AimingOnLadder at -40 / 89
   | combat | 95 / 0 / 0 / 0 | 100 / 0 / 0 / 0 | 110 / 0 / 0 / 0 |
   | aiming | 100 / 0 / 0 / 0 | 100 / 0 / 0 / 0 | 100 / 0 / 0 / 0 |
   | claw ride and anti-grav distance / height / FOV | 95 / 0 / 0 | 100 / 0 / 0 | 115 / 0 / 5 |
+  | indoors distance / height / shoulder / FOV | 100 / 0 / 0 / 0 | 100 / 0 / 0 / 0 | 100 / 0 / 0 / 0 |
 
   `reset_distance` / `reset_gap` are 500 / 0.25 in all three. Every value sits on its slider step.
 
@@ -1016,7 +1057,7 @@ became the captured values and the log stayed silent (see "Limits"). A later cha
 - **Two value sets per mode.** `shipped` is the first capture and never changes (for the logs). `base` starts
   equal to it and is what every write is computed from (`expected()`, the one computation behind `write()`)
   and what `restore()` writes at unload. The fields watched are `DefaultFieldOfView`, `ViewPitchMin/Max` and,
-  per `CameraOffsets` key, `TargetOffset` X, Y, Z and `OverriddenFieldOfView`. The type blend time and the
+  per `CameraOffsets` key, `TargetOffset` X, Y, Z, `OverriddenFieldOfView` and `bOverrideFOV`. The type blend time and the
   lag bits are not: Smoothwalker writes those itself (the flip, the lag switch).
 - **Three-way classification, no snapshots.** Each watched value on a captured CDO or a live instance is the
   mod's own if it equals, bit for bit, the last write (`expected()` of the last tuning), the base, or the
@@ -1889,3 +1930,7 @@ against f22aa8e byte for byte; `tests/unit/session_test.cpp` replaced it. See "C
 Fix: a processor or listener call stalled past the unload waits (over 5 s) no longer touches freed memory: `unregister_processor` and `clear_listener` return 1 drained / 0 timed out, and on 0 the Smoothwalker component is left allocated (leaked) with one warning instead of destroyed. See "Core and processors".
 
 Fix: an `install` re-key (a Lua mod restarting on its old state without `on_lua_stop`) now frees the layer slot it held, as an uninstall does; before, the slot and its layer stayed and repeated restarts used up the eight slots. `authority_test` checks it (`rekey_frees_the_slot`).
+
+Indoor camera (2026-09-30): four settings, `interior_distance`, `interior_height`, `interior_shoulder` and
+`interior_fov`, adjust the Interior camera type of the nine modes whose Interior key differs from Default, on top of
+each group's settings. Preset keys 41 to 45, menu page 48 to 52 settings. See "Indoors (`interior_*`)".

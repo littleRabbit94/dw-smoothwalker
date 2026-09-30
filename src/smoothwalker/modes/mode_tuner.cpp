@@ -393,6 +393,7 @@ namespace
         m_off.type_blend = (type_blend_args >= 0 && blend_time >= 0) ? type_blend_args + blend_time : -1;
         m_off.offset_target = offset_in(offset, STR("TargetOffset"));
         m_off.offset_fov = offset_in(offset, STR("OverriddenFieldOfView"));
+        m_offset_override = bool_in(offset, STR("bOverrideFOV"));
         if (offset)
         {
             m_off.offset_size = offset->GetStructureSize();
@@ -400,7 +401,7 @@ namespace
         }
 
         bool ok = m_off.fov >= 0 && m_off.pitch_min >= 0 && m_off.pitch_max >= 0 && m_hlag_on && m_vlag_on &&
-                  m_off.offsets_map >= 0 && m_off.type_blend >= 0 && m_off.offset_target >= 0 && m_off.offset_fov >= 0 &&
+                  m_off.offsets_map >= 0 && m_off.type_blend >= 0 && m_off.offset_target >= 0 && m_off.offset_fov >= 0 && m_offset_override &&
                   m_off.offset_size > 0 && m_off.offset_align > 0 && m_set_type && m_get_type;
         if (!ok)
         {
@@ -426,7 +427,8 @@ namespace
         {
             if (off.key < 1 || off.key > 3) return false;
             if (!(std::abs(off.x) <= 2000.0 && std::abs(off.y) <= 2000.0 && std::abs(off.z) <= 2000.0)) return false;
-            // 0 where the key has no override; the ceiling is DefaultFieldOfView's. Also rejects NaN.
+            // Shipped values are unused while the override is off (160 on most modes, 0 or 90 on some); the ceiling
+            // is DefaultFieldOfView's. Also rejects NaN.
             if (foreign && !(off.overridden_fov >= 0.0f && off.overridden_fov <= 170.0f)) return false;
         }
         return true;
@@ -583,13 +585,14 @@ namespace
         out.type_blend = read_float(object, m_off.type_blend);
         out.offsets.clear();
         for_each_offset(object, [&](uint8_t key, uint8_t* value) {
-            OffsetOriginal o{key};
+            OffsetValues o{key};
             double target[3]{};
             memcpy(target, value + m_off.offset_target, sizeof(target));
             o.x = target[0];
             o.y = target[1];
             o.z = target[2];
             memcpy(&o.overridden_fov, value + m_off.offset_fov, sizeof(float));
+            o.override_fov = m_offset_override->GetPropertyValueInContainer(value);
             out.offsets.push_back(o);
         });
     }
@@ -611,17 +614,10 @@ namespace
         e.pitch_max = on && player_pitch ? static_cast<float>(t.pitch_max) : b.pitch_max;
 
         if (!on) return e;
-        for (auto& off : e.offsets) // each field from its own base value, so in place
+        // The group's tuning goes on every key; offset_of() adds the interior settings on key 2 of the modes that take them.
+        for (auto& off : e.offsets) // each entry from its own base value, so in place
         {
-            if (off.x < 0.0) off.x = off.x * g.distance / 100.0;
-            if (off.y != 0.0) // centred modes stay centred
-            {
-                // A negative offset stops at the centre instead of crossing to the other shoulder.
-                off.y = std::copysign(std::max(std::abs(off.y) + g.shoulder, 0.0), off.y);
-                if (t.shoulder_swap) off.y = -off.y;
-            }
-            off.z = off.z + g.height;
-            off.overridden_fov = static_cast<float>(off.overridden_fov + g.fov);
+            off = offset_of(off, e.fov, g, t.interior, mode.spec.interior, t.shoulder_swap);
         }
         return e;
     }
@@ -643,6 +639,7 @@ namespace
                 double target[3]{off.x, off.y, off.z};
                 memcpy(value + m_off.offset_target, target, sizeof(target));
                 memcpy(value + m_off.offset_fov, &off.overridden_fov, sizeof(float));
+                m_offset_override->SetPropertyValueInContainer(value, off.override_fov);
                 break;
             }
         });
@@ -690,8 +687,8 @@ namespace
         // made from it is the mod's own even after the CDO's foreign value changed the base.
         const Original prior = mode.base;
         const Original written = m_applied ? expected(mode, m_last) : prior;
-        // field: 0-2 the scalars, 3 + 4 * key index + axis the offsets; the out-of-range warning once per field
-        // per check, not once per object holding the value. get: one field of an Original. label: that field
+        // field: 0-2 the scalars, 3 + 5 * key index + axis the offsets (x, y, z, FOV override value, FOV override
+        // switch); the out-of-range warning once per field per check, not once per object holding the value. get: one field of an Original. label: that field
         // with a value, for the log.
         uint32_t warned = 0;
         auto consider = [&](int field, auto value, auto get, auto label) {
@@ -729,11 +726,12 @@ namespace
                 auto offset = [key](const wchar_t* name) {
                     return [name, key](auto v) { return std::format(L"{} {} on key {} ({})", name, v, key, camera_type_label(key)); };
                 };
-                int field = 3 + 4 * static_cast<int>(k); // plausible() allows at most 3 keys: bits 3-14
+                int field = 3 + 5 * static_cast<int>(k); // plausible() allows at most 3 keys: bits 3-17
                 consider(field, found->x, [k](auto& o) -> auto& { return o.offsets[k].x; }, offset(L"X offset"));
                 consider(field + 1, found->y, [k](auto& o) -> auto& { return o.offsets[k].y; }, offset(L"Y offset"));
                 consider(field + 2, found->z, [k](auto& o) -> auto& { return o.offsets[k].z; }, offset(L"Z offset"));
                 consider(field + 3, found->overridden_fov, [k](auto& o) -> auto& { return o.offsets[k].overridden_fov; }, offset(L"FOV override"));
+                consider(field + 4, found->override_fov, [k](auto& o) -> auto& { return o.offsets[k].override_fov; }, offset(L"FOV override switch"));
             }
         }
     }

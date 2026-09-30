@@ -1,5 +1,6 @@
 // Camera position tuning: writes the position settings (modes/position.hpp) into the game's camera modes: per-group
-// distance, height, shoulder and FOV, and the look limits, plus the switch for the game's own camera lag. Game thread
+// distance, height, shoulder and FOV on every camera type, the interior adjustment on the Interior type of the modes
+// that differ there, and the look limits, plus the switch for the game's own camera lag. Game thread
 // only, except note_new() (any thread; it touches tuner state only when called on the game thread) and restore() at
 // unload.
 //
@@ -97,18 +98,11 @@ namespace dw::smoothwalker::modes
         auto tick(uint64_t view_updates, double view_seconds, UObject* player_camera) -> void;
 
       private:
-        struct OffsetOriginal
-        {
-            uint8_t key;
-            double x, y, z;
-            float overridden_fov;
-        };
-
         struct Original
         {
             float fov{}, pitch_min{}, pitch_max{}, type_blend{};
             bool hlag_on{}, vlag_on{};
-            std::vector<OffsetOriginal> offsets;
+            std::vector<OffsetValues> offsets;
         };
 
         struct Mode
@@ -177,6 +171,8 @@ namespace dw::smoothwalker::modes
         // Properties of a native class, so the pointers hold for the session.
         FBoolProperty* m_hlag_on = nullptr;
         FBoolProperty* m_vlag_on = nullptr;
+        // CameraOffset.bOverrideFOV: read and written with the CameraOffset value as the container, like the lag bits.
+        FBoolProperty* m_offset_override = nullptr;
         bool m_layout_ok = false;
         bool m_layout_tried = false;
         bool m_applied = false;

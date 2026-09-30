@@ -39,7 +39,8 @@ namespace dw::smoothwalker::settings
                                 {"combat_distance", 95}, {"combat_height", 0}, {"combat_shoulder", 0}, {"combat_fov", 0},
                                 {"focus_distance", 95}, {"focus_height", 0}, {"focus_shoulder", 0}, {"focus_fov", 0},
                                 {"aiming_distance", 100}, {"aiming_height", 0}, {"aiming_shoulder", 0}, {"aiming_fov", 0},
-                                {"traversal_distance", 95}, {"traversal_height", 0}, {"traversal_fov", 0}}},
+                                {"traversal_distance", 95}, {"traversal_height", 0}, {"traversal_fov", 0},
+                                {"interior_distance", 100}, {"interior_height", 0}, {"interior_shoulder", 0}, {"interior_fov", 0}}},
                 {102, "Balanced", {{"follow_rate_h", 6.5}, {"follow_rate_v", 10}, {"curve_h", 2}, {"curve_v", 0}, {"catchup_distance", 150},
                                    {"min_rate_scale", 0.35}, {"max_lag_h", 85}, {"max_lag_v", 50}, {"soft_leash", 1},
                                    {"aiming_follow", 30}, {"combat_follow", 100}, {"traversal_follow", 100},
@@ -50,7 +51,8 @@ namespace dw::smoothwalker::settings
                                    {"combat_distance", 100}, {"combat_height", 0}, {"combat_shoulder", 0}, {"combat_fov", 0},
                                    {"focus_distance", 100}, {"focus_height", 0}, {"focus_shoulder", 0}, {"focus_fov", 0},
                                    {"aiming_distance", 100}, {"aiming_height", 0}, {"aiming_shoulder", 0}, {"aiming_fov", 0},
-                                   {"traversal_distance", 100}, {"traversal_height", 0}, {"traversal_fov", 0}}},
+                                   {"traversal_distance", 100}, {"traversal_height", 0}, {"traversal_fov", 0},
+                                   {"interior_distance", 100}, {"interior_height", 0}, {"interior_shoulder", 0}, {"interior_fov", 0}}},
                 {103, "Cinematic", {{"follow_rate_h", 4}, {"follow_rate_v", 6}, {"curve_h", 3}, {"curve_v", 2}, {"catchup_distance", 200},
                                     {"min_rate_scale", 0.35}, {"max_lag_h", 120}, {"max_lag_v", 80}, {"soft_leash", 1},
                                     {"aiming_follow", 30}, {"combat_follow", 100}, {"traversal_follow", 100},
@@ -61,7 +63,8 @@ namespace dw::smoothwalker::settings
                                     {"combat_distance", 110}, {"combat_height", 0}, {"combat_shoulder", 0}, {"combat_fov", 0},
                                     {"focus_distance", 110}, {"focus_height", 0}, {"focus_shoulder", 0}, {"focus_fov", 0},
                                     {"aiming_distance", 100}, {"aiming_height", 0}, {"aiming_shoulder", 0}, {"aiming_fov", 0},
-                                    {"traversal_distance", 115}, {"traversal_height", 0}, {"traversal_fov", 5}}},
+                                    {"traversal_distance", 115}, {"traversal_height", 0}, {"traversal_fov", 5},
+                                    {"interior_distance", 100}, {"interior_height", 0}, {"interior_shoulder", 0}, {"interior_fov", 0}}},
         };
         return presets;
     }

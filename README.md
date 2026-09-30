@@ -86,7 +86,7 @@ example mod's Lua syntax (`luac -p`, Lua 5.4), then writes `release/dist/Smoothw
 
 Copy `release/example-preset/Template.ini` into `ue4ss/Mods/DWSmoothwalker/config/presets/` under a new name,
 change the `name` line and the values, and restart the game. Every key is commented with its range and
-default. The preset format and rules (41 keys, clamping, the 54 drop-in limit) are in `docs/design.md`,
+default. The preset format and rules (45 keys, clamping, the 54 drop-in limit) are in `docs/design.md`,
 "Presets". Switches are not preset keys; a preset that sets them is ignored on those lines.
 
 To start from a camera you tuned in game, set the Preset picker on the Mod Menu page to a slot marked
