@@ -570,6 +570,11 @@ key, as shipped (`X Y Z` of `TargetOffset`):
   any other value switches it on at the mode's FOV as written plus `interior_fov` (from the override value plus the
   group's FOV if a base already overrides). Neutral values (100, 0, 0, 0) write exactly what the group writes.
   One pure function, `offset_of()` in `position.hpp`, computes every entry, so the unit tests cover it.
+- **Verified in game 2026-09-30** on Cinematic (exploring 115 %): `interior_distance` 120 moved key 2 of `Base_LongRange`
+  to -262.2 and `AntiGrav` to -227.7, keys 1 and 3 unchanged, GapSqueeze, Aiming and CombatNear untouched, no
+  foreign-value line; `interior_fov` -10 switched the override on at 85 (Sprint 93) and the FOV glided 85 -> 95 -> 85
+  over about 1 s each way through a doorway; back at neutral the switch read off and the camera returned. An
+  apply made under a pause lands on unpause, as every flip does ("The flip waits for the camera").
 - **Known limit:** while `interior_fov` is not 0 the mod writes `bOverrideFOV` true on those keys, so another mod's
   `true` there reads as the mod's own and is not adopted (a bool matches the last write half the time); its override
   value still is. With `interior_fov` back at 0 that other mod's switch is written false. No mod known to set it is
