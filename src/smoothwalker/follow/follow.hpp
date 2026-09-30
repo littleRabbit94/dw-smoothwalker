@@ -1,14 +1,15 @@
 // The follow: the math behind Smoothwalker's view processor (processor.hpp, camera/frame.hpp). A smoothed pivot
 // trails the capsule, the camera becomes smoothed pivot + (game camera - pivot), so orbiting stays instant and only
-// following lags. Optional rotation smoothing, the crouch hold, the aiming / combat / focus / traversal / interior shares and the wall
-// clamp live here too. docs/design.md, "Follow", "Pivot" and "Walls". Numbers only: runs on the hook thread, no
-// Unreal or UE4SS types.
+// following lags. Optional rotation smoothing, the crouch hold, the aiming / combat / focus / traversal / interior shares, the wall
+// clamp and the speed blend (speed_blend.hpp) live here too. docs/design.md, "Follow", "Pivot", "Walls" and "Speed blend".
+// Numbers only: runs on the hook thread, no Unreal or UE4SS types.
 #pragma once
 
 #include "../../camera/frame.hpp"
 #include "../../camera/wall.hpp"
 #include "../../common/math.hpp"
 #include "curves.hpp"
+#include "speed_blend.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -46,6 +47,7 @@ namespace dw::smoothwalker::follow
         double interior_follow_keep = 1.0;    // interior_follow as a share: the trail kept while the game's camera type is Interior
         double interior_rotation_keep = 1.0;  // interior_rotation as a share: the turning smoothing kept while the game's camera type is Interior
         double transition = 0.0;              // s, position_transition: the core's crossfade, and a mode write's wall-clamp hold
+        SpeedBlendTuning speed;               // the speed blend: speed_blend, its range and the Sprint group's difference from Exploration's
     };
 
     inline auto same_values(const FollowTuning& a, const FollowTuning& b) -> bool
@@ -58,16 +60,17 @@ namespace dw::smoothwalker::follow
                a.traversal_follow_keep == b.traversal_follow_keep && a.traversal_rotation_keep == b.traversal_rotation_keep &&
                a.focus_follow_keep == b.focus_follow_keep && a.focus_rotation_keep == b.focus_rotation_keep &&
                a.interior_follow_keep == b.interior_follow_keep && a.interior_rotation_keep == b.interior_rotation_keep &&
-               a.transition == b.transition;
+               a.transition == b.transition && a.speed == b.speed;
     }
 
     // What the follow reads besides the core's frame, all Smoothwalker's: a camera-mode write landed since the last
-    // frame (its distance glides in over the transition), which camera-mode groups are blending in or active, and
-    // whether the game's camera type is Interior.
+    // frame (its distance glides in over the transition), which camera-mode groups are blending in or active,
+    // whether the game's camera type is Interior, and what the speed blend reads of the Sprint camera.
     struct FollowInputs
     {
         bool mode_write = false;
         bool aiming = false, combat = false, focus = false, traversal = false, interior = false;
+        SprintView sprint;
     };
 
     // The log_stats numbers of one frame.
@@ -94,6 +97,7 @@ namespace dw::smoothwalker::follow
             out.location = in.camera;
             out.rotation = in.rotation;
             out.rotated = false;
+            out.fov_add = 0.0;
             out.feed = false;
             report.stats = false;
             report.clamped = false;
@@ -128,6 +132,7 @@ namespace dw::smoothwalker::follow
         double m_traversal = 0.0;    // 0 to 1, eased toward traversal: how far the follow is handed to the traversal camera
         double m_interior = 0.0;     // 0 to 1, eased toward interior: how far the follow is handed to the indoor camera type
         double m_nominal_hold = 0.0; // s left in which m_nominal_distance tracks the game: a position write is gliding
+        SpeedBlend m_speed;          // the eased pivot speed and the Sprint state weight
 
         // A crouch drops the capsule centre by the half-height change in one frame (54 cm here) while the game
         // eases its own camera height down over several. Lagging the centre made the arm jump by that delta
@@ -150,6 +155,7 @@ namespace dw::smoothwalker::follow
             m_crouch_base = NAN;
             m_crouch_drop = m_crouch_smoothed = 0.0;
             m_nominal_distance = dw::length(in.camera - in.pivot);
+            m_speed.restart(in.pivot, sw.sprint.sprint);
         }
 
         auto step(const FollowTuning& t, const FollowInputs& sw, const camera::FrameIn& in, camera::FrameOut& out, FollowReport& report) -> void
@@ -309,9 +315,20 @@ namespace dw::smoothwalker::follow
                 m_nominal_hold -= dt;
                 m_nominal_distance = game_distance;
             }
-            if (t.wall_clamp && camera::clamp_to_wall(result, pivot, game_distance, camera::wall_weight(game_distance, m_nominal_distance)))
+            const double wall = t.wall_clamp ? camera::wall_weight(game_distance, m_nominal_distance) : 0.0;
+            if (t.wall_clamp && camera::clamp_to_wall(result, pivot, game_distance, wall))
             {
                 report.clamped = true;
+            }
+
+            // The speed blend, after the clamp: its distance and height terms go only as far as the clamp leaves room.
+            // Every context override wins over it; indoors does not, the blend runs there too.
+            const double share = m_speed.share(t.speed, sw.sprint, in.fov, pivot, dt, 1.0 - std::max({m_aim, m_combat, m_focus, m_traversal}));
+            if (share > 0.0)
+            {
+                const SpeedBlendAdd add = speed_blend_add(t.speed, share, arm, out.rotation, 1.0 - wall);
+                result = result + add.offset;
+                out.fov_add = add.fov;
             }
             out.location = result;
 

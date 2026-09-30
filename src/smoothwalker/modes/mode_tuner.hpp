@@ -15,6 +15,7 @@
 #include "../../common/live_ref.hpp"
 #include "position.hpp"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -33,7 +34,8 @@ namespace dw::smoothwalker::modes
     using namespace RC::Unreal;
 
     // Whether an Aiming-, Combat-, Focus- or Traversal-group mode is blending in or active, from one scan of the
-    // player's live modes, and whether the player's camera type is Interior.
+    // player's live modes, and whether the player's camera type is Interior. With the speed blend on, also the Sprint
+    // camera as follow::SprintView carries it.
     struct ModeState
     {
         bool aiming = false;
@@ -41,6 +43,10 @@ namespace dw::smoothwalker::modes
         bool focus = false;
         bool traversal = false;
         bool interior = false;
+        bool sprint = false;          // a Sprint-group mode is blending in or active
+        float exploring_fov = NAN;    // the live exploring mode's FOV as written for the live camera type (shown_fov)
+        float sprint_fov = NAN;       // Sprint's
+        bool fov_moves = false;       // a camera-type blend (the game's, or the flip's) is moving the FOV as written
     };
 
     class ModeTuner
@@ -66,8 +72,9 @@ namespace dw::smoothwalker::modes
         // adopt_new) is served here on the next tick, not left to an apply that may never come. Only then does it
         // capture and walk every object; every other tick only adopts the hand-off. capture() on every tick would
         // retry a class dropped by an unload each time (about 50 ms a failed lookup) and capture a reloaded one
-        // without the late-class write adopt_late() gives it.
-        auto mode_state(UObject* player_camera) -> ModeState;
+        // without the late-class write adopt_late() gives it. sprint (the speed blend is on): the Sprint group gets its
+        // GetState call too, and the exploring and Sprint FOVs as written are worked out (sprint_fovs()).
+        auto mode_state(UObject* player_camera, bool sprint) -> ModeState;
 
         // Every live mode on the player's camera with its state, newest first, popped ones (3) left out: the tracked
         // modes and the other RebelCameraMode subclasses the hand-off and the scan found (m_untracked). For the debug
@@ -208,6 +215,13 @@ namespace dw::smoothwalker::modes
         float m_transition = 0.5f;
         double m_flip_back_at = 0.0; // view_seconds at the switch back
 
+        // The speed blend's view of camera-type changes (sprint_fovs()): the game blends the offsets and an interior FOV
+        // override over CameraTypeBlendArgs, so the FOV moves without a sprint for that long.
+        double m_seconds = 0.0;             // view_seconds at the last tick()
+        uint8_t m_type_seen = 0;            // the player's camera type at the last mode_state(); 0: unknown
+        uint8_t m_type_from = 0;            // the type before the last change the game made; 0: none yet
+        double m_type_changed_at = 0.0;     // m_seconds at that change
+
         auto resolve_layout() -> bool;
 
         // foreign: a value another mod wrote. Only those take the override FOV bound, which no shipped value has
@@ -310,5 +324,14 @@ namespace dw::smoothwalker::modes
         // A request while away runs again after the switch back, so the latest values are read. One during the
         // glide back restarts at once: queued behind the glide, a quick second press moved the camera in two steps.
         auto request_flip(UObject* camera) -> void;
+
+        // The captured mode of that name (ModeClassSpec::name), or nullptr.
+        auto mode_named(const wchar_t* name) const -> const Mode*;
+
+        // The FOVs as written of the live exploring mode (the newest live Base_LongRange or Base_CloseRange, the
+        // vanilla Far / Close option; Base_LongRange's when none is held) and of Sprint, on the camera type `type`
+        // (0: unknown, taken as Default), and whether a camera-type blend is moving them: the game's own for
+        // CameraTypeBlendArgs after it changed the type, or the flip's.
+        auto sprint_fovs(ModeState& state, const Mode* exploring, uint8_t type) const -> void;
     };
 } // namespace dw::smoothwalker::modes

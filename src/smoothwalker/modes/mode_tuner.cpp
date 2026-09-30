@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <cwchar>
 #include <format>
 #include <string>
 #include <string_view>
@@ -155,30 +156,55 @@ namespace
         m_live.clear();
         m_untracked.clear();
         m_scan_needed = true;
+        m_type_seen = m_type_from = 0;
     }
 
-    auto ModeTuner::mode_state(UObject* player_camera) -> ModeState
+    auto ModeTuner::mode_state(UObject* player_camera, bool sprint) -> ModeState
     {
         ModeState state;
         if (m_scan_needed) ensure_scanned(player_camera);
         else adopt_new();
+        uint8_t type = 0;
         if (m_get_type && player_camera && is_rebel_camera(player_camera))
         {
             // The flip switches the type away from its home for one update: that is not the game leaving or
             // entering an interior, so the type it left stands in for the read.
-            if (m_flip_stage == Away && player_camera == m_flip_camera) state.interior = m_flip_home == INTERIOR_KEY;
-            else state.interior = get_camera_type(player_camera) == INTERIOR_KEY;
+            if (m_flip_stage == Away && player_camera == m_flip_camera) type = m_flip_home;
+            else type = get_camera_type(player_camera);
+            state.interior = type == INTERIOR_KEY;
         }
-        if (!m_layout_ok || !m_get_state || m_scan_needed) return state;
-        for_each_instance([&](UObject* instance, Mode& mode) {
-            bool* found = mode.spec.group == Aiming      ? &state.aiming
-                          : mode.spec.group == Combat    ? &state.combat
-                          : mode.spec.group == Focus     ? &state.focus
-                          : mode.spec.group == Traversal ? &state.traversal
-                                                         : nullptr;
-            if (!found || *found) return;
-            *found = get_state(instance) <= 1;
-        });
+        if (type != 0 && type != m_type_seen)
+        {
+            if (m_type_seen != 0)
+            {
+                m_type_from = m_type_seen;
+                m_type_changed_at = m_seconds;
+            }
+            m_type_seen = type;
+        }
+        const Mode* exploring = nullptr;
+        if (m_layout_ok && m_get_state && !m_scan_needed)
+        {
+            const Mode* far_mode = sprint ? mode_named(L"Base_LongRange") : nullptr;
+            const Mode* close_mode = sprint ? mode_named(L"Base_CloseRange") : nullptr;
+            uint64_t newest = 0;
+            for_each_live([&](LiveMode& live, Mode& mode) {
+                if (sprint && (&mode == far_mode || &mode == close_mode) && live.seq > newest)
+                {
+                    exploring = &mode;
+                    newest = live.seq;
+                }
+                bool* found = mode.spec.group == Aiming           ? &state.aiming
+                              : mode.spec.group == Combat         ? &state.combat
+                              : mode.spec.group == Focus          ? &state.focus
+                              : mode.spec.group == Traversal      ? &state.traversal
+                              : mode.spec.group == Sprint && sprint ? &state.sprint
+                                                                  : nullptr;
+                if (!found || *found) return;
+                *found = get_state(live.ref.object) <= 1;
+            });
+        }
+        if (sprint && m_layout_ok) sprint_fovs(state, exploring, type);
         return state;
     }
 
@@ -249,6 +275,7 @@ namespace
     auto ModeTuner::camera_changed() -> void
     {
         m_scan_needed = true;
+        m_type_seen = m_type_from = 0;
     }
 
     auto ModeTuner::note_new(LiveRef object, bool game_thread) -> void
@@ -317,6 +344,7 @@ namespace
 
     auto ModeTuner::tick(uint64_t view_updates, double view_seconds, UObject* player_camera) -> void
     {
+        m_seconds = view_seconds;
         bool updated = view_updates != m_flip_seen;
         m_flip_seen = view_updates;
         if (m_flip_stage == Idle) return;
@@ -769,6 +797,34 @@ namespace
         uint8_t params[16]{};
         params[0] = type;
         camera->ProcessEvent(m_set_type, params);
+    }
+
+    auto ModeTuner::mode_named(const wchar_t* name) const -> const Mode*
+    {
+        for (auto& mode : m_modes)
+        {
+            if (std::wcscmp(mode.spec.name, name) == 0) return &mode;
+        }
+        return nullptr;
+    }
+
+    auto ModeTuner::sprint_fovs(ModeState& state, const Mode* exploring, uint8_t type) const -> void
+    {
+        if (!exploring) exploring = mode_named(L"Base_LongRange");
+        const Mode* sprint = mode_named(L"Sprint");
+        auto usable = [](const Mode* mode) { return mode && mode->has_shipped && mode->usable; };
+        if (!usable(exploring) || !usable(sprint)) return;
+        // As the last apply wrote them (m_last; neutral before the first, which writes the base as it stands).
+        auto fov = [&](const Mode* mode, uint8_t on) { return shown_fov(mode->base.fov, mode->base.offsets, mode->spec, m_last, on ? on : 1); };
+        auto moves = [&](uint8_t a, uint8_t b) { return a != b && (fov(exploring, a) != fov(exploring, b) || fov(sprint, a) != fov(sprint, b)); };
+        state.exploring_fov = fov(exploring, type);
+        state.sprint_fov = fov(sprint, type);
+        // The game's blend runs CameraTypeBlendArgs (1.0 s shipped) on world time; the flip's while it is away or
+        // gliding back (the blend time then is position_transition, and Back holds 0.25 s past it).
+        const double blend = std::clamp(static_cast<double>(exploring->base.type_blend), 0.0, 5.0) + 0.1;
+        const bool game_blend = m_type_from != 0 && m_seconds - m_type_changed_at < blend && moves(m_type_from, m_type_seen);
+        const bool flip_blend = (m_flip_stage == Away || m_flip_stage == Back) && moves(m_flip_home, m_flip_away);
+        state.fov_moves = game_blend || flip_blend;
     }
 
     auto ModeTuner::request_flip(UObject* camera) -> void

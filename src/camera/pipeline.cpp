@@ -176,6 +176,7 @@ namespace
             restart = true;
         }
 
+        const bool game_fov_ok = std::isfinite(view.fov) && view.fov > 1.0f && view.fov < 179.0f;
         FrameIn in{};
         in.enabled = enabled;
         in.restart = restart;
@@ -184,6 +185,7 @@ namespace
         in.half_height = static_cast<double>(half_height);
         in.camera = camera;
         in.rotation = rotation;
+        in.fov = game_fov_ok ? static_cast<double>(view.fov) : NAN;
         FrameOut moved{};
         if (processor) processor->frame(in, moved);
         if (moved.generation != m_view.seen_processor) changed = true;
@@ -198,6 +200,12 @@ namespace
             {
                 result_rotation = moved.rotation;
                 dw::to_rotator(result_rotation, view.rotation[0], view.rotation[1], view.rotation[2]);
+            }
+            // The processor's FOV add, before the crossfade (which then fades it like any change) and the layers. Kept
+            // inside the range the fade and the snapshot treat as plausible.
+            if (game_fov_ok && moved.fov_add != 0.0 && std::isfinite(moved.fov_add))
+            {
+                view.fov = static_cast<float>(std::clamp(static_cast<double>(view.fov) + moved.fov_add, 5.0, 170.0));
             }
         }
         if (moved.feed)

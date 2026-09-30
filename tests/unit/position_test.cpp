@@ -451,3 +451,30 @@ TEST(position, interior_modes)
     }
     CHECK(found == expected);
 }
+
+TEST(position, shown_fov_per_camera_type)
+{
+    // Base_LongRange's keys as shipped (docs/design.md, "Indoors"): the override off, its value unused.
+    const std::vector<OffsetValues> keys{{1, -250, 30, 0, 160.0f, false}, {2, -190, 70, 10, 160.0f, false}, {3, -250, 70, 0, 160.0f, false}};
+    const modes::ModeClassSpec spec{modes::Exploration, L"Base_LongRange", L"", true, true};
+    PositionTuning t;
+    CHECK_EQ(modes::shown_fov(90.0f, keys, spec, t, 1), 90.0f);
+    t.groups[modes::Exploration].fov = 5;
+    CHECK_EQ(modes::shown_fov(90.0f, keys, spec, t, 1), 95.0f);
+    CHECK_EQ(modes::shown_fov(90.0f, keys, spec, t, 2), 95.0f); // no interior FOV: the same indoors
+    t.interior.fov = -10;
+    CHECK_EQ(modes::shown_fov(90.0f, keys, spec, t, 2), 85.0f); // the override the write switches on
+    CHECK_EQ(modes::shown_fov(90.0f, keys, spec, t, 1), 95.0f);
+    CHECK_EQ(modes::shown_fov(90.0f, keys, spec, t, 3), 95.0f);
+    // A mode that does not take the interior settings keeps its FOV indoors.
+    const modes::ModeClassSpec plain{modes::Exploration, L"GapSqueeze", L"", true, false};
+    CHECK_EQ(modes::shown_fov(90.0f, keys, plain, t, 2), 95.0f);
+    // A type without a key falls back to Default's; no keys at all, the mode's FOV.
+    const std::vector<OffsetValues> default_only{{1, -250, 30, 0, 70.0f, true}}; // another mod's override on key 1
+    CHECK_EQ(modes::shown_fov(90.0f, default_only, spec, t, 2), 75.0f);
+    CHECK_EQ(modes::shown_fov(90.0f, {}, spec, t, 2), 95.0f);
+    // Tuning off: the base as it stands.
+    t.active = false;
+    CHECK_EQ(modes::shown_fov(90.0f, keys, spec, t, 2), 90.0f);
+    CHECK_EQ(modes::shown_fov(90.0f, default_only, spec, t, 1), 70.0f);
+}

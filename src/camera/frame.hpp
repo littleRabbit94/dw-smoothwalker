@@ -22,6 +22,7 @@ namespace dw::camera
         double half_height;  // capsule half height; NAN when unknown or implausible
         dw::Vec3 camera;     // the game's camera location this frame
         dw::Quat rotation; // the game's camera rotation this frame
+        double fov;          // the game's field of view this frame, degrees; NAN when not plausible (1 to 179)
     };
 
     // Filled by the processor. The core value-initializes it before the call.
@@ -30,6 +31,9 @@ namespace dw::camera
         dw::Vec3 location;    // where the camera goes; the game's camera unless the processor moved it
         dw::Quat rotation;    // its rotation; the game's unless `rotated`
         bool rotated = false; // rotation differs from the game's and is written to the view
+        // Degrees added to the game's FOV (Smoothwalker's speed blend). The core adds it before the crossfade and the API
+        // layers, only to a plausible FOV and only while the processor is on and nobody owns the camera.
+        double fov_add = 0.0;
 
         // Bumped whenever something the processor shows changes without a cut (a setting, a camera-mode write): the
         // core crossfades on it. Reported with the frame it was read for, so a change never shows for a frame before

@@ -184,6 +184,29 @@ namespace dw::smoothwalker::modes
         return o;
     }
 
+    // The FOV a mode shows on a camera type as a publish writes it: the override of that type's CameraOffsets key when the
+    // write switches it on, else the mode's DefaultFieldOfView as written. A type without a key falls back to Default's
+    // (key 1), as the game does. The same computation as ModeTuner::expected(), for one key and without its copy, so the
+    // tuner can publish it every tick (the speed blend's `w`, follow/speed_blend.hpp).
+    inline auto shown_fov(float base_fov, const std::vector<OffsetValues>& base_offsets, const ModeClassSpec& spec, const PositionTuning& t,
+                          uint8_t type) -> float
+    {
+        const GroupTuning& g = t.groups[spec.group];
+        const float mode_fov = t.active ? static_cast<float>(base_fov + g.fov) : base_fov;
+        const OffsetValues* entry = nullptr;
+        for (const auto& off : base_offsets)
+        {
+            if (off.key == type) entry = &off;
+        }
+        for (const auto& off : base_offsets)
+        {
+            if (!entry && off.key == 1) entry = &off;
+        }
+        if (!entry) return mode_fov;
+        const OffsetValues o = t.active ? offset_of(*entry, mode_fov, g, t.interior, spec.interior, t.shoulder_swap) : *entry;
+        return o.override_fov ? o.overridden_fov : mode_fov;
+    }
+
     // What a publish writes into the game of a position: with camera_tuning off only the lag switch is written, so a
     // changed position number applies nothing. Two positions with equal written() are the same to the game; the values
     // are kept, so switching camera_tuning on applies the latest.

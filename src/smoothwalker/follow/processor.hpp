@@ -1,8 +1,8 @@
 // The follow as the camera core's view processor (camera/api.hpp, docs/design.md "Core and processors"): its switch
 // and toggle generation, its settings and their generation, and what the follow reads besides the core's frame
-// (mode writes, the aiming / combat / focus / traversal / interior flags), all on Smoothwalker's side of the interface. No Unreal or UE4SS
-// types: the core calls frame() and state() on the hook thread. Owned by the Smoothwalker component
-// (smoothwalker/smoothwalker.cpp) and registered with the core for its whole life.
+// (mode writes, the aiming / combat / focus / traversal / interior flags, the Sprint camera for the speed blend), all on
+// Smoothwalker's side of the interface. No Unreal or UE4SS types: the core calls frame() and state() on the hook thread.
+// Owned by the Smoothwalker component (smoothwalker/smoothwalker.cpp) and registered with the core for its whole life.
 #pragma once
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -20,6 +20,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 
 namespace dw::smoothwalker::follow
 {
@@ -48,6 +49,18 @@ namespace dw::smoothwalker::follow
         t.interior_follow_keep = s.interior_follow / 100.0;
         t.interior_rotation_keep = s.interior_rotation / 100.0;
         t.transition = s.position_transition;
+        // The Sprint group's difference is in the game's modes only while camera_tuning writes them. Neutral at 0, so a
+        // position setting changed with the blend off bumps no follow generation.
+        if (s.camera_tuning && s.speed_blend > 0.0)
+        {
+            t.speed.amount = s.speed_blend / 100.0;
+            t.speed.start = s.speed_blend_start;
+            t.speed.full = s.speed_blend_full;
+            t.speed.distance_ratio = s.exploration_distance > 0.0 ? s.sprint_distance / s.exploration_distance : 1.0;
+            t.speed.height = s.sprint_height - s.exploration_height;
+            t.speed.shoulder = s.sprint_shoulder - s.exploration_shoulder;
+            t.speed.fov = s.sprint_fov - s.exploration_fov;
+        }
         return t;
     }
 
@@ -105,6 +118,14 @@ namespace dw::smoothwalker::follow
         auto swap_focus(bool on) -> bool { return m_focus.exchange(on); }
         auto swap_traversal(bool on) -> bool { return m_traversal.exchange(on); }
         auto swap_interior(bool on) -> bool { return m_interior.exchange(on); }
+        // Game thread, each engine tick: the Sprint camera as the tuner sees it (ModeTuner::mode_state). The two FOVs go
+        // in one word, so the hook never pairs one tick's exploring FOV with another tick's Sprint FOV.
+        auto set_sprint_view(const SprintView& v) -> void
+        {
+            m_sprint_fovs.store(pack(v.exploring_fov, v.sprint_fov), std::memory_order_relaxed);
+            m_sprint_fov_moves.store(v.fov_moves, std::memory_order_relaxed);
+            m_sprint.store(v.sprint, std::memory_order_relaxed);
+        }
 
         // Game thread: a camera-mode write landed; its FOV shows on the next camera update, so it crossfades, and its
         // distance glides in, so the wall clamp holds off meanwhile.
@@ -138,6 +159,9 @@ namespace dw::smoothwalker::follow
         std::atomic<bool> m_focus{false};     // a focus camera mode is blending in or active
         std::atomic<bool> m_traversal{false}; // a traversal camera mode is blending in or active
         std::atomic<bool> m_interior{false};  // the game's camera type is Interior
+        std::atomic<uint64_t> m_sprint_fovs{pack(NAN, NAN)}; // SprintView::exploring_fov (high word) and sprint_fov
+        std::atomic<bool> m_sprint_fov_moves{false};          // SprintView::fov_moves
+        std::atomic<bool> m_sprint{false};                    // SprintView::sprint: a Sprint-group mode is blending in or active
         std::atomic<bool> m_log_stats{false};
         std::atomic<uint64_t> m_frames{0};
         std::atomic<uint64_t> m_clamped{0};
@@ -165,6 +189,9 @@ namespace dw::smoothwalker::follow
             sw.focus = m_focus.load(std::memory_order_relaxed);
             sw.traversal = m_traversal.load(std::memory_order_relaxed);
             sw.interior = m_interior.load(std::memory_order_relaxed);
+            unpack(m_sprint_fovs.load(std::memory_order_relaxed), sw.sprint.exploring_fov, sw.sprint.sprint_fov);
+            sw.sprint.fov_moves = m_sprint_fov_moves.load(std::memory_order_relaxed);
+            sw.sprint.sprint = m_sprint.load(std::memory_order_relaxed);
             if (settings != m_seen_settings || sw.mode_write) ++m_generation;
             m_seen_settings = settings;
 
@@ -179,6 +206,20 @@ namespace dw::smoothwalker::follow
                 m_frames.fetch_add(1, std::memory_order_relaxed);
                 m_lag_sum.store(m_lag_sum.load(std::memory_order_relaxed) + report.shown_lag, std::memory_order_relaxed);
             }
+        }
+
+        static auto pack(float high, float low) -> uint64_t
+        {
+            uint32_t h = 0, l = 0;
+            std::memcpy(&h, &high, sizeof(h));
+            std::memcpy(&l, &low, sizeof(l));
+            return (static_cast<uint64_t>(h) << 32) | l;
+        }
+        static auto unpack(uint64_t word, float& high, float& low) -> void
+        {
+            const auto h = static_cast<uint32_t>(word >> 32), l = static_cast<uint32_t>(word);
+            std::memcpy(&high, &h, sizeof(high));
+            std::memcpy(&low, &l, sizeof(low));
         }
 
         // Any thread, lock-free (camera::Processor).

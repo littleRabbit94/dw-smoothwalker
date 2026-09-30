@@ -53,7 +53,8 @@ namespace rig
     constexpr int32_t TRANSLATION = 0x200;
     constexpr int32_t HALF_HEIGHT = 0x100;
 
-    // Processor output: the game's camera moved by `offset`, with the generation and transition the test sets.
+    // Processor output: the game's camera moved by `offset` and its FOV by `fov_add`, with the generation and transition
+    // the test sets.
     class Stub final : public dw::camera::Processor
     {
       public:
@@ -62,6 +63,7 @@ namespace rig
         uint64_t generation = 0;
         double transition = 0.0;
         dw::Vec3 offset{};
+        double fov_add = 0.0;
         bool wall_clamp = false;
         dw::camera::FrameIn last{};
         int calls = 0;
@@ -72,6 +74,7 @@ namespace rig
             ++calls;
             out.location = in.camera + offset;
             out.rotation = in.rotation;
+            out.fov_add = fov_add;
             out.generation = generation;
             out.transition = transition;
             out.wall_clamp = wall_clamp;

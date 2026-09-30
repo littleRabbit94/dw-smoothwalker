@@ -108,6 +108,7 @@ struct Smoothwalker::Impl
     std::mutex m_position_mutex;           // m_position
     modes::PositionTuning m_position{};
     std::atomic<uint64_t> m_position_generation{1};
+    std::atomic<bool> m_speed_blend{false};    // speed_blend on with camera_tuning: the tuner reports the Sprint camera each tick
     uint64_t m_position_applied_generation = 0; // game thread only
 
     std::chrono::steady_clock::time_point m_last_report{}, m_last_poll{};
@@ -301,6 +302,7 @@ struct Smoothwalker::Impl
         m_banner.enable(m_store.settings().show_banner);
         m_debug_overlay.store(m_store.settings().debug_overlay);
         m_debug_markers.store(m_store.settings().debug_markers);
+        m_speed_blend.store(m_store.settings().speed_blend > 0.0 && m_store.settings().camera_tuning);
         {
             auto* active = m_store.settings().preset != 0 ? m_store.find_preset(m_store.settings().preset) : nullptr;
             std::lock_guard guard(m_debug_mutex);
@@ -336,8 +338,9 @@ struct Smoothwalker::Impl
         auto* camera = m_core.player_camera();
         m_tuner.tick(m_core.view_updates(), m_core.view_seconds(), camera);
         // off: no per-tick GetState calls either
-        auto state = camera && m_processor.enabled() ? m_tuner.mode_state(camera) : modes::ModeState{};
+        auto state = camera && m_processor.enabled() ? m_tuner.mode_state(camera, m_speed_blend.load()) : modes::ModeState{};
         m_processor.set_aiming(state.aiming);
+        m_processor.set_sprint_view({state.exploring_fov, state.sprint_fov, state.fov_moves, state.sprint});
         if (state.combat != m_processor.swap_combat(state.combat) && dw::verbose())
             Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] combat camera {}\n"), state.combat ? STR("on") : STR("off"));
         if (state.focus != m_processor.swap_focus(state.focus) && dw::verbose())

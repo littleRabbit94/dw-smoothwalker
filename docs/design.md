@@ -364,14 +364,15 @@ fails the Nth access to reach each fault path. The store takes `settings::Files`
 | `curves` | 4 | `curve`, `follow_rate`, `follow_alpha`, frame-rate independence |
 | `wall` | 3 | the wall clamp |
 | `follow` | 15 | leash, restart, crouch hold, trail cap, `Influence`, the mode-write hold |
-| `pipeline` | 31 | gap, teleport, cut precedence, off and settled, crossfade, owned camera, glide, lease edge, layers, faults, odd `DeltaTime`, timing, seqlock |
+| `pipeline` | 32 | gap, teleport, cut precedence, off and settled, crossfade, owned camera, glide, lease edge, layers, faults, odd `DeltaTime`, timing, seqlock |
 | `authority` | 16 | claim results, renewal, expiry, eight layer slots, layer sums, re-key, uninstall |
 | `ini` | 19 | parse, sanitize ranges, missing keys, rewrite (layout, CRLF), number format, file read and write |
 | `presets` | 13 | built-ins, preset file parse, normalization, labels, slot file, manifest lines |
 | `store` | 44 | startup, reload rules (a) to (e), the Custom pin, slots, cycle, deferred write-back and retry, the pending file |
 | `panel` | 11 | golden strings of `format_panel`, every snap reason and influence name |
 | `markers` | 46 | the debug markers' numbers: the projection (MaintainY and X, major axis, constrained aspect, refusals), near-plane clipping, the pivots, the lift's fit, bisection and easing, the trail, the leash, label placement, hysteresis, the drawable gates and the layout |
-| `position` | 10 | `position_of` over the defaults and each built-in, equality, `written`, the tuned mode classes |
+| `position` | 12 | `position_of` over the defaults and each built-in, equality, `written`, the tuned mode classes, `shown_fov` per camera type |
+| `speed_blend` | 10 | the speed share's edges, the FOV weight and its refusals, the terms, the eased speed and restart, weight and context, the state-weight fallback, settings into the tuning, through the follow, walls, the processor's sprint view |
 | `session` | 2 | seeded sessions through the hook against `session_golden.txt`, and their coverage (below) |
 
 **The session suite** (`session_test.cpp`, 2026-09-29) succeeds the equivalence harness (stage 2 above). The
@@ -471,7 +472,7 @@ Measured live on the running game.
 Per group (exploring, sprinting, combat, focus, aiming, claw ride and anti-grav): distance %, height, shoulder
 and FOV. For every mode: a shoulder swap (`N`), the
 look up/down limits and a transition time. Indoors, four more on the Interior camera type (see "Indoors
-(`interior_*`)"). 56 settings on the menu page (the three safety keys and `game_lag_scale` left it on 2026-09-19; the safety keys stay in the ini; the four `interior_` position keys and the four focus and interior follow keys joined 2026-09-30), validated with the menu's
+(`interior_*`)"). 59 settings on the menu page (the three safety keys and `game_lag_scale` left it on 2026-09-19; the safety keys stay in the ini; the four `interior_` position keys, the four focus and interior follow keys and `speed_blend` joined 2026-09-30), validated with the menu's
 parser. The groups cover 23 `BP_CameraMode_*` classes; the finisher and shadowstep attack cameras are
 left alone. 22 are loaded at session start (21 checked 2026-09-16, `Shadowstep_2_Base` 2026-09-20).
 `CombatSprinting` is day Coen's camera for sprinting with a weapon drawn, and its class is loaded by day only
@@ -598,9 +599,9 @@ key, as shipped (`X Y Z` of `TargetOffset`):
 - Before these settings the Interior key already followed the group settings like every key, so indoor stayed in
   proportion to outdoor (Base_LongRange at 75 %: -142 against -188).
 
-### Speed blend (planned)
+### Speed blend (`speed_blend`)
 
-Planned 2026-09-30, not built. Asked for on Nexus (2026-09-21): the camera close while walking or standing, further
+Built and verified in game 2026-09-30. Asked for on Nexus (2026-09-21): the camera close while walking or standing, further
 out as the character speeds up, and no step between running and sprinting, so analog-movement mods (more than the
 game's fixed gaits) get a matching camera. It is not a new camera: the Sprint group's settings arrive with speed
 instead of all at once when the game pushes `Sprint`.
@@ -629,43 +630,63 @@ instead of all at once when the game pushes `Sprint`.
 reverses; out 103 to 95 over about 0.95 s, an ease. Both match the `Sprint` CDO's `BlendInArgs` / `BlendOutArgs`.
 `RebelCameraMode` reflects no blend weight or alpha, only `GetState()`.
 
-**The blend.** Per frame, in the follow processor (the mode writes land once per Apply and stay that way):
+**The blend.** Per frame, in the follow (`follow/speed_blend.hpp`, called from `Follow::step` after the wall clamp;
+the mode writes land once per Apply and stay that way):
 
 ```
-s     = smoothstep(start, full, smoothed horizontal pivot speed)   // 0 at walk, 1 from sprint up
+s     = smoothstep(start, full, eased horizontal pivot speed) * speed_blend   // 0 at walk, 1 from sprint up
 w     = the Sprint mode's blend weight, 0..1
 share = s * (1 - w) + w
 shown = exploration settings + (sprint settings - exploration settings) * share
 ```
 
 The mode writes already put the Sprint group into the Sprint modes, so the hook adds only
-`(sprint - exploration) * s * (1 - w)` on top of what the game built: its share fades as the game's own blend takes
-over, and at `w` = 1 the camera is exactly the Sprint group. With `s` = 1 the share is 1 whatever `w` reads, so the
-haste dip and any weight error at speed cost nothing. On a stop out of sprint `s` falls to 0 in about 0.3 s while the
-game blends out over 0.95 s, and the share follows `w`, the game's own curve.
+`(sprint - exploration) * s * (1 - w) * context` on top of what the game built: its share fades as the game's own
+blend takes over, and at `w` = 1 the camera is exactly the Sprint group. With `s` = 1 the share is 1 whatever `w`
+reads, so the haste dip and any weight error at speed cost nothing. On a stop out of sprint `s` falls to 0 in about
+0.3 s while the game blends out over 0.95 s, and the share follows `w`, the game's own curve. It blends the settings'
+difference only: with Sprint and Exploration set alike (Balanced) the slider changes nothing, and the game's own
+Sprint base (20 cm closer, +5 FOV) still arrives with `w`.
 
-- **`w` from the FOV.** `w = (game FOV - exploring FOV) / (sprint FOV - exploring FOV)`, clamped 0..1, from the
-  hook's own `DesiredView` before any edit. The tuner publishes the two FOVs as written: the live exploring mode's
-  (`Base_LongRange` 90 on Far, `Base_CloseRange` on Close) and `Sprint`'s. When the two are within
-  1 degree (a `sprint_fov` that cancels the game's +5), or while a camera type blend is in flight with an
-  `interior_fov` override on (the FOV then moves without a sprint), `w` comes from `GetState()` on the live
-  `Sprint` instance in the `mode_state()` pass, eased at the game's times (0.5 s in, 1.0 s out).
-- **Terms.** Distance: the arm (camera minus pivot) scaled by `sprint_distance / exploration_distance`, blended by
-  the share. Height: up by the difference in cm. Shoulder: out by the difference along the view's right on the
-  current side (`N`), left alone in centred modes. FOV: added by the difference.
+- **`w` from the FOV** (`sprint_weight_of_fov`). `(game FOV - exploring FOV) / (sprint FOV - exploring FOV)`,
+  clamped 0..1, from `FrameIn::fov`, the game's FOV before any edit. `ModeTuner::sprint_fovs` computes both as
+  written (`shown_fov` in `position.hpp`, from the last apply) for the live camera type, an `interior_fov` override
+  included: the newest live `Base_LongRange` or `Base_CloseRange` (Far or Close), else `Base_LongRange`'s base,
+  and `Sprint`. The processor gets them through `set_sprint_view` (one packed 64-bit atomic and two flags).
+- **The fallback.** When the two FOVs are within 1 degree (a `sprint_fov` that cancels the game's +5), or while
+  the FOV moves without a sprint (the game changed the camera type within the exploring mode's
+  `CameraTypeBlendArgs` time + 0.1 s, or the flip is away or back, and the FOV as written differs between the two
+  types), `w` is a smoothstep of a ramp toward `GetState()` of the live Sprint-group modes (blending in or active),
+  0.5 s up and 1.0 s down. The `mode_state()` pass calls that `GetState` only while `speed_blend` is above 0 and
+  `camera_tuning` is on.
+- **Terms** (`speed_blend_add`). Distance: back along the view by the arm's length behind the pivot times
+  `sprint_distance / exploration_distance - 1`. Height: up in world Z by the difference in cm. Shoulder: out along
+  the view's right by the difference, on the side the camera already sits, ramped over 5 cm of lateral offset, so a
+  centred mode gets none and an `N` glide does not pop. FOV: `FrameOut::fov_add`, added by `Pipeline::update_view`
+  while the processor is on and nobody owns the camera, before the crossfade and the API layers, clamped 5 to 170.
 - **Indoors too.** The blend runs on the Interior camera type as well; `interior_*` scales both modes' key 2 alike,
-  so the ratio and differences hold. The published FOVs are the ones as written for the live type, so an
-  `interior_fov` override does not read as a sprint.
-- **Walls.** The distance and height terms are multiplied by the wall clamp's factor (full at 0.85 of the recent
-  distance, none at 0.65 and closer), so collision pulling the camera in also takes the extra arm with it.
+  so the ratio and differences hold, and the FOVs as written for the live type keep an `interior_fov` override from
+  reading as a sprint.
+- **Walls.** The distance and height terms are scaled by `1 - wall_weight`, the clamp's own weight (full at 0.85 of
+  the recent distance, none at 0.65 and closer), so collision pulling the camera in also takes the extra arm with it.
+  With `wall_clamp` 0 they apply in full.
 - **Exploring only.** The share is multiplied by `1 - max(aim, combat, focus, traversal)`, the factors the follow
   already eases, so every context override wins.
-- **Speed.** Pivot displacement over world delta, horizontal only, eased (0.3 to 0.5 s) so turn dips and the
-  run-to-sprint step do not pump the camera. A cut resets it to the next frame's reading.
-- **Settings.** `speed_blend`, percent, the one new slider: 0 is today's camera, 100 the full share. `start` and
-  `full` as ini keys only, guessed at 150 (just above walk) and 558 (sprint), so run sits at about 75 to 80 %.
-  Presets stay at `speed_blend` 0 until each is reviewed: with it on, Cinematic's sprint +8 FOV and 110 % distance
-  show while running.
+- **Speed** (`SpeedBlend`). Pivot displacement over world delta, horizontal only, one frame's reading capped at
+  1500 cm/s, eased with a 0.4 s time constant; a cut takes the next frame's reading as is.
+- **Settings.** `speed_blend`, percent 0 to 100, on the page under Camera: Sprinting, and a preset key (0 in every
+  built-in, so no preset changes). `speed_blend_start` 150 and `speed_blend_full` 558, ini only, clamped 0 to 2000;
+  full at or below start makes the blend a step at start. A change bumps the follow's generation (`same_values`) and
+  crossfades; while `speed_blend` or `camera_tuning` is 0 the tuning stays neutral and bumps nothing.
+- **Guessed, not measured:** the 0.4 s speed easing, the 1500 cm/s cap, the fallback ramp's shape, the 5 cm shoulder
+  ramp. The easing read fine in play: the add wanders about 0.5 to 0.8 degree on turns at a run, not noticed.
+- **The debug overlay's lag and the markers' follow offset include the push**, since it is part of the follow's
+  output: tens of cm while running read as lag there.
+- **Verified in game 2026-09-30** (exploring 115 % / FOV +5, sprint 130 % / FOV +10, `speed_blend` 100,
+  `Smoothwalker.view()` every frame): run at about 460 added 4.1 to 4.27 degrees (the math: 0.855 x 5); run to sprint
+  went 99.2, 101.7, 105.0 with no step; a stop out of sprint followed the game down 105.0, 103.3, 98.6, 95.7, 95.0;
+  haste added 0; an analog partial stick at about 365 held +2.82; walking added 0. Doorways, walls, turns and the
+  pull-back read right to the player.
 
 Sprint works indoors, and from a standstill the Sprint camera blends in (0.5 s) before speed reaches 558, so the share
 follows `w` there.
@@ -767,19 +788,20 @@ FOV 100 mid-blend) can only shrink the addition, never overshoot it.
 
 ### Presets
 
-- **Presets carry 49 keys** (32 in 0.8.0; four `focus_` keys since 0.9.0, when focus left the combat group; a file or preset without them takes its combat values, in `parse_settings` and `fill_focus`; 36 from 2026-09-19, when `wall_clamp`, `reset_distance`, `reset_gap` and
+- **Presets carry 50 keys** (32 in 0.8.0; four `focus_` keys since 0.9.0, when focus left the combat group; a file or preset without them takes its combat values, in `parse_settings` and `fill_focus`; 36 from 2026-09-19, when `wall_clamp`, `reset_distance`, `reset_gap` and
   `position_transition` left: a preset is a camera look, and the first three are off the menu page, so a
   preset would have changed settings the player cannot see; 39 from 2026-09-22, when `aiming_follow` joined
   and `combat_follow` / `combat_rotation` were added, both new settings for the combat camera, split into
   position and turning like aiming's; 41 later that day, when `traversal_follow` / `traversal_rotation` were
-  added, the same pair for the traversal camera; 45 from 2026-09-30, when the four `interior_` keys were added; 49 the same day, with `focus_follow`, `focus_rotation`, `interior_follow` and `interior_rotation`): follow,
-  turning, the look limits, every group's distance, height, shoulder and FOV, and the indoor adjustment. Not `enabled`, `camera_tuning`, `shoulder_swap`, `show_banner`, `log_stats`, the key names,
+  added, the same pair for the traversal camera; 45 from 2026-09-30, when the four `interior_` keys were added; 49 the same day, with `focus_follow`, `focus_rotation`, `interior_follow` and `interior_rotation`; 50 with
+  `speed_blend`, the same day): follow, turning, the look limits, every group's distance, height, shoulder and FOV,
+  the indoor adjustment and the speed blend. Not `enabled`, `camera_tuning`, `shoulder_swap`, `show_banner`, `log_stats`, the key names,
   or `preset`. A preset file holding fewer keys loads and matches on the keys it has.
 - **Built-ins** (cycle order): Tight, Balanced, Cinematic. Follow values, horizontal retuned 2026-09-19 for the game's lag being off (it had
   added up to 30 cm of trail; before: 25 cm 18/s, 70 cm 8/s; Cinematic was tried at 145 cm 3/s, too much, and kept as it was): Tight (lag 40/20 cm,
   12/20 per s, constant), Balanced (the shipped default: 85/50 cm, 6.5/10 per s; 95 cm 5.5/s was tried and read too loose, smoothstep h), Cinematic
   (120/80 cm, 4/6 per s, ease in-out, floor 0.35, turning smoothed at 25). Balanced equals the shipped
-  `smoothwalker.ini` on all 49 keys.
+  `smoothwalker.ini` on all 50 keys.
 
   | Key | Tight | Balanced | Cinematic |
   |---|---|---|---|
@@ -2031,3 +2053,7 @@ Fix: an `install` re-key (a Lua mod restarting on its old state without `on_lua_
 Indoor camera (2026-09-30): four settings, `interior_distance`, `interior_height`, `interior_shoulder` and
 `interior_fov`, adjust the Interior camera type of the nine modes whose Interior key differs from Default, on top of
 each group's settings. Preset keys 41 to 45, menu page 48 to 52 settings. See "Indoors (`interior_*`)".
+
+Speed blend (2026-09-30): `speed_blend` brings the Sprint group's settings in with the character's speed, from a walk
+to a sprint, and hands over to the game's own Sprint blend with no step. `FrameIn` carries the game's FOV and
+`FrameOut` an added FOV. Preset keys 50, menu page 59 settings. See "Speed blend (`speed_blend`)".

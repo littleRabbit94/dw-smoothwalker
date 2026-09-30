@@ -214,6 +214,59 @@ TEST(pipeline, processor_moves_the_view)
     CHECK_EQ(snapshot.pivot[2], 100.0);
 }
 
+// The processor's FOV add (the speed blend): on the game's FOV, before the layers, faded like any change, clamped, and
+// neither on an implausible FOV nor while another mod owns the camera.
+TEST(pipeline, processor_fov_add)
+{
+    Fixture f;
+    f.stub.fov_add = 6.0;
+    f.core.update();
+    CHECK_EQ(f.stub.last.fov, 90.0);
+    CHECK_EQ(f.core.view.head.fov, 96.0f);
+    dw::camera::Snapshot snapshot{};
+    CHECK(f.core.pipeline.snapshot().read(snapshot));
+    CHECK_EQ(snapshot.shown.fov, 96.0);
+    CHECK_EQ(snapshot.game.fov, 90.0);
+
+    // A layer's FOV goes on top.
+    f.core.authority.install(&keys[0], "Zoom", "1");
+    dw::camera::Layer l;
+    l.fov_delta = 10.0;
+    f.core.authority.layer_set(&keys[0], l, 0.0);
+    f.core.update();
+    CHECK_EQ(f.core.view.head.fov, 106.0f);
+    f.core.authority.uninstall(&keys[0]);
+    f.core.update();
+    CHECK_EQ(f.core.view.head.fov, 96.0f);
+
+    // A change with the generation fades from the FOV shown.
+    f.stub.transition = 0.4;
+    f.stub.fov_add = 0.0;
+    ++f.stub.generation;
+    f.core.update();
+    CHECK_NEAR(f.core.view.head.fov, 96.0 - 6.0 * eased(0.25), 1e-4);
+    for (int i = 0; i < 4; ++i) f.core.update();
+    CHECK_EQ(f.core.view.head.fov, 90.0f);
+
+    // Clamped; nothing on an implausible FOV, which the processor reads as NAN.
+    f.stub.transition = 0.0;
+    f.stub.fov_add = 200.0;
+    f.core.update();
+    CHECK_EQ(f.core.view.head.fov, 170.0f);
+    f.core.set_game_view({-300, 0, 180}, 0, 0, 0, 0.5f);
+    f.core.update();
+    CHECK(std::isnan(f.stub.last.fov));
+    CHECK_EQ(f.core.view.head.fov, 0.5f);
+
+    // Owned: the game's view, FOV included.
+    f.core.set_game_view({-300, 0, 180});
+    f.stub.fov_add = 6.0;
+    f.core.authority.install(&keys[1], "Photo", "1");
+    CHECK_EQ(f.core.authority.claim(&keys[1], false, 0.0), dw::camera::ApiResult::Ok);
+    f.core.update();
+    CHECK(f.core.untouched());
+}
+
 // A generation change fades from the last shown offset to the new one over the processor's transition, eased with a
 // smoothstep on the world delta: offset A + (B - A) * smoothstep(elapsed / transition). 0.1 s steps (the rig's
 // 0.125 s delta, clamped) over 0.4 s.
