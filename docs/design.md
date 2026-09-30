@@ -668,7 +668,13 @@ game blends out over 0.95 s, and the share follows `w`, the game's own curve.
   show while running.
 
 Sprint works indoors, and from a standstill the Sprint camera blends in (0.5 s) before speed reaches 558, so the share
-follows `w` there. **Open:** a check with an analog-movement mod installed.
+follows `w` there.
+
+With `zTBODLocomotionController` (Nexus 493, its controller-analog file; measured 2026-09-30) partial stick holds
+speeds between walk and run while exploring (about 205, 238, 265 and 350 for 1 to 2 s each, and smooth ramps 260 to
+460); walk 131 stays the common low-stick plateau, and the run and sprint tops are unchanged. Combat reads FOV 90,
+below exploring, so `w` clamps to 0 there; since the hook only adds `s * (1 - w)`, a wrong `w` (combat, aiming's
+FOV 100 mid-blend) can only shrink the addition, never overshoot it.
 
 ## Presets and the Mod Menu page
 
