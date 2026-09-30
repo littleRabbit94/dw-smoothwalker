@@ -32,7 +32,9 @@ if(DW_BUILD_MOD)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/settings/store.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/ui/banner.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/ui/debug_overlay.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/ui/menu_probe.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/ui/marker_layer.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/ui/menu_probe.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/ui/umg.cpp")
     target_link_libraries(DWSmoothwalker PUBLIC UE4SS)
     # Record the PDB by file name rather than absolute path. The name is literal because the Visual Studio
     # generator escapes the percent signs in %_PDB%.

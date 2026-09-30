@@ -283,6 +283,9 @@ namespace
             view("api.snapshot.game", snapshot.game);
             view("api.snapshot.shown", snapshot.shown);
             r.put("api.snapshot.pivot", snapshot.pivot);
+            r.put("api.snapshot.half_height", snapshot.half_height);
+            r.put("api.snapshot.follow_offset", snapshot.follow_offset);
+            r.put("api.snapshot.follow_yaw", snapshot.follow_yaw);
             r.put("api.snapshot.qpc", snapshot.qpc);
             const Authority::Inspect a = api.inspect();
             r.put("api.blending", a.blending);
@@ -433,6 +436,7 @@ namespace
             r.put("panel.rate_h", feed.rate_h);
             r.put("panel.snap", static_cast<int>(feed.snap));
             r.put("panel.snap_age", feed.snap_age);
+            r.put("panel.snap_time", feed.snap_time);
             const Owner owner = m_core->camera_owner();
             const std::string& mod = owner.mod;
             const double lease = mod.empty() ? NAN : owner.lease;

@@ -39,7 +39,7 @@ namespace dw::smoothwalker::settings
     // assignment line (a commented-out one does not count; one with a bad value does, and the flush rewrites it)
     // gets "key = value ; comment" after the line of the nearest earlier NUMERIC_KEYS entry the file has, else
     // after the last line. Every other byte is kept, the newline style and a missing final newline included.
-    // debug_key is added the same way, after debug_overlay: not a ConfigKey, but a blank line to fill in is how a
+    // debug_key is added the same way, after debug_markers: not a ConfigKey, but a blank line to fill in is how a
     // player finds it. The older key names predate this writer and are in every file it meets.
     // Returns the new content and the added keys.
     auto with_missing_keys(const std::string& content, const Settings& s) -> std::pair<std::string, std::vector<std::string>>;

@@ -188,7 +188,7 @@ internal structure, not a packaging line: shipping the core as a second DLL is d
 | Side | Files | Owns |
 |---|---|---|
 | Core | `camera/core.hpp` / `core.cpp` (the component), `camera/hook.hpp` / `hook.cpp` (slot 214 and the image-level statics), `camera/pipeline.hpp` / `pipeline.cpp` (the hook side and `CoreApi`), `camera/authority.hpp` / `authority.cpp` (the API's state), `camera/lua_api.hpp`, `camera/api.hpp`, `camera/frame.hpp` (with `Snap`), `camera/snapshot.hpp`, `camera/clock.hpp`, `camera/guarded.hpp` / `guarded.cpp` | Slot 214 and its pin, the `Pipeline` and the `Authority` (the Core's own instances, with `CoreApi` over both), player and camera discovery, `Pipeline::m_view_updates` / `m_view_seconds`, cuts, the crossfade, layers, the write and the API snapshot, `claim` / `release` / `owner`, `view()` / `live()`, the Lua injection, the processor and listener slots |
-| Smoothwalker | `smoothwalker/smoothwalker.hpp` / `smoothwalker.cpp` (the component: orchestration, the keys, the `Listener`, `publish`, `apply_position`, the panel's gathering), `smoothwalker/follow/` (`processor.hpp`, `follow.hpp` with `Influence`, `curves.hpp`), `smoothwalker/settings/` (`settings.hpp`, `ini.hpp` / `ini.cpp`, `presets.hpp` / `presets.cpp`, `store.hpp` / `store.cpp`), `smoothwalker/modes/` (`position.hpp`, `mode_tuner.hpp` / `mode_tuner.cpp`), `smoothwalker/ui/` (`banner.hpp` / `banner.cpp`, `menu_probe.hpp` / `menu_probe.cpp`, `panel.hpp`, `debug_overlay.hpp` / `debug_overlay.cpp`) | The follow as a processor, `SettingsStore` (`smoothwalker.ini`, presets and slots, the write-back), mode classification and writes, the flip, the lag switch, other mods' writes, keys, banners, the Mod Menu probe, the debug overlay |
+| Smoothwalker | `smoothwalker/smoothwalker.hpp` / `smoothwalker.cpp` (the component: orchestration, the keys, the `Listener`, `publish`, `apply_position`, the panel's and the markers' gathering), `smoothwalker/follow/` (`processor.hpp`, `follow.hpp` with `Influence`, `curves.hpp`), `smoothwalker/settings/` (`settings.hpp`, `ini.hpp` / `ini.cpp`, `presets.hpp` / `presets.cpp`, `store.hpp` / `store.cpp`), `smoothwalker/modes/` (`position.hpp`, `mode_tuner.hpp` / `mode_tuner.cpp`), `smoothwalker/ui/` (`banner.hpp` / `banner.cpp`, `menu_probe.hpp` / `menu_probe.cpp`, `panel.hpp`, `debug_overlay.hpp` / `debug_overlay.cpp`, `markers.hpp`, `marker_layer.hpp` / `marker_layer.cpp`, `umg.hpp` / `umg.cpp`) | The follow as a processor, `SettingsStore` (`smoothwalker.ini`, presets and slots, the write-back), mode classification and writes, the flip, the lag switch, other mods' writes, keys, banners, the Mod Menu probe, the debug overlay, the debug markers |
 | Shared, header-only | `common/math.hpp`, `camera/wall.hpp`, `common/live_ref.hpp`, `common/active_slot.hpp`, `common/log.hpp`, `common/text.hpp` | Math, the wall clamp, `LiveRef`, UTF-8 and wide string conversion, `ActiveSlot` (a pointer other threads call through and the count of calls in flight through it) with `wait_for_zero`, the verbose flag `dw::g_verbose` (the one static of the shared files, written at every construction) |
 
 Core files include no Smoothwalker header; Smoothwalker's include only `camera/api.hpp` (and through it
@@ -215,13 +215,14 @@ the seam: both sides are one DLL built by one compiler.
 | `set_cut_thresholds(reset_distance, reset_gap)` | any but the hook (exclusive SRW lock) | A change bumps the core's generation and crossfades; the core starts at 500 cm / 0.25 s |
 | `set_diagnostics(flags)` | any | `DIAG_VERBOSE` (the core's verbose lines), `DIAG_HOOK_TIMING` (log_stats times the hook) |
 | `player_camera()` | any; dereference on the game thread only | The camera component, or null |
-| `player_controller()` | game thread | Checked live this tick, or null (banners, the overlay) |
+| `player_controller()` | game thread | Checked live this tick, or null (banners, the overlay, the markers) |
 | `player_known()` | any | A controller is held (banners dropped without a player) |
 | `view_updates()`, `view_seconds()` | any | The flip's stages and its blend-time restore run on these |
 | `camera_live()` | any | The player camera updated within 0.25 s (keys, the write-back) |
 | `game_thread_id()` | any | 0 before the first engine tick (`note_new` writes a mode only on the game thread) |
 | `take_hook_timing(calls, us)` | any | log_stats: the hook's half of the report line, then zeroed |
-| `read_debug()` | any, relaxed | A `DebugFeed`, the overlay's feed: keep shares, rate, influence, lag on screen, last snap and its age, glide |
+| `read_debug()` | any, relaxed | A `DebugFeed`, the overlay's feed: keep shares, rate, influence, lag on screen, last snap, its age and its `snap_time` (on the clock of `ViewFeed::now`), glide |
+| `read_view(out)` | any (the snapshot's seqlock read and one clock read) | A `ViewFeed`, the markers' feed: the game's and the shown view, pivot, `half_height`, `follow_offset`, `follow_yaw`, `age` and `now`; `false` before the first publish or when a write was in flight on every try ("Debug markers") |
 | `camera_owner()` | any (takes the Lua API's mutex briefly) | An `Owner`: the owner's mod name (empty for nobody) and lease (NAN without one), as `owner()` reads them |
 
 Until 2026-09-29 the seam was a C table (`dwcc_get_api(version)` returning a `dw::camera::Api` of function
@@ -332,9 +333,9 @@ runs everything and exits non-zero on a failed check or a suite with no tests. B
 **What `dw_unit` compiles.** Product sources: `camera/authority.cpp`, `camera/guarded.cpp`, `camera/hook.cpp` (its
 UE4SS log include resolves to a sink in `tests/unit/session/`, on that file's include path only), `camera/pipeline.cpp`,
 `smoothwalker/settings/ini.cpp`, `presets.cpp` and `store.cpp`. Product headers: `follow/*` (`processor.hpp` with
-`publish_view`), `camera/wall.hpp`, `common/math.hpp`, `common/text.hpp`, `modes/position.hpp`, `ui/panel.hpp`. What
+`publish_view`), `camera/wall.hpp`, `common/math.hpp`, `common/text.hpp`, `modes/position.hpp`, `ui/panel.hpp`, `ui/markers.hpp`. What
 includes other UE4SS headers stays out (`core.cpp`, `mod.cpp`, `smoothwalker.cpp`, `mode_tuner.cpp`, `banner.cpp`,
-`menu_probe.cpp`, `debug_overlay.cpp`): the game covers those.
+`menu_probe.cpp`, `debug_overlay.cpp`, `marker_layer.cpp`, `umg.cpp`): the game covers those.
 
 **Injected seams.** `Clock` (`camera/clock.hpp`) is two function pointers, `now()` and `frequency()`; `Pipeline` and
 `Authority` each take one (`QPC_CLOCK` by default), so a test moves the ticks itself and every clock read stays at its place in
@@ -355,6 +356,7 @@ fails the Nth access to reach each fault path. The store takes `settings::Files`
 | `presets` | 13 | built-ins, preset file parse, normalization, labels, slot file, manifest lines |
 | `store` | 44 | startup, reload rules (a) to (e), the Custom pin, slots, cycle, deferred write-back and retry, the pending file |
 | `panel` | 11 | golden strings of `format_panel`, every snap reason and influence name |
+| `markers` | 46 | the debug markers' numbers: the projection (MaintainY and X, major axis, constrained aspect, refusals), near-plane clipping, the pivots, the lift's fit, bisection and easing, the trail, the leash, label placement, hysteresis, the drawable gates and the layout |
 | `position` | 10 | `position_of` over the defaults and each built-in, equality, `written`, the tuned mode classes |
 | `session` | 2 | seeded sessions through the hook against `session_golden.txt`, and their coverage (below) |
 
@@ -365,7 +367,7 @@ toggle, publishes, mode writes, the mode flags, cuts for every reason, two API c
 releases, uninstalls, re-keys and layers, log_stats takes and overlay reads) drives a `Pipeline` and an `Authority`
 with `CoreApi` over both, the `FollowProcessor` registered through it, and every camera update through
 `get_camera_view_hook` on a slot of the test's. Each event's record (the view bytes the hook left, everything the hook
-publishes, the API state, the stats and overlay reads, every NaN of a float field as one value) and its count of
+publishes, the API state, the stats and overlay reads, every NaN of a float field as one value; the record includes `api.snapshot.half_height`, `follow_offset` and `follow_yaw`, and `panel.snap_time`) and its count of
 clock reads feed one FNV-1a 64 hash per seed; seeds 1 to 8 x 20,000 frames must equal `tests/unit/session_golden.txt`.
 The second test sums coverage over the eight seeds: every restart reason, crossfades, glides, faults, claims,
 releases, layer sets and re-keys. About 1.2 s in Release, 2.6 s in Debug.
@@ -377,6 +379,8 @@ or the follow re-records in the commit that makes it, and that commit's message 
 without one is a regression. Recorded 2026-09-29 while the harness passed on the same tree (8 x 300,000 and
 8 x 20,000 frames). The harness's three planted changes fail it: the crossfade eased linearly (all 8 seeds), the
 follow's wall-clamp hold at 0.35 s (seed 3 only), mode writes not folded into the processor's generation (all 8).
+Re-recorded 2026-09-30 for the debug markers' fields ("Debug markers"): with the fields added but not recorded the
+test passed on the old hashes, and only then were the four puts added and the file re-recorded.
 
 ## Camera modes and position tuning
 
@@ -1170,7 +1174,7 @@ Consumers are keyed by their main `lua_State*` (from `LUA_RIDX_MAINTHREAD`), nev
 | `Smoothwalker.enabled()` | the mod's live switch |
 
 The hook publishes the snapshot once per player-camera update through a seqlock (`ViewSnapshot::m_seq` in `camera/snapshot.hpp`, odd while writing,
-one writer): the game's view as read, what was handed back (equal when off), the pivot, a QPC stamp. Off and
+one writer): the game's view as read, what was handed back (equal when off), the pivot, the capsule's half height, the follow's lag and yaw (for the debug markers, "Debug markers"), a QPC stamp. Off and
 settled, the hook still publishes game = shown, without a pivot. All slice-1 calls read atomics only, so they
 are safe from any thread, including a mod's top level and `LoopAsync`; the game-thread id is captured on the
 engine tick for the slices that will need it.
@@ -1394,8 +1398,7 @@ source at `97b7e501`, and the public source of Combat Camera - Configurable 3.1.
 ## Debug overlay
 
 Since 0.10.0 (`src/smoothwalker/ui/`: `panel.hpp` lays the text out, `debug_overlay.hpp` / `.cpp` builds the widget). `debug_overlay = 1` (ini, or Debug overlay on the Mod Menu page) puts
-a text panel at the top right of the screen with the live camera state; `debug_key` (ini only, unbound by
-default) flips the same setting and writes it back like the toggle key. Off by default. Built for tuning
+a text panel at the top right of the screen with the live camera state; `debug_key` shows and hides it together with the debug markers ("Debug markers"). Off by default. Built for tuning
 presets and for bug reports: one screenshot shows what the follow, the game's modes and the API were doing.
 
 ### What it shows
@@ -1504,6 +1507,99 @@ Switched off, `RemoveFromParent` and the references go; switched on again, a new
   which `CreateWidget` accepts only in Shipping and Test builds (`ValidateUserWidgetClass` is compiled out,
   `UserWidget.cpp` 2465-2477 in 5.5.4); proven working in this game's shipping build by the Lua probe.
 
+## Debug markers
+
+Not released yet (`src/smoothwalker/ui/`: `markers.hpp` holds the numbers (projection, pivots, lift, trail, layout), `marker_layer.hpp` / `.cpp` builds and moves the widgets, `umg.hpp` / `.cpp` are the reflection helpers it shares with the overlay). `debug_markers = 1` (ini, or Debug markers in the Mod Menu page's Debug group) draws the follow's trail on the character: the game's pivot, the pivot the shown camera follows, and the distance between them. Off by default; presets never set it. Built for tuning presets and for bug reports: the trail reads on the character where the panel ("Debug overlay") gives numbers.
+
+`debug_key` (ini only, unbound by default, written back like the toggle key) flips the panel and the markers together: either one on turns both off, both off turns both on. The two settings stay independent otherwise.
+
+### What it draws
+
+Sizes are slate units (a 30-unit shape read small at 2880x1800, viewport scale 0.833); colours are RGB in 0-1. "Line colour" is off-white (0.95, 0.94, 0.91) at 0.75 opacity.
+
+| Marker | Shows | Look | Shown |
+|---|---|---|---|
+| Dot | the game's pivot, on the marker plane | amber (0.94, 0.62, 0.15), filled, 20 | always |
+| Ring | the followed pivot, `pivot - follow_offset`, in full 3D, so a vertical lag lifts it off the plane | teal (0.36, 0.79, 0.65), hollow, 40, outline 4, opacity `0.35 + 0.65 * keep_follow` | always |
+| Tick | the ring's height above or below the plane | line colour, 4 thick | `abs(lag_v)` over 2 cm, hidden under 1.5 |
+| Lag line and label | dot to ring; the label reads the horizontal lag as `NN cm` | line colour, 4 thick; the label in line colour, font 20 | `lag_h` over 5 cm, hidden under 4 |
+| Leash | the lag limit: a circle round the dot of radius `max_lag_h * keep_follow` | 32 beads, 10, line-colour fill with a dark rim (black at 0.7, 2 wide) | radius 1 cm or more; `max_lag_h` 0 hides it |
+| Trail | the followed pivot's path over the last second, on the plane | teal dots, 25 at most, one sample each 0.04 s, size 11 down to 6 and opacity 0.9 down to 0.1, linear in age | cleared on every snap |
+| Turn arrows | 60 cm from the dot: the game's yaw and `follow_yaw` | grey (0.53, 0.53, 0.50) and teal, 4 thick | `rotation_smoothing` on and `keep_turn` above 0 |
+
+The two hysteresis pairs keep a lag near a threshold from flickering. The label sits beside the lag line's midpoint along the line's normal (the side that points right, or up for a level line), far enough out that its box clears the ring: a short line has the dot and the ring on top of each other, and a label above the midpoint covered them. The box is estimated, with no layout call: 0.55 em per glyph, one point being 4/3 slate units. Every horizontal marker lies on one plane at the character's feet plus a lift ("The marker plane"); the ring alone leaves it by the vertical lag.
+
+### When it draws
+
+All of these, else the layer is collapsed with one call and its state (trail, lift, hysteresis) is cleared:
+
+- **Smoothwalker on** (`FollowProcessor::enabled`). Off, the hook still publishes a pivot while another mod's layer is set or the toggle-off fade runs, and nothing is being followed.
+- **A readable view feed, 0 to `LIVE_WINDOW` (0.25 s) old.** It hides during pauses, cutscenes and the free camera, where the camera stops updating.
+- **No other mod holding the camera** (`CameraCore::camera_owner`).
+- **A finite pivot and `follow_offset`.**
+- **A viewport of 64 px or more on both axes.** `GetViewportSize` reads 1x1 without a viewport.
+
+Per primitive: a point less than 1 cm in front of the camera (or behind it) is hidden. A line is clipped in 3D to 10 cm in front of the camera (an end nearer moves along the segment to that depth); one with both ends nearer, or with ends that coincide on screen, is hidden.
+
+### Where the numbers come from
+
+- **The snapshot.** The hook adds three fields to the API snapshot (`camera/snapshot.hpp`): `half_height` (the capsule's), `follow_offset` (`m_view.out_offset`) and `follow_yaw` (the yaw of `out_rotation` times the game's rotation). Both follow numbers are taken before other mods' layers, so the ring and the label equal the panel's lag ("Debug overlay", the lag row). All three are NAN when no pivot is published (the off-and-settled path).
+- **One clock read.** `CameraCore::read_view(ViewFeed&)` returns the game's and the shown view, the pivot, the three fields, `age` and `now`, the last two from one clock read. `DebugFeed::snap_time` is on that same clock, so the trail's snap detection compares like with like: a snap later than the last one seen clears the trail. The debug feed and the snapshot are two reads, so a frame may pair values from two updates.
+- **Only `api.hpp`.** The Smoothwalker side reaches the core through `ViewFeed` and `DebugFeed` alone; `markers.hpp` includes `camera/api.hpp` and `common/math.hpp`.
+- **Gathering.** `Impl::marker_scene` (game thread, each engine tick while the layer is built): the two feeds, `camera_owner`, the processor's switch, `max_lag_h` and `rotation_smoothing` from the follow's settings under their shared lock. `MarkerLayer` reads the rendered view itself ("Projection").
+
+### Projection
+
+The markers project as the engine does, with UE 5.5.4 `FMinimalViewInfo::CalculateProjectionMatrixGivenViewRectangle` (`CameraStackTypes.cpp`) as the source. With W and H the viewport in pixels and `AspectRatio` the view's:
+
+- **`bMaintainXFOV`** is (W > H and the axis constraint is MajorAxisFOV) or MaintainXFOV. True: `tan_x = tan(fov/2)`, `tan_y = tan_x * H / W`. Else `half = atan(tan(fov/2) / AspectRatio)`, `tan_y = tan(half)`, `tan_x = tan_y * W / H`.
+- **`bConstrainAspectRatio`:** the view keeps its own aspect ratio in the centred sub-rectangle of the viewport (black bars), `tan_x = tan(fov/2)`, `tan_y = tan_x / AspectRatio`.
+- **The point:** `x = rect_x + rect_w/2 * (1 + dot(d, right) / (depth * tan_x))`, `y = rect_y + rect_h/2 * (1 - dot(d, up) / (depth * tan_y))`, with `d` the world offset from the camera, `depth = dot(d, forward)`, the axes from the view's rotation (`FRotationMatrix`); the pixels are then divided by `GetViewportScale`.
+
+This game (`LocalPlayer.AspectRatioAxisConstraint` 0, MaintainYFOV; the POV's `AspectRatio` 1.7778; `bConstrainAspectRatio` false) is the else case, which matters off 16:9: without the MaintainYFOV correction the markers were about 11 % off at 2880x1800 (16:10). Verified 2026-09-30: the projector matched `WidgetLayoutLibrary::ProjectWorldLocationToWidgetPosition` within 0.53 slate units on 5 points (2 of them off screen) at 2880x1800, viewport scale 0.833.
+
+The view projected with is `PlayerCameraManager.CameraCachePrivate.POV`, the rendered view after the camera modifiers (shakes, FOV kicks), because the hook's own view is before them. Location, Rotation and FOV, and `AspectRatio` and `bConstrainAspectRatio`, are read member by member from it on every drawn tick; the axis constraint from `PlayerController.Player`. What cannot be found: the measured values above with one warning for the settings, the feed's shown view with one warning for the POV. World positions come from the feed either way. A view number that is not finite, an FOV outside (0, 180), a viewport under 64 px or a scale not above 0 projects nothing.
+
+### The marker plane
+
+At the default camera (202 cm from the pivot, 50 cm above it, pitch 0, half height 96) the character's feet project 119 % of the way down the screen, off it (measured 2026-09-30). So the horizontal markers do not sit on the feet: they sit on a plane at feet plus a lift, and the lift is solved each frame. A plane 60 cm up clips the 85 cm leash, 90 cm fits it, and 120 cm is nearly edge-on.
+
+- **Rule.** The lowest lift that keeps the dot and every leash bead above 92 % of the screen height: bisection over 0 to the maximum, 10 steps, 0 when the feet already fit. Points nearer than 1 cm are left out of the test. A camera pitched over the character makes the test non-monotonic, so the result is a fitting lift, not guaranteed the smallest.
+- **Cap.** 40 cm below the projection camera, so the plane never goes edge-on; when even that does not fit, the cap is used.
+- **Easing.** The lift drawn moves `1 - exp(-6 * dt)` of the way to the target each frame. It lands at once after a snap, on the first frame after the markers appear, and when the clock went back.
+- **The trail** stores x and y only and is drawn on the current plane, so a change of lift moves it whole.
+
+`markers_test.cpp` puts the target lift for that scene at 90.8 cm (threshold 90.7 cm, one bisection step of 0.1).
+
+### Building the layer
+
+UMG from C++ through reflection, the panel's idiom ("Building the panel"; the lookup and write helpers are `ui/umg.hpp`'s). Verified live 2026-09-30:
+
+1. `WidgetBlueprintLibrary::Create` gives a `UserWidget`. A `CanvasPanel` constructed with the widget tree as outer becomes `WidgetTree.RootWidget`, before `AddToViewport`. With the canvas slot's default anchors it fills the viewport.
+2. Every marker is a `Border` constructed with the tree as outer and added with `CanvasPanel:AddChildToCanvas`; its slot is centred with `SetAlignment (0.5, 0.5)`, so a position is a centre. The label is a `TextBlock` in an auto-sized slot.
+3. `Background.DrawAs` 4 (RoundedBox) with `OutlineSettings.RoundingType` 1 (HalfHeightRadius) draws a circle. A ring is the outline (width and colour, `bUseBrushTransparency` false) over a `BrushColor` of alpha 0, so the outline stays whatever the fill's alpha. A bead is a filled circle with a dark outline (2 wide, drawn inside the box). All of it is written before `AddToViewport`.
+4. `SetRenderTransformAngle` turns a thin `Border` into a line, of the length of its width.
+5. `AddToViewport(999)`, under the panel's 1000, then `IsInViewport`: a refusal is a failed build. Visibility is `HitTestInvisible` (3) or Collapsed (1).
+
+Missing functions, classes or parameter layouts turn the markers off with one warning; missing styling properties are named in one warning and left at the engine default.
+
+### Threading and cost
+
+- **Game thread only.** Built, moved and removed from the engine tick (`Impl::on_tick`, after the overlay, from the core's `Listener::tick`). The hook touches no UObject for it: it only publishes the snapshot, now with three more numbers.
+- **Only changes are sent.** Positions and widths are rounded to 0.5 slate units and angles to 0.1 degree before the compare, so sub-pixel jitter sends nothing; opacity, visibility and the label text are sent when they differ. Struct members (vector components, POV members, colour channels) are found once at resolve. A hidden layer costs the gather and nothing else; a drawn tick adds `GetViewportSize`, `GetViewportScale` and the POV reads. Unlike the panel's 250 ms refresh, it runs every engine tick.
+- **Lifecycle** as the overlay's. Resolved once; built lazily, only with a player controller and camera (the main menu and a load collapse it); a failed build is retried every 2 s with one warning; `forget_world()` drops the references (the level change takes the layer off the viewport); `RemoveFromParent` when the setting goes off; every tick checks that the widgets are alive and `IsInViewport` is asked every 250 ms, and a layer the game removed or collected is rebuilt. Nothing is called from the destructor.
+
+### Known limits
+
+- **Hot reload freezes it.** The destructor must not touch UMG, so a layer on screen at a Ctrl+R keeps its last frame until the next level change removes it, as the panel does; the reloaded DLL builds a new one over it.
+- **A camera component's aspect-ratio-axis override is not read** (`bOverrideAspectRatioAxisConstraint`); this game does not use it.
+- **Aiming puts the pivot at the screen's bottom left**, so the markers draw over the HUD's health bar there.
+- **The label's width is an estimate**, so its distance from the ring is approximate.
+
+### Checked in game
+
+2026-09-30: walk, sprint, stop, strafe, jump, crouch, aim, combat, a parry, fast travel (the trail cleared), pause, photo mode, a cutscene, the F8 key both ways, the Mod Menu toggle, and the toggle key hiding the markers at once.
+
 ## Logging
 
 Four levels since 0.10.0. `LogLevel` only picks the UE4SS console color (`DynamicOutput/OutputDevice.hpp`:
@@ -1512,11 +1608,11 @@ line says what stopped in its own words ("mod inactive", "smoothing inactive").
 
 - **Normal**, the default log: one load line (version, on or off, saved slots, presets from the folder),
   `GetCameraView hooked`, `API consumer '{}' registered`, and changes the player made: the toggle, shoulder
-  swap, debug overlay key, a saved or loaded preset, a key ignored, settings applied, missing ini keys added,
+  swap, the debug key (panel and markers), a saved or loaded preset, a key ignored, settings applied, missing ini keys added,
   pending settings applied, and a camera value another mod wrote taken as a mode's base. The `log_stats`
   report is Normal too, but opt-in.
 - **Warning**: something is off or falls back, the mod still runs. A missing property with a fallback, a
-  failed write, a skipped preset, banners or the overlay off, and at unload `unload: still running after 5 s: <list>;
+  failed write, a skipped preset, banners, the overlay or the markers off, and at unload `unload: still running after 5 s: <list>;
   both components left allocated` (a Lua, hook or follow call stalled past the 5 s waits; the list names each).
 - **Error**: the mod or the follow cannot work. Camera class defaults missing, slot 214 not overridden, a
   failed `VirtualProtect`, `RelativeLocation` or the `ComponentToWorld` translation not found, the UE4SS
@@ -1524,13 +1620,13 @@ line says what stopped in its own words ("mod inactive", "smoothing inactive").
 - **Verbose**, only with `log_verbose = 1` (ini only): player discovery, the controller found, not found yet
   and gone lines, `following`, the translation offset, `Mod Menu open`, the presets-folder lines, the camera
   mode layout, `Base_LongRange`, `camera position applied` with its duration, a mode loaded late, the debug
-  overlay shown, and combat and traversal camera on and off. The flag is `dw::g_verbose`
+  overlay and markers shown, and combat and traversal camera on and off. The flag is `dw::g_verbose`
   (`common/log.hpp`), one atomic for both components, written by Smoothwalker's settings at every construction and publish
   (and by `CameraCore::set_diagnostics`, `DIAG_VERBOSE`, from the same publish); it gates the core's discovery, offset and hook lines too. At startup it is read from `smoothwalker.ini` before
   `load_presets_locked()`, which runs ahead of the full settings load and logs presets-folder lines.
 
 The diagnostic switches are `log_stats` (Mod Menu page: per-frame hook cost, mean lag and wall clamp share
-every 5 s), `log_verbose` (ini only) and `debug_overlay` with `debug_key` (see "Debug overlay").
+every 5 s), `log_verbose` (ini only) and `debug_overlay` and `debug_markers` with `debug_key` (see "Debug overlay" and "Debug markers").
 
 ## Known limits
 
@@ -1550,6 +1646,8 @@ every 5 s), `log_verbose` (ini only) and `debug_overlay` with `debug_key` (see "
 - **The `FindFirstOf` fallback's cost** for one object walk is not measured.
 - **The debug overlay** freezes across a hot reload, shows through photo mode and a hidden HUD, and lines up
   only roughly in Roboto; see "Debug overlay".
+- **The debug markers** freeze across a hot reload, draw over the HUD's health bar while aiming and place their label
+  from an estimated text width; see "Debug markers".
 
 ## Deferred
 
@@ -1580,7 +1678,7 @@ follow, so an existing player adds one requirement and keeps `smoothwalker.ini` 
 |---|---|
 | Slot 214 hook and its pin, player and camera discovery, the view update count and world seconds | The follow, a processor of the core |
 | Cuts (gap, teleport, player swap, API cut), the crossfade, layers | `mode_tuner.hpp`: mode classification (aiming, combat, traversal), the writes, the flip, the lag switch, other mods' writes |
-| `claim` / `release` / `owner`, `view()` / `live()`, the Lua injection, the processor list | Presets and slots, `smoothwalker.ini`, the Mod Menu page, keys, banners, the debug overlay |
+| `claim` / `release` / `owner`, `view()` / `live()`, the Lua injection, the processor list | Presets and slots, `smoothwalker.ini`, the Mod Menu page, keys, banners, the debug overlay and markers |
 
 Alone, the core is the game: the hook takes today's "off and settled" path (no processor, no layer), writes
 nothing, and nothing writes a camera mode.

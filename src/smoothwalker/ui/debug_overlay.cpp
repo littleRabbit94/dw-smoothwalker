@@ -1,8 +1,9 @@
 // The debug overlay's widget (ui/debug_overlay.hpp): reflection lookups, the UMG panel's construction and its
-// text updates. Bodies moved from debug_overlay.hpp unchanged.
+// text updates. Bodies moved from debug_overlay.hpp unchanged; the reflection helpers are ui/umg.hpp's.
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
 #include "debug_overlay.hpp"
+#include "umg.hpp"
 #include "../../common/log.hpp"
 
 #include <cstring>
@@ -20,10 +21,10 @@ namespace dw::smoothwalker::ui
 {
     using namespace RC;
     using namespace RC::Unreal;
+    using namespace umg;
 
 namespace
 {
-    constexpr size_t PARAMS = 256; // every params buffer here; checked against reflection
     constexpr int32_t Z_ORDER = 1000;
     constexpr double INSET = 16.0;            // slate units from the right and top edges
     constexpr uint8_t HIT_TEST_INVISIBLE = 3; // ESlateVisibility: drawn, never takes input
@@ -31,93 +32,6 @@ namespace
     constexpr double PADDING = 8.0;
     constexpr double BACKGROUND[4]{0.0, 0.0, 0.0, 0.6};
     constexpr double TEXT_COLOR[4]{0.92, 0.92, 0.88, 1.0};
-
-    auto find_property(UStruct* owner, const wchar_t* name) -> FProperty*
-    {
-        if (!owner) return nullptr;
-        for (FProperty* property : TFieldRange<FProperty>(owner))
-        {
-            // FNames compare without case, and the stored spelling is the first one registered: the game
-            // has SetPositionInViewport's parameter as "position".
-            if (_wcsicmp(property->GetName().c_str(), name) == 0) return property;
-        }
-        return nullptr;
-    }
-
-    // A member of a struct-typed property.
-    auto member(FProperty* of, const wchar_t* name) -> FProperty*
-    {
-        auto* as_struct = CastField<FStructProperty>(of);
-        return as_struct ? find_property(as_struct->GetStruct().Get(), name) : nullptr;
-    }
-
-    // The offset of a pointer-sized parameter or property, or -1.
-    auto pointer_at(UStruct* owner, const wchar_t* name) -> int32_t
-    {
-        auto* property = find_property(owner, name);
-        return property && property->GetElementSize() == static_cast<int32_t>(sizeof(void*)) ? property->GetOffset_ForInternal() : -1;
-    }
-
-    auto value_in(FProperty* property, void* container) -> uint8_t*
-    {
-        return static_cast<uint8_t*>(container) + property->GetOffset_ForInternal();
-    }
-
-    // A float or a double property; false for anything else, which is left alone.
-    auto write_real(FProperty* property, void* container, double value) -> bool
-    {
-        if (!property) return false;
-        if (CastField<FDoubleProperty>(property))
-        {
-            memcpy(value_in(property, container), &value, sizeof(value));
-            return true;
-        }
-        if (CastField<FFloatProperty>(property))
-        {
-            auto single = static_cast<float>(value);
-            memcpy(value_in(property, container), &single, sizeof(single));
-            return true;
-        }
-        return false;
-    }
-
-    auto is_real(FProperty* property) -> bool
-    {
-        return CastField<FDoubleProperty>(property) || CastField<FFloatProperty>(property);
-    }
-
-    // X and Y both float or double: anything else would leave them zero and the panel at the top left.
-    auto writes_xy(FProperty* vector) -> bool
-    {
-        return CastField<FStructProperty>(vector) && is_real(member(vector, L"X")) && is_real(member(vector, L"Y"));
-    }
-
-    auto write_xy(FProperty* vector, void* container, double x, double y) -> void
-    {
-        auto* at = value_in(vector, container);
-        write_real(member(vector, L"X"), at, x);
-        write_real(member(vector, L"Y"), at, y);
-    }
-
-    auto write_color(FProperty* color, void* container, const double (&rgba)[4]) -> bool
-    {
-        if (!color) return false;
-        auto* at = value_in(color, container);
-        bool ok = true;
-        const wchar_t* channels[4]{L"R", L"G", L"B", L"A"};
-        for (int i = 0; i < 4; ++i) ok = write_real(member(color, channels[i]), at, rgba[i]) && ok;
-        return ok;
-    }
-
-    auto sized(UFunction* function) -> bool
-    {
-        return function && function->GetPropertiesSize() >= 0 && static_cast<size_t>(function->GetPropertiesSize()) <= PARAMS;
-    }
-
-    auto call(UObject* object, UFunction* function, uint8_t* params) -> void
-    {
-        object->ProcessEvent(function, params);
-    }
 } // namespace
 
     auto DebugOverlay::resolve() -> void

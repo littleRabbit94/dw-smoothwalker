@@ -30,13 +30,16 @@ namespace
         return static_cast<double>(b.QuadPart - a.QuadPart) / m_clock.frequency();
     }
 
-    auto Pipeline::publish_api_view(const ViewHead& game, const ViewHead& shown, const dw::Vec3* pivot) -> void
+    auto Pipeline::publish_api_view(const ViewHead& game, const ViewHead& shown, const dw::Vec3* pivot, double half_height,
+                                    const dw::Vec3* follow_offset, double follow_yaw) -> void
     {
         View g{{game.location[0], game.location[1], game.location[2]}, {game.rotation[0], game.rotation[1], game.rotation[2]}, game.fov};
         View s{{shown.location[0], shown.location[1], shown.location[2]}, {shown.rotation[0], shown.rotation[1], shown.rotation[2]}, shown.fov};
         double p[3]{};
+        double o[3]{};
         if (pivot) { p[0] = pivot->x; p[1] = pivot->y; p[2] = pivot->z; }
-        m_snapshot.publish(g, s, pivot ? p : nullptr, m_clock.now());
+        if (follow_offset) { o[0] = follow_offset->x; o[1] = follow_offset->y; o[2] = follow_offset->z; }
+        m_snapshot.publish(g, s, pivot ? p : nullptr, half_height, follow_offset ? o : nullptr, follow_yaw, m_clock.now());
     }
 
     // The debug overlay's feed while nothing is followed.
@@ -296,7 +299,10 @@ namespace
         m_debug_glide.store(m_view.blending && m_view.blend_glide, std::memory_order_relaxed);
         m_debug_lag_h.store(std::hypot(m_view.out_offset.x, m_view.out_offset.y), std::memory_order_relaxed);
         m_debug_lag_v.store(std::abs(m_view.out_offset.z), std::memory_order_relaxed);
-        publish_api_view(game_view, wrote ? view : game_view, &pivot);
+        // The follow's own lag and yaw for the debug markers: out_* are before the layers applied above.
+        double follow_pitch = 0.0, follow_yaw = 0.0, follow_roll = 0.0;
+        dw::to_rotator(dw::multiply(m_view.out_rotation, rotation), follow_pitch, follow_yaw, follow_roll);
+        publish_api_view(game_view, wrote ? view : game_view, &pivot, static_cast<double>(half_height), &m_view.out_offset, follow_yaw);
     }
 
     auto Pipeline::on_camera_view(void* self, float delta_time, void* desired_view) -> void
@@ -324,7 +330,7 @@ namespace
             m_authority.set_blending(false);
             publish_debug_idle();
             ViewHead view{};
-            if (m_copy(&view, desired_view, VIEW_BYTES)) publish_api_view(view, view, nullptr);
+            if (m_copy(&view, desired_view, VIEW_BYTES)) publish_api_view(view, view, nullptr, NAN, nullptr, NAN);
             return;
         }
         if (!m_hook_timing.load(std::memory_order_relaxed))
@@ -418,13 +424,36 @@ namespace
         out.lag_v = m_debug_lag_v.load(std::memory_order_relaxed);
         out.snap = m_debug_snap.load(std::memory_order_relaxed);
         out.snap_age = NAN;
+        out.snap_time = NAN;
         if (auto at = m_debug_snap_qpc.load(std::memory_order_relaxed))
         {
             const int64_t now = m_clock.now();
             out.snap_age = static_cast<double>(now - at) / m_clock.frequency();
+            out.snap_time = static_cast<double>(at) / m_clock.frequency();
         }
         out.glide = m_debug_glide.load(std::memory_order_relaxed);
         return out;
+    }
+
+    // The snapshot and one clock read: the age and `now` share it, and snap_time (read_debug) is on the same clock.
+    auto Pipeline::read_view(ViewFeed& out) const -> bool
+    {
+        Snapshot s{};
+        if (!m_snapshot.read(s)) return false;
+        const int64_t now = m_clock.now();
+        const double frequency = m_clock.frequency();
+        out.game = s.game;
+        out.shown = s.shown;
+        for (int i = 0; i < 3; ++i)
+        {
+            out.pivot[i] = s.pivot[i];
+            out.follow_offset[i] = s.follow_offset[i];
+        }
+        out.half_height = s.half_height;
+        out.follow_yaw = s.follow_yaw;
+        out.age = static_cast<double>(now - s.qpc) / frequency;
+        out.now = static_cast<double>(now) / frequency;
+        return true;
     }
 
     auto Pipeline::inspect() const -> Inspect
@@ -480,4 +509,6 @@ namespace
         owner.mod = std::move(mod);
         return owner;
     }
+
+    auto CoreApi::read_view(ViewFeed& out) const -> bool { return m_pipeline.read_view(out); }
 } // namespace dw::camera

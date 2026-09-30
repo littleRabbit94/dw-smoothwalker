@@ -18,6 +18,16 @@ namespace RC::Unreal
 
 namespace dw::camera
 {
+    // Pitch, yaw, roll in degrees; FOV in degrees; location in cm, world space.
+    struct View
+    {
+        double location[3];
+        double rotation[3];
+        double fov;
+    };
+
+    constexpr double LIVE_WINDOW = 0.25; // s, the camera_live() window
+
     // A view processor. The core runs at most one (register_processor answers false while one is registered) and
     // calls nothing of it while none is: the hook then leaves the game's view alone unless a layer is set. Owned by
     // its registrant, which keeps it alive until it is unregistered.
@@ -77,7 +87,24 @@ namespace dw::camera
         double lag_h, lag_v;              // cm of lag on screen, horizontal and vertical; NAN: not following
         int32_t snap;                     // Snap of the last restart from the capsule
         double snap_age;                  // s since it; NAN: none yet
+        double snap_time;                 // s on the core's clock when it happened (ViewFeed::now's clock); NAN: none yet
         bool glide;                       // the running crossfade was started by a release("glide")
+    };
+
+    // The player's last camera update as the hook published it (read_view), for the debug markers. Filled from one
+    // seqlock read of the API snapshot and one read of the core's clock. The follow's own numbers are before other
+    // mods' layers; `shown` is after them. Every view is before the game's camera modifiers (shakes, FOV kicks).
+    struct ViewFeed
+    {
+        View game;               // the view as the game built it, before Smoothwalker
+        View shown;              // what the hook handed back, layers included (equal to game when off)
+        double pivot[3];         // the capsule centre the follow is built around; NAN when unknown (off and settled)
+        double half_height;      // the capsule's half height, cm; NAN when unknown
+        double follow_offset[3]; // cm, the follow's shown lag: pivot + the game's arm under the output rotation - the
+                                 // output location (the pivot the camera follows is pivot - follow_offset); NAN with the pivot
+        double follow_yaw;       // degrees, the yaw Smoothwalker handed back before layers; NAN with the pivot
+        double age;              // s since the hook published it
+        double now;              // s on the core's clock at the read (DebugFeed::snap_time's clock)
     };
 
     // The camera owner as Smoothwalker.owner() reads it (camera_owner).
@@ -133,6 +160,9 @@ namespace dw::camera
         virtual auto read_debug() const -> DebugFeed = 0;
         // Any thread (takes the Lua API's mutex briefly): the camera owner's mod name and the s left on its lease.
         virtual auto camera_owner() const -> Owner = 0;
+        // Any thread (the snapshot's seqlock read and one clock read): the player's last camera update (see ViewFeed).
+        // False when nothing was published yet or a write was in flight on every try.
+        virtual auto read_view(ViewFeed& out) const -> bool = 0;
 
       protected:
         CameraCore() = default;

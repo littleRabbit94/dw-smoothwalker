@@ -185,7 +185,8 @@ namespace dw::smoothwalker::settings
             {"log_stats", "every 5 s in UE4SS.log: smoothed frames, mean lag, wall clamp share"},
             {"log_verbose", "1 adds detail to UE4SS.log: player discovery, offsets, camera mode layouts, combat and traversal camera changes"},
             {"debug_overlay", "1 shows a live panel of the camera state at the top right of the screen"},
-            {"debug_key", "shows and hides that panel in game (blank: no key)"},
+            {"debug_markers", "1 draws the camera's trail on the ground around your character"},
+            {"debug_key", "shows and hides the panel and the markers in game (blank: no key)"},
         };
         auto found = comments.find(key);
         return found == comments.end() ? nullptr : found->second;
@@ -223,11 +224,11 @@ namespace dw::smoothwalker::settings
             if (is_numeric_key(key) || key == "debug_key") line_of[key] = i;
         }
 
-        std::vector<const char*> order; // NUMERIC_KEYS, with debug_key after debug_overlay
+        std::vector<const char*> order; // NUMERIC_KEYS, with debug_key after debug_markers
         for (auto* key : NUMERIC_KEYS)
         {
             order.push_back(key);
-            if (std::string_view(key) == "debug_overlay") order.push_back("debug_key");
+            if (std::string_view(key) == "debug_markers") order.push_back("debug_key");
         }
 
         std::vector<std::string> added;

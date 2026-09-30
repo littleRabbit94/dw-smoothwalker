@@ -155,6 +155,7 @@ namespace dw::camera
         auto camera_live() const -> bool;
         auto take_hook_timing(uint64_t& calls, double& microseconds_per_call) -> void;
         auto read_debug() const -> DebugFeed;
+        auto read_view(ViewFeed& out) const -> bool;
 
         // ------------------------------------------------------------------------------ the Authority's reads
 
@@ -183,7 +184,8 @@ namespace dw::camera
 
       private:
         auto seconds_between(LARGE_INTEGER a, LARGE_INTEGER b) const -> double;
-        auto publish_api_view(const ViewHead& game, const ViewHead& shown, const dw::Vec3* pivot) -> void;
+        auto publish_api_view(const ViewHead& game, const ViewHead& shown, const dw::Vec3* pivot, double half_height,
+                              const dw::Vec3* follow_offset, double follow_yaw) -> void;
         auto publish_debug_idle() -> void;
         auto lose_view() -> void;
         auto update_view(void* desired_view, float delta_time, Processor* processor, bool enabled, uint64_t toggle) -> void;
@@ -261,6 +263,7 @@ namespace dw::camera
         auto take_hook_timing(uint64_t& calls, double& microseconds_per_call) -> void override;
         auto read_debug() const -> DebugFeed override;
         auto camera_owner() const -> Owner override;
+        auto read_view(ViewFeed& out) const -> bool override;
 
       private:
         Pipeline& m_pipeline;

@@ -242,7 +242,8 @@ TEST(ini, missing_keys_empty_file)
     CHECK_EQ(added.size(), NUMERIC_KEYS.size() + 1);
     CHECK_EQ(added.front(), std::string("enabled"));
     CHECK_EQ(added.back(), std::string("debug_key"));
-    CHECK_EQ(added[added.size() - 2], std::string("debug_overlay"));
+    CHECK_EQ(added[added.size() - 2], std::string("debug_markers"));
+    CHECK_EQ(added[added.size() - 3], std::string("debug_overlay"));
     // Laid out as the shipped file: the key padded to 16, the value to 6, then its comment.
     CHECK(out.starts_with("enabled" + spaces(9) + " = 1" + spaces(5) + "; 0 is the game's own camera"));
     CHECK(contains(out, "\ncurve_v" + spaces(9) + " = 0\n"));                        // no shipped comment: none
@@ -269,8 +270,10 @@ TEST(ini, missing_keys_placement)
             "; head\nenabled = 1 ; on\nfollow_rate_h" + spaces(3) + " = 9" + spaces(5) + "; horizontal catch-up rate\nfollow_rate_v = 10\ncurve_h ";
     CHECK(out.starts_with(head));
     CHECK(out.ends_with("\n; tail\n"));
-    auto overlay = out.find("\ndebug_overlay "), key = out.find("\ndebug_key "), curve = out.find("\ncurve_h ");
-    CHECK(overlay != std::string::npos && key == out.find('\n', overlay + 1)); // debug_key right after debug_overlay
+    auto overlay = out.find("\ndebug_overlay "), markers = out.find("\ndebug_markers "), key = out.find("\ndebug_key "),
+         curve = out.find("\ncurve_h ");
+    CHECK(overlay != std::string::npos && markers == out.find('\n', overlay + 1)); // debug_markers right after debug_overlay
+    CHECK(markers != std::string::npos && key == out.find('\n', markers + 1));     // debug_key right after debug_markers
     CHECK(curve < overlay);
 }
 

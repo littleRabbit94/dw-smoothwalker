@@ -9,6 +9,7 @@ add_executable(dw_unit
     main.cpp
     math_test.cpp
     curves_test.cpp
+    markers_test.cpp
     wall_test.cpp
     follow_test.cpp
     pipeline_test.cpp
@@ -37,6 +38,6 @@ if(MSVC)
     target_compile_options(dw_unit PRIVATE /W4 /utf-8 /permissive-)
 endif()
 
-foreach(suite math curves wall follow pipeline authority ini presets store panel position session)
+foreach(suite math curves markers wall follow pipeline authority ini presets store panel position session)
     add_test(NAME ${suite} COMMAND dw_unit ${suite})
 endforeach()

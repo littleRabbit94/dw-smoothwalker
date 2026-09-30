@@ -65,12 +65,13 @@ namespace dw::smoothwalker::settings
         bool log_verbose = false; // discovery, offsets, layouts, camera mode changes in the log; ini only, not on the Mod Menu page
 
         bool debug_overlay = false; // the live panel at the top right of the screen (debug_overlay.hpp)
-        std::string debug_key;      // shows and hides it; empty: not bound
+        bool debug_markers = false; // the camera's trail drawn on the ground around the character (marker_layer.hpp)
+        std::string debug_key;      // shows and hides both; empty: not bound
     };
 
     // A preset is a camera look: follow, turning, the look limits and camera position. Not the switches (enabled,
-    // camera_tuning, shoulder_swap, show_banner, log_stats, log_verbose, debug_overlay), the safety values (wall_clamp,
-    // reset_distance, reset_gap), position_transition, the key names, or preset.
+    // camera_tuning, shoulder_swap, show_banner, log_stats, log_verbose, debug_overlay, debug_markers), the safety values
+    // (wall_clamp, reset_distance, reset_gap), position_transition, the key names, or preset.
     inline const std::array<const char*, 41> PRESET_KEYS{
             "follow_rate_h", "follow_rate_v", "curve_h", "curve_v", "catchup_distance", "min_rate_scale", "max_lag_h", "max_lag_v",
             "soft_leash", "aiming_follow", "combat_follow", "traversal_follow", "rotation_smoothing", "rotation_rate", "combat_rotation",
@@ -80,14 +81,15 @@ namespace dw::smoothwalker::settings
             "traversal_height", "traversal_fov"};
 
     // Every numeric setting: the ones the Mod Menu can move and the mod writes back.
-    inline const std::array<const char*, 53> NUMERIC_KEYS{
+    inline const std::array<const char*, 54> NUMERIC_KEYS{
             "enabled", "follow_rate_h", "follow_rate_v", "curve_h", "curve_v", "catchup_distance", "min_rate_scale", "max_lag_h",
             "max_lag_v", "soft_leash", "aiming_follow", "combat_follow", "traversal_follow", "rotation_smoothing", "rotation_rate", "combat_rotation",
             "traversal_rotation", "wall_clamp", "reset_distance", "reset_gap", "show_banner",
             "camera_tuning", "exploration_distance", "exploration_height", "exploration_shoulder", "exploration_fov", "sprint_distance",
             "sprint_height", "sprint_shoulder", "sprint_fov", "combat_distance", "combat_height", "combat_shoulder", "combat_fov", "focus_distance", "focus_height", "focus_shoulder", "focus_fov",
             "aiming_distance", "aiming_height", "aiming_shoulder", "aiming_fov", "traversal_distance", "traversal_height", "traversal_fov",
-            "shoulder_swap", "pitch_min", "pitch_max", "position_transition", "preset", "log_stats", "log_verbose", "debug_overlay"};
+            "shoulder_swap", "pitch_min", "pitch_max", "position_transition", "preset", "log_stats", "log_verbose", "debug_overlay",
+            "debug_markers"};
 
     inline auto is_preset_key(const std::string& key) -> bool
     {
@@ -184,6 +186,7 @@ namespace dw::smoothwalker::settings
         else if (key == "log_stats") flag(s.log_stats);
         else if (key == "log_verbose") flag(s.log_verbose);
         else if (key == "debug_overlay") flag(s.debug_overlay);
+        else if (key == "debug_markers") flag(s.debug_markers);
         else if (key == "debug_key") s.debug_key = value;
     }
 
@@ -284,6 +287,7 @@ namespace dw::smoothwalker::settings
         if (key == "log_stats") return flag(s.log_stats);
         if (key == "log_verbose") return flag(s.log_verbose);
         if (key == "debug_overlay") return flag(s.debug_overlay);
+        if (key == "debug_markers") return flag(s.debug_markers);
         return 0.0;
     }
 

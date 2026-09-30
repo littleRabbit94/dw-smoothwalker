@@ -1,9 +1,9 @@
 // Smoothwalker's side of the DLL, as orchestration (docs/design.md, "Core and processors"): it owns the parts and wires
 // them to each other and to the camera core's interface (camera/api.hpp): the follow processor (follow/processor.hpp),
 // the settings store (settings/store.hpp), the camera modes' tuner (modes/mode_tuner.hpp), the banners, the Mod Menu
-// probe and the debug overlay (ui/). What stays here is construction, start, update and shutdown, the key binds, the
-// core's game-thread listener, publish (the live settings out to the follow, the modes and the panel), apply_position,
-// the debug panel's gathering and the store's event forwarder.
+// probe, the debug overlay and the debug markers (ui/). What stays here is construction, start, update and shutdown,
+// the key binds, the core's game-thread listener, publish (the live settings out to the follow, the modes and the
+// panel), apply_position, the debug panel's and the markers' gathering and the store's event forwarder.
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
 #include "smoothwalker.hpp"
@@ -12,6 +12,7 @@
 #include "settings/store.hpp"
 #include "ui/banner.hpp"
 #include "ui/debug_overlay.hpp"
+#include "ui/marker_layer.hpp"
 #include "ui/menu_probe.hpp"
 #include "ui/panel.hpp"
 #include "../common/live_ref.hpp"
@@ -97,6 +98,8 @@ struct Smoothwalker::Impl
     ui::MenuProbe m_menu;                  // game thread only
     ui::DebugOverlay m_overlay;            // game thread only
     std::atomic<bool> m_debug_overlay{false};
+    ui::MarkerLayer m_markers;             // game thread only
+    std::atomic<bool> m_debug_markers{false};
     std::mutex m_debug_mutex;              // m_debug_preset, m_debug_tuning: written by publish_locked, read by the overlay's refresh
     std::wstring m_debug_preset;           // the active preset's name, or Custom
     bool m_debug_tuning = true;            // camera_tuning
@@ -174,12 +177,15 @@ struct Smoothwalker::Impl
         });
         // Written back like the toggle key's change, so the Mod Menu page shows it. Live under a pause too: it moves
         // nothing in the game.
+        // The panel and the markers together: either on turns both off, else both on.
         bind(m_store.debug_key(), STR("debug_key"), [this]() {
             std::lock_guard guard(m_store.mutex());
-            m_store.settings().debug_overlay = !m_store.settings().debug_overlay;
+            const bool on = !(m_store.settings().debug_overlay || m_store.settings().debug_markers);
+            m_store.settings().debug_overlay = on;
+            m_store.settings().debug_markers = on;
             publish_locked();
             m_store.mark_pending_locked();
-            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] debug overlay {}\n"), m_store.settings().debug_overlay ? STR("on") : STR("off"));
+            Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] debug overlay and markers {}\n"), on ? STR("on") : STR("off"));
         });
 
         m_last_report = m_last_poll = std::chrono::steady_clock::now();
@@ -226,6 +232,7 @@ struct Smoothwalker::Impl
         m_tuner.forget();
         m_position_applied_generation = 0; // re-apply in the next world
         m_overlay.forget();                // the level took the panel off the viewport; the next pawn gets a new one
+        m_markers.forget();                // and the markers
     }
 
     // Game thread: a new pawn's camera.
@@ -243,6 +250,7 @@ struct Smoothwalker::Impl
         auto* controller = m_core.player_controller();
         auto* camera = m_core.player_camera();
         m_overlay.tick(m_debug_overlay.load(), controller, camera, [&] { return ui::format_panel(debug_panel(camera)); });
+        m_markers.tick(m_debug_markers.load(), controller, camera, [&] { return marker_scene(); });
     }
 
     // The camera API as the panel shows it (CameraCore::camera_owner).
@@ -292,6 +300,7 @@ struct Smoothwalker::Impl
         follow::publish_view(m_processor, m_core, m_store.settings());
         m_banner.enable(m_store.settings().show_banner);
         m_debug_overlay.store(m_store.settings().debug_overlay);
+        m_debug_markers.store(m_store.settings().debug_markers);
         {
             auto* active = m_store.settings().preset != 0 ? m_store.find_preset(m_store.settings().preset) : nullptr;
             std::lock_guard guard(m_debug_mutex);
@@ -384,6 +393,23 @@ struct Smoothwalker::Impl
         p.api = api_status();
         p.api.glide = feed.glide;
         return p;
+    }
+
+    // The debug markers' frame, gathered every engine tick while they are built (game thread): the core's view feed
+    // (CameraCore::read_view: its age and `now` on the core's clock, which the debug feed's snap_time is on too), the
+    // debug feed, whether another mod holds the camera, and the follow's settings under their shared lock. The
+    // rendered view is the widget's to read (MarkerLayer).
+    auto marker_scene() -> ui::markers::Scene
+    {
+        ui::markers::Scene s;
+        s.readable = m_core.read_view(s.view);
+        s.feed = m_core.read_debug();
+        s.enabled = m_processor.enabled();
+        s.owned = !m_core.camera_owner().mod.empty();
+        const follow::FollowTuning follow = m_processor.tuning();
+        s.max_lag_h = follow.max_lag_h;
+        s.rotation_smoothing = follow.rotation_smoothing;
+        return s;
     }
 };
 
