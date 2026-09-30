@@ -5,6 +5,14 @@
 // (smoothwalker/smoothwalker.cpp) and registered with the core for its whole life.
 #pragma once
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+
 #include "../../camera/api.hpp"
 #include "../../common/log.hpp"
 #include "../settings/settings.hpp"

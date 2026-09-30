@@ -6,12 +6,15 @@
 
 #include "follow/processor.hpp"
 #include "smoothwalker.hpp"
+#include "settings/ini.hpp"
+#include "settings/presets.hpp"
 #include "settings/settings.hpp"
 #include "ui/debug_overlay.hpp"
 #include "modes/mode_tuner.hpp"
 #include "../common/live_ref.hpp"
 #include "../common/log.hpp"
 #include "../common/math.hpp"
+#include "../common/text.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -289,7 +292,7 @@ struct Smoothwalker::Impl
         ui::ApiStatus s;
         camera::Owner owner = m_core.camera_owner();
         if (owner.mod.empty()) return s;
-        s.owner = settings::to_wide(owner.mod);
+        s.owner = dw::to_wide(owner.mod);
         s.lease = owner.lease;
         return s;
     }
@@ -462,7 +465,7 @@ struct Smoothwalker::Impl
         {
             auto* active = m_settings.preset != 0 ? find_preset(m_settings.preset) : nullptr;
             std::lock_guard guard(m_debug_mutex);
-            m_debug_preset = m_settings.preset == 0 ? STR("Custom") : active ? settings::to_wide(active->name) : STR("preset ") + std::to_wstring(m_settings.preset);
+            m_debug_preset = m_settings.preset == 0 ? STR("Custom") : active ? dw::to_wide(active->name) : STR("preset ") + std::to_wstring(m_settings.preset);
             m_debug_tuning = m_settings.camera_tuning;
         }
 
@@ -604,7 +607,7 @@ struct Smoothwalker::Impl
         }
         auto slot_name = [&](int id) {
             auto* slot = find_preset(id);
-            return settings::to_wide(slot ? slot->name : "Slot " + std::to_string(id));
+            return dw::to_wide(slot ? slot->name : "Slot " + std::to_string(id));
         };
         // The slot file is written now: the menu does not watch it.
         auto save_slot = [&](int id) {
@@ -709,7 +712,7 @@ struct Smoothwalker::Impl
             auto parsed = read_preset(name);
             if (!parsed) continue;
             int id = settings::FIRST_DROPIN_ID + static_cast<int>(dropins.size());
-            auto stem = settings::utf8_of(name.substr(0, name.size() - 4)).value_or("");
+            auto stem = dw::utf8_of(name.substr(0, name.size() - 4)).value_or("");
             dropins.push_back({id, settings::display_name(parsed->first, stem, id), settings::normalize_preset(parsed->second)});
         }
         if (over_limit)
@@ -772,7 +775,7 @@ struct Smoothwalker::Impl
         {
             for (auto& p : dropins)
             {
-                Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] preset {} from the presets folder: {}\n"), p.id, settings::to_wide(p.name));
+                Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] preset {} from the presets folder: {}\n"), p.id, dw::to_wide(p.name));
             }
         }
         size_t slots = m_presets.size() - settings::builtin_presets().size();
@@ -854,7 +857,7 @@ struct Smoothwalker::Impl
         settings::apply_values(m_settings, preset->values);
         m_loaded_id = id;
         m_custom_pinned = false;
-        auto name = settings::to_wide(preset->name);
+        auto name = dw::to_wide(preset->name);
         Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] loaded preset {}\n"), name);
         request_banner(STR("Smoothwalker: ") + name);
         return true;
