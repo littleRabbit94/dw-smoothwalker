@@ -144,7 +144,9 @@ TEST(panel, no_snap_yet_when_none_or_age_unknown)
 TEST(panel, influence_names)
 {
     CHECK(std::wstring(ui::influence_name(follow::Influence::None)) == L"none");
+    CHECK(std::wstring(ui::influence_name(follow::Influence::Interior)) == L"interior");
     CHECK(std::wstring(ui::influence_name(follow::Influence::Traversal)) == L"traversal");
+    CHECK(std::wstring(ui::influence_name(follow::Influence::Focus)) == L"focus");
     CHECK(std::wstring(ui::influence_name(follow::Influence::Combat)) == L"combat");
     CHECK(std::wstring(ui::influence_name(follow::Influence::Aiming)) == L"aiming");
     DebugPanel p = following();

@@ -370,6 +370,25 @@ TEST(store, startup_reads_log_verbose_first)
     dw::g_verbose.store(false);
 }
 
+// A smoothwalker.ini from before the focus and interior follow settings gets them at 100, the game's own trail.
+TEST(store, startup_adds_missing_focus_and_interior_follow_keys)
+{
+    MemoryFiles files = shipped();
+    std::string ini = *files.content(SETTINGS_PATH);
+    for (const char* k : {"focus_follow", "interior_follow", "focus_rotation", "interior_rotation"})
+    {
+        auto at = ini.find(std::string("\n") + k + " ");
+        CHECK(at != std::string::npos);
+        ini.erase(at + 1, ini.find('\n', at + 1) - at);
+    }
+    files.put(SETTINGS_PATH, ini);
+    Session a(files);
+    a.start();
+    CHECK(a.events.logged(L"[DWSmoothwalker] smoothwalker.ini: added 4 missing keys: focus_follow, interior_follow, focus_rotation, interior_rotation\n"));
+    for (const char* k : {"focus_follow", "interior_follow", "focus_rotation", "interior_rotation"})
+        CHECK_EQ(files.number(SETTINGS_PATH, k).value_or(-1), 100.0);
+}
+
 TEST(store, startup_adds_missing_keys)
 {
     MemoryFiles files = shipped();

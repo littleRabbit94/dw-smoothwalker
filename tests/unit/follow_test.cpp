@@ -1,5 +1,5 @@
-// smoothwalker/follow: the leash, the restart, the crouch hold, the rotation trail cap, the aiming / combat /
-// traversal shares and Influence, the mode-write hold of the wall clamp, and the processor's generation.
+// smoothwalker/follow: the leash, the restart, the crouch hold, the rotation trail cap, the aiming / combat / focus /
+// traversal / interior shares and Influence, the mode-write hold of the wall clamp, and the processor's generation.
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -215,18 +215,43 @@ TEST(follow, influence_and_keep_shares)
 {
     struct Case
     {
-        bool aiming, combat, traversal;
+        bool aiming, combat, focus, traversal, interior;
         Influence expect;
         double keep;
+        double turn;
     };
+    // Precedence, lowest to highest: interior, traversal, focus, combat, aiming. Every percentage is absolute in its
+    // own context, so the highest active one shows alone.
     FollowTuning t = balanced();
     t.aiming_keep = 0.3;
     t.combat_follow_keep = 0.6;
+    t.combat_rotation_keep = 0.55;
+    t.focus_follow_keep = 0.7;
+    t.focus_rotation_keep = 0.65;
     t.traversal_follow_keep = 0.8;
+    t.traversal_rotation_keep = 0.75;
+    t.interior_follow_keep = 0.9;
+    t.interior_rotation_keep = 0.85;
     const Case cases[] = {
-            {false, false, false, Influence::None, 1.0},  {true, false, false, Influence::Aiming, 0.3},
-            {false, true, false, Influence::Combat, 0.6}, {false, false, true, Influence::Traversal, 0.8},
-            {true, false, true, Influence::Aiming, 0.3},  {false, true, true, Influence::Combat, 0.6},
+            // aiming, combat, focus, traversal, interior
+            {false, false, false, false, false, Influence::None, 1.0, 1.0},
+            {false, false, false, false, true, Influence::Interior, 0.9, 0.85},
+            {false, false, false, true, false, Influence::Traversal, 0.8, 0.75},
+            {false, false, false, true, true, Influence::Traversal, 0.8, 0.75},
+            {false, false, true, false, false, Influence::Focus, 0.7, 0.65},
+            {false, false, true, false, true, Influence::Focus, 0.7, 0.65},
+            {false, false, true, true, false, Influence::Focus, 0.7, 0.65},
+            {false, false, true, true, true, Influence::Focus, 0.7, 0.65},
+            {false, true, false, false, false, Influence::Combat, 0.6, 0.55},
+            {false, true, false, false, true, Influence::Combat, 0.6, 0.55},
+            {false, true, false, true, false, Influence::Combat, 0.6, 0.55},
+            {false, true, true, false, false, Influence::Combat, 0.6, 0.55},
+            {false, true, true, true, true, Influence::Combat, 0.6, 0.55},
+            {true, false, false, false, false, Influence::Aiming, 0.3, 0.3},
+            {true, false, false, true, false, Influence::Aiming, 0.3, 0.3},
+            {true, false, true, false, false, Influence::Aiming, 0.3, 0.3},
+            {true, false, false, false, true, Influence::Aiming, 0.3, 0.3},
+            {true, true, true, true, true, Influence::Aiming, 0.3, 0.3},
     };
     for (const Case& c : cases)
     {
@@ -235,12 +260,71 @@ TEST(follow, influence_and_keep_shares)
         r.step(frame_at({0, 0, 96}, 1.0 / 60.0, true));
         r.inputs.aiming = c.aiming;
         r.inputs.combat = c.combat;
+        r.inputs.focus = c.focus;
         r.inputs.traversal = c.traversal;
+        r.inputs.interior = c.interior;
         for (int i = 0; i < 300; ++i) r.step(frame_at({0, 0, 96}));
         CHECK(r.out.feed);
         CHECK_EQ(r.out.influence, static_cast<int>(c.expect));
         CHECK_NEAR(r.out.keep_follow, c.keep, 1e-6);
+        CHECK_NEAR(r.out.keep_turn, c.turn, 1e-6);
     }
+}
+
+// Focus and interior are eased and snapped like the other shares; while focus comes up over the indoor base, the
+// keep runs from interior's value to focus's by focus's eased share.
+TEST(follow, focus_and_interior_ease_and_snap)
+{
+    FollowTuning t = balanced();
+    t.focus_follow_keep = 0.2;
+    t.interior_follow_keep = 0.6;
+    t.focus_rotation_keep = 0.1;
+    t.interior_rotation_keep = 0.5;
+
+    Run snapped;
+    snapped.tuning = t;
+    snapped.inputs.interior = true;
+    snapped.step(frame_at({0, 0, 96}, 1.0 / 60.0, true));
+    snapped.step(frame_at({0, 0, 96}));
+    CHECK_NEAR(snapped.out.keep_follow, 0.6, 1e-12); // full weight from the restart on, no ease
+    CHECK_NEAR(snapped.out.keep_turn, 0.5, 1e-12);
+    CHECK_EQ(snapped.out.influence, static_cast<int>(Influence::Interior));
+
+    Run blend;
+    blend.tuning = t;
+    blend.inputs.interior = true;
+    blend.step(frame_at({0, 0, 96}, 1.0 / 60.0, true));
+    blend.step(frame_at({0, 0, 96}));
+    blend.inputs.focus = true;
+    blend.step(frame_at({0, 0, 96}, 0.1));
+    const double m = 1.0 - std::exp(-8.0 * 0.1); // focus's share after one 0.1 s step
+    CHECK_NEAR(blend.out.keep_follow, 0.6 + (0.2 - 0.6) * m, 1e-12);
+    CHECK_NEAR(blend.out.keep_turn, 0.5 + (0.1 - 0.5) * m, 1e-12);
+    blend.inputs.focus = false;
+    for (int i = 0; i < 300; ++i) blend.step(frame_at({0, 0, 96}));
+    CHECK_NEAR(blend.out.keep_follow, 0.6, 1e-6); // back to the indoor base
+    CHECK_EQ(blend.out.influence, static_cast<int>(Influence::Interior));
+}
+
+TEST(follow, tuning_of_settings_reads_focus_and_interior)
+{
+    dw::smoothwalker::settings::Settings s;
+    s.focus_follow = 20;
+    s.focus_rotation = 10;
+    s.interior_follow = 60;
+    s.interior_rotation = 50;
+    const FollowTuning t = follow_tuning_of(s);
+    CHECK_NEAR(t.focus_follow_keep, 0.2, 1e-12);
+    CHECK_NEAR(t.focus_rotation_keep, 0.1, 1e-12);
+    CHECK_NEAR(t.interior_follow_keep, 0.6, 1e-12);
+    CHECK_NEAR(t.interior_rotation_keep, 0.5, 1e-12);
+    FollowTuning u = t;
+    CHECK(same_values(t, u));
+    u.interior_rotation_keep = 0.51;
+    CHECK(!same_values(t, u));
+    u = t;
+    u.focus_follow_keep = 0.21;
+    CHECK(!same_values(t, u));
 }
 
 TEST(follow, restart_snaps_the_shares)

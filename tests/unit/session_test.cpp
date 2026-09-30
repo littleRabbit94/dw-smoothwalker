@@ -5,7 +5,7 @@
 // (tests/equivalence, retired 2026-09-29, whose sessions matched commit f22aa8e byte for byte): walking, jumps,
 // teleports, pauses, slow motion, crouches, bad half heights, NaN and infinite views, odd DeltaTime, other cameras,
 // lost root / camera / offsets, faults on each guarded access, the toggle, publishes, mode writes, the aiming /
-// combat / traversal flags, cuts for every reason, two API consumers (claims, leases, releases, uninstalls,
+// combat / traversal flags (focus and interior stay off), cuts for every reason, two API consumers (claims, leases, releases, uninstalls,
 // re-keys, layers), log_stats takes and overlay reads.
 //
 // After every event its record (the view bytes the hook left, everything the hook publishes, the API's state and,
@@ -102,8 +102,11 @@ namespace
         double catchup_distance = 150.0, min_rate_scale = 0.35, max_lag_h = 85.0, max_lag_v = 50.0;
         bool soft_leash = true;
         double aiming_follow = 30.0, combat_follow = 100.0, traversal_follow = 100.0;
+        // Not drawn by the generator (a draw would move every golden): the sessions run at the defaults.
+        double focus_follow = 100.0, interior_follow = 100.0;
         bool rotation_smoothing = false;
         double rotation_rate = 20.0, combat_rotation = 100.0, traversal_rotation = 100.0;
+        double focus_rotation = 100.0, interior_rotation = 100.0;
         bool wall_clamp = true;
         double reset_distance = 500.0, reset_gap = 0.25, position_transition = 0.5;
         bool log_stats = false, log_verbose = false;
@@ -124,10 +127,14 @@ namespace
         s.aiming_follow = h.aiming_follow;
         s.combat_follow = h.combat_follow;
         s.traversal_follow = h.traversal_follow;
+        s.focus_follow = h.focus_follow;
+        s.interior_follow = h.interior_follow;
         s.rotation_smoothing = h.rotation_smoothing;
         s.rotation_rate = h.rotation_rate;
         s.combat_rotation = h.combat_rotation;
         s.traversal_rotation = h.traversal_rotation;
+        s.focus_rotation = h.focus_rotation;
+        s.interior_rotation = h.interior_rotation;
         s.wall_clamp = h.wall_clamp;
         s.reset_distance = h.reset_distance;
         s.reset_gap = h.reset_gap;
@@ -430,7 +437,7 @@ namespace
             const DebugFeed feed = m_core->read_debug();
             r.put("panel.keep_follow", feed.keep_follow);
             r.put("panel.keep_turn", feed.keep_turn);
-            r.put("panel.influence", static_cast<int>(feed.influence));
+            r.put("panel.influence", feed.influence);
             r.put("panel.lag_h", feed.lag_h);
             r.put("panel.lag_v", feed.lag_v);
             r.put("panel.rate_h", feed.rate_h);

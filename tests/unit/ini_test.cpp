@@ -123,6 +123,8 @@ TEST(ini, sanitize_ranges)
 {
     Settings s = parse_settings("follow_rate_h = 100\nfollow_rate_v = 0\ncurve_h = 9\ncurve_v = -2\ncatchup_distance = 1\n"
                                 "min_rate_scale = 2\nmax_lag_h = 999\nmax_lag_v = -1\naiming_follow = 150\nrotation_rate = 0\n"
+                                "combat_follow = 150\ntraversal_follow = -5\nfocus_follow = 150\ninterior_follow = -5\n"
+                                "combat_rotation = 150\ntraversal_rotation = -5\nfocus_rotation = 150\ninterior_rotation = -5\n"
                                 "reset_distance = 5\nreset_gap = 9\nexploration_distance = 10\nsprint_height = 500\n"
                                 "aiming_shoulder = -100\ntraversal_fov = 45\ninterior_distance = 10\ninterior_height = 80\n"
                                 "interior_shoulder = -99\ninterior_fov = 45\npitch_min = 0\npitch_max = 95\nposition_transition = -1\n");
@@ -135,6 +137,14 @@ TEST(ini, sanitize_ranges)
     CHECK_EQ(s.max_lag_h, 300.0);
     CHECK_EQ(s.max_lag_v, 0.0);
     CHECK_EQ(s.aiming_follow, 100.0);
+    CHECK_EQ(s.combat_follow, 100.0);
+    CHECK_EQ(s.traversal_follow, 0.0);
+    CHECK_EQ(s.focus_follow, 100.0);
+    CHECK_EQ(s.interior_follow, 0.0);
+    CHECK_EQ(s.combat_rotation, 100.0);
+    CHECK_EQ(s.traversal_rotation, 0.0);
+    CHECK_EQ(s.focus_rotation, 100.0);
+    CHECK_EQ(s.interior_rotation, 0.0);
     CHECK_EQ(s.rotation_rate, 1.0);
     CHECK_EQ(s.reset_distance, 100.0);
     CHECK_EQ(s.reset_gap, 2.0);

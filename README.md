@@ -48,7 +48,7 @@ will not open while a `ConfigKey` is missing from it.
 | `src/smoothwalker/` | Smoothwalker, namespace `dw::smoothwalker`: `smoothwalker.hpp` / `smoothwalker.cpp` (orchestration: owns the parts below, the keys, the core's listener, publish, `apply_position`, the debug panel's gathering) |
 | `src/smoothwalker/follow/` | `processor.hpp` (`FollowProcessor`, the follow as the core's processor, `publish_view`), `follow.hpp` (the follow, `Influence`), `curves.hpp` |
 | `src/smoothwalker/settings/` | `settings.hpp` (`Settings`, the key lists, ranges), `ini.hpp` / `ini.cpp` (the file's text), `presets.hpp` / `presets.cpp` (built-ins, slot and drop-in files, labels), `store.hpp` / `store.cpp` (`SettingsStore`: reload rules, write-back, slots, cycle; behind `Files` and `Events`) |
-| `src/smoothwalker/modes/` | `position.hpp` (groups, `position_of`, `written`, the tuned mode classes), `mode_tuner.hpp` / `mode_tuner.cpp` (`ModeTuner`: camera position in the game's modes, the flip, aiming, combat and traversal state) |
+| `src/smoothwalker/modes/` | `position.hpp` (groups, `position_of`, `written`, the tuned mode classes), `mode_tuner.hpp` / `mode_tuner.cpp` (`ModeTuner`: camera position in the game's modes, the flip, aiming, combat, focus and traversal state, the indoor camera type) |
 | `src/smoothwalker/ui/` | `banner.hpp` / `banner.cpp` (banners), `menu_probe.hpp` / `menu_probe.cpp` (is a Mod Menu page open), `panel.hpp` (`DebugPanel`, `format_panel`), `debug_overlay.hpp` / `debug_overlay.cpp` (the UMG widget), `markers.hpp` (the debug markers' projection, lift, trail and layout), `marker_layer.hpp` / `marker_layer.cpp` (their UMG widget), `umg.hpp` / `umg.cpp` (reflection helpers both widgets share) |
 | `src/common/` | Shared by both sides, namespace `dw`: `math.hpp`, `live_ref.hpp` (`LiveRef`), `active_slot.hpp`, `log.hpp` (the verbose flag), `text.hpp` (UTF-8 and wide strings) |
 | `tests/unit/` | Never shipped: CTest suites over the UE4SS-free code, built without the RE-UE4SS tree (Unit tests, below) |
@@ -86,7 +86,7 @@ example mod's Lua syntax (`luac -p`, Lua 5.4), then writes `release/dist/Smoothw
 
 Copy `release/example-preset/Template.ini` into `ue4ss/Mods/DWSmoothwalker/config/presets/` under a new name,
 change the `name` line and the values, and restart the game. Every key is commented with its range and
-default. The preset format and rules (45 keys, clamping, the 54 drop-in limit) are in `docs/design.md`,
+default. The preset format and rules (49 keys, clamping, the 54 drop-in limit) are in `docs/design.md`,
 "Presets". Switches are not preset keys; a preset that sets them is ignored on those lines.
 
 To start from a camera you tuned in game, set the Preset picker on the Mod Menu page to a slot marked
@@ -99,7 +99,7 @@ that slot picked and every Apply saves into it. Copy the file under any other na
 By default `UE4SS.log` stays quiet: the load line, the changes you make (toggle, presets, shoulder swap,
 settings applied), and any warnings or errors. With `log_stats = 1` the mod also logs the per-frame hook cost
 every 5 s. With `log_verbose = 1` (ini only, not on the Mod Menu page) it adds cyan detail: player discovery,
-offsets, camera mode layouts, and combat/traversal camera changes, including camera position apply's own
+offsets, camera mode layouts, and focus/combat/traversal camera changes and indoor switches, including camera position apply's own
 duration (`camera position applied: ... ms`): after the first apply of a session it should read about 0 ms,
 and a number in the tens means something walks the object array on a key press again. With `debug_overlay = 1`
 a panel at the top right of the screen shows the live follow, the game's camera modes, the last snap and the API

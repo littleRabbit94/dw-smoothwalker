@@ -40,7 +40,7 @@ namespace dw::smoothwalker::ui
         std::wstring camera_type;
         std::vector<ModeListing> modes; // newest first
         bool modes_stale = false;       // a rescan is pending, the list may be short
-        double keep_follow = NAN;       // share of the trail shown, after the aiming, combat and traversal blends
+        double keep_follow = NAN;       // share of the trail shown, after the interior, traversal, focus, combat and aiming blends
         double keep_turn = NAN;         // share of the turning smoothing shown
         bool rotation_smoothing = false;
         Influence influence = Influence::None;
@@ -74,7 +74,9 @@ namespace dw::smoothwalker::ui
     {
         switch (influence)
         {
+        case Influence::Interior: return L"interior";
         case Influence::Traversal: return L"traversal";
+        case Influence::Focus: return L"focus";
         case Influence::Combat: return L"combat";
         case Influence::Aiming: return L"aiming";
         default: return L"none";

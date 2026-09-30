@@ -122,26 +122,40 @@ speed 1, a 360 spin, the camera reversed halfway). At speed 1 a fast spin now ri
 behind, and catches up over about a second when the turn stops. A turn past 180 degrees inside one frame is
 still ambiguous, as it is for any smoothing.
 
-- **Aiming, combat and traversal** (`aiming_follow`, `combat_follow`, `combat_rotation`, `traversal_follow`,
-  `traversal_rotation`, percent, default 30 / 100 / 100 / 100 / 100). A trail and smoothed turning behind the
-  crosshair read as input lag; in a fight the same trail can be a liability, so combat gets its own pair,
-  split into position and turning, and traversal (claw ride, anti-grav, shadowstep) another. The camera
-  component has no "active mode" call, but every mode has `GetState()` (`ECameraModeState`: BlendingIn 0,
-  Active 1, BlendingOut 2, Popped 3; checked live), and the tuner already holds the player's live modes with
-  their group. Each engine tick one pass (`ModeTuner::mode_state()`) calls `GetState` on the live Aiming-,
-  Combat- and Traversal-group modes only, skipping a group once its flag is already set (none while there
-  is none of them), and publishes three atomic flags. A rescan request (a new camera or world, or over 256 modes waiting in the hand-off) is served by that pass on the next tick through `ensure_scanned` (capture, adopt, one `ForEachUObject` walk), not left to an apply that may never come; every other tick only adopts the hand-off. The hook eases three 0-1 factors toward them (rate 8/s
-  on the world delta, about a third of a second): `aim`, `combat` and `traversal`. Two keep shares are built
-  from them, combat taking over from wherever traversal left it and aiming from wherever combat left it:
-  `keep_pos = lerp(lerp(lerp(1, traversal_follow_keep, traversal), combat_follow_keep, combat), aiming_keep, aim)`,
-  and `keep_rot` the same with `traversal_rotation_keep` and `combat_rotation_keep`. Aiming must win over
-  traversal: `AimingClawRide(Ledge)` and `AntiGravAiming` stack on top of `ClawRide(Ledge)` and `AntiGrav`.
+- **Aiming, combat, focus, traversal and interior** (`aiming_follow`, `combat_follow`, `combat_rotation`,
+  `focus_follow`, `focus_rotation`, `traversal_follow`, `traversal_rotation`, `interior_follow`,
+  `interior_rotation`, percent, default 30 for aiming and 100 for the rest). A trail and smoothed turning behind
+  the crosshair read as input lag; in a fight the same trail can be a liability, so combat gets its own pair,
+  split into position and turning like aiming's, and focus mode, traversal (claw ride, anti-grav, shadowstep)
+  and the game's indoor camera type each get another. Every percentage is absolute in its own context: 0 locks
+  the camera to the character there, 100 trails as everywhere else, which is also what a file without the keys
+  gets. The camera component has no "active mode" call, but every mode has `GetState()` (`ECameraModeState`:
+  BlendingIn 0, Active 1, BlendingOut 2, Popped 3; checked live), and the tuner already holds the player's live
+  modes with their group. Each engine tick one pass (`ModeTuner::mode_state()`) calls `GetState` on the live
+  Aiming-, Combat-, Focus- and Traversal-group modes only, skipping a group once its flag is already set (none
+  while there is none of them), and publishes a flag per group. A rescan request (a new camera or world, or over 256 modes waiting in the hand-off) is served by that pass on the next tick through `ensure_scanned` (capture, adopt, one `ForEachUObject` walk), not left to an apply that may never come; every other tick only adopts the hand-off.
+  Interior is not a mode group but the player camera's type (`ECameraType` 2, `INTERIOR_KEY`, see "Indoors
+  (`interior_*`)"): the same pass makes one `GetCameraType` call per tick, on a `RebelCameraComponent` only,
+  reading the return value at its reflected offset once that is known. The position flip switches the type away
+  from home for one update; while it is away on the player's camera the pass reports whether the type it left
+  was Interior instead of reading it, so the flip cannot blip the interior factor. The hook eases five 0-1
+  factors toward the flags (rate 8/s on the world delta, about a third of a second): `aim`, `combat`, `focus`,
+  `traversal` and `interior`. Two keep shares are built from them, each context taking over from wherever the
+  one below left it; from lowest to highest: interior, traversal, focus, combat, aiming:
+  `keep_pos = lerp(lerp(lerp(lerp(lerp(1, interior_follow_keep, interior), traversal_follow_keep, traversal), focus_follow_keep, focus), combat_follow_keep, combat), aiming_keep, aim)`,
+  and `keep_rot` the same with the `*_rotation_keep` values, `aiming_keep` on top. Indoors is the base
+  context (exploring inside), so every mode override replaces it. Aiming must win over traversal:
+  `AimingClawRide(Ledge)` and `AntiGravAiming` stack on top of `ClawRide(Ledge)` and `AntiGrav`.
   `keep_pos` scales only what is shown: the shown lag; `keep_rot` scales the shown rotation slerped from
   smoothed toward the game's (visible only with rotation smoothing on). The smoothed pivot and rotation run
-  on underneath, so the trail is back once all three factors ease to zero, with no edge either way. A cut
-  snaps all three factors. Focus mode is its own group, not combat (see "Position tuning
-  (`mode_tuner.hpp`)"), so `combat_follow` / `combat_rotation` leave it alone. Guessing from the arm length
-  was rejected: a close `exploration_distance` reads the same as aiming.
+  on underneath, so the trail is back once all five factors ease to zero, with no edge either way. A cut
+  snaps all five factors. `Influence` (the debug overlay's word after the kept share) names the context with the
+  largest weight: aiming's `aim`, combat's `combat * (1 - aim)`, focus's `focus * (1 - combat) * (1 - aim)`,
+  traversal's `traversal * (1 - focus) * (1 - combat) * (1 - aim)`, interior's
+  `interior * (1 - traversal) * (1 - focus) * (1 - combat) * (1 - aim)`, and none for the rest. Focus mode is its
+  own group, not combat (see "Position tuning (`mode_tuner.hpp`)"), so `combat_follow` / `combat_rotation` leave
+  it alone and `focus_follow` / `focus_rotation` govern it. Guessing from the arm length was rejected: a close
+  `exploration_distance` reads the same as aiming.
 - **Soft leash** (`soft_leash = 1`, 0.5.0): the internal lag may run to 3x `max_lag`, and the camera shows
   `max_lag * tanh(lag / max_lag)`, so reaching the limit has no edge. With `soft_leash = 0` the leash is a
   hard clamp.
@@ -457,7 +471,7 @@ Measured live on the running game.
 Per group (exploring, sprinting, combat, focus, aiming, claw ride and anti-grav): distance %, height, shoulder
 and FOV. For every mode: a shoulder swap (`N`), the
 look up/down limits and a transition time. Indoors, four more on the Interior camera type (see "Indoors
-(`interior_*`)"). 52 settings on the menu page (the three safety keys and `game_lag_scale` left it on 2026-09-19; the safety keys stay in the ini; the four `interior_` keys joined 2026-09-30), validated with the menu's
+(`interior_*`)"). 56 settings on the menu page (the three safety keys and `game_lag_scale` left it on 2026-09-19; the safety keys stay in the ini; the four `interior_` position keys and the four focus and interior follow keys joined 2026-09-30), validated with the menu's
 parser. The groups cover 23 `BP_CameraMode_*` classes; the finisher and shadowstep attack cameras are
 left alone. 22 are loaded at session start (21 checked 2026-09-16, `Shadowstep_2_Base` 2026-09-20).
 `CombatSprinting` is day Coen's camera for sprinting with a weapon drawn, and its class is loaded by day only
@@ -675,19 +689,19 @@ key, as shipped (`X Y Z` of `TargetOffset`):
 
 ### Presets
 
-- **Presets carry 45 keys** (32 in 0.8.0; four `focus_` keys since 0.9.0, when focus left the combat group; a file or preset without them takes its combat values, in `parse_settings` and `fill_focus`; 36 from 2026-09-19, when `wall_clamp`, `reset_distance`, `reset_gap` and
+- **Presets carry 49 keys** (32 in 0.8.0; four `focus_` keys since 0.9.0, when focus left the combat group; a file or preset without them takes its combat values, in `parse_settings` and `fill_focus`; 36 from 2026-09-19, when `wall_clamp`, `reset_distance`, `reset_gap` and
   `position_transition` left: a preset is a camera look, and the first three are off the menu page, so a
   preset would have changed settings the player cannot see; 39 from 2026-09-22, when `aiming_follow` joined
   and `combat_follow` / `combat_rotation` were added, both new settings for the combat camera, split into
   position and turning like aiming's; 41 later that day, when `traversal_follow` / `traversal_rotation` were
-  added, the same pair for the traversal camera; 45 from 2026-09-30, when the four `interior_` keys were added): follow,
+  added, the same pair for the traversal camera; 45 from 2026-09-30, when the four `interior_` keys were added; 49 the same day, with `focus_follow`, `focus_rotation`, `interior_follow` and `interior_rotation`): follow,
   turning, the look limits, every group's distance, height, shoulder and FOV, and the indoor adjustment. Not `enabled`, `camera_tuning`, `shoulder_swap`, `show_banner`, `log_stats`, the key names,
   or `preset`. A preset file holding fewer keys loads and matches on the keys it has.
 - **Built-ins** (cycle order): Tight, Balanced, Cinematic. Follow values, horizontal retuned 2026-09-19 for the game's lag being off (it had
   added up to 30 cm of trail; before: 25 cm 18/s, 70 cm 8/s; Cinematic was tried at 145 cm 3/s, too much, and kept as it was): Tight (lag 40/20 cm,
   12/20 per s, constant), Balanced (the shipped default: 85/50 cm, 6.5/10 per s; 95 cm 5.5/s was tried and read too loose, smoothstep h), Cinematic
   (120/80 cm, 4/6 per s, ease in-out, floor 0.35, turning smoothed at 25). Balanced equals the shipped
-  `smoothwalker.ini` on all 45 keys.
+  `smoothwalker.ini` on all 49 keys.
 
   | Key | Tight | Balanced | Cinematic |
   |---|---|---|---|
@@ -1666,7 +1680,7 @@ line says what stopped in its own words ("mod inactive", "smoothing inactive").
 - **Verbose**, only with `log_verbose = 1` (ini only): player discovery, the controller found, not found yet
   and gone lines, `following`, the translation offset, `Mod Menu open`, the presets-folder lines, the camera
   mode layout, `Base_LongRange`, `camera position applied` with its duration, a mode loaded late, the debug
-  overlay and markers shown, and combat and traversal camera on and off. The flag is `dw::g_verbose`
+  overlay and markers shown, and focus, combat and traversal camera and interior on and off. The flag is `dw::g_verbose`
   (`common/log.hpp`), one atomic for both components, written by Smoothwalker's settings at every construction and publish
   (and by `CameraCore::set_diagnostics`, `DIAG_VERBOSE`, from the same publish); it gates the core's discovery, offset and hook lines too. At startup it is read from `smoothwalker.ini` before
   `load_presets_locked()`, which runs ahead of the full settings load and logs presets-folder lines.
@@ -1723,7 +1737,7 @@ follow, so an existing player adds one requirement and keeps `smoothwalker.ini` 
 | DWCameraCore | DWSmoothwalker |
 |---|---|
 | Slot 214 hook and its pin, player and camera discovery, the view update count and world seconds | The follow, a processor of the core |
-| Cuts (gap, teleport, player swap, API cut), the crossfade, layers | `mode_tuner.hpp`: mode classification (aiming, combat, traversal), the writes, the flip, the lag switch, other mods' writes |
+| Cuts (gap, teleport, player swap, API cut), the crossfade, layers | `mode_tuner.hpp`: mode classification (aiming, combat, focus, traversal), the indoor camera type, the writes, the flip, the lag switch, other mods' writes |
 | `claim` / `release` / `owner`, `view()` / `live()`, the Lua injection, the processor list | Presets and slots, `smoothwalker.ini`, the Mod Menu page, keys, banners, the debug overlay and markers |
 
 Alone, the core is the game: the hook takes today's "off and settled" path (no processor, no layer), writes

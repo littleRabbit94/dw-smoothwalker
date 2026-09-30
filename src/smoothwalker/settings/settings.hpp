@@ -35,11 +35,15 @@ namespace dw::smoothwalker::settings
         double aiming_follow = 30.0;      // percent of the trail and the turning smoothing kept while aiming
         double combat_follow = 100.0;     // percent of the trail kept while a combat camera mode is blending in or active
         double traversal_follow = 100.0;  // percent of the trail kept while a traversal camera mode is blending in or active
+        double focus_follow = 100.0;      // percent of the trail kept while a focus camera mode is blending in or active
+        double interior_follow = 100.0;   // percent of the trail kept while the game's camera type is Interior
 
         bool rotation_smoothing = false;
         double rotation_rate = 20.0;
         double combat_rotation = 100.0;   // percent of the turning smoothing kept while a combat camera mode is blending in or active
         double traversal_rotation = 100.0; // percent of the turning smoothing kept while a traversal camera mode is blending in or active
+        double focus_rotation = 100.0;    // percent of the turning smoothing kept while a focus camera mode is blending in or active
+        double interior_rotation = 100.0; // percent of the turning smoothing kept while the game's camera type is Interior
 
         bool wall_clamp = true;
         double reset_distance = 500.0;    // cm moved in one frame that counts as a teleport
@@ -74,19 +78,19 @@ namespace dw::smoothwalker::settings
     // A preset is a camera look: follow, turning, the look limits and camera position. Not the switches (enabled,
     // camera_tuning, shoulder_swap, show_banner, log_stats, log_verbose, debug_overlay, debug_markers), the safety values
     // (wall_clamp, reset_distance, reset_gap), position_transition, the key names, or preset.
-    inline const std::array<const char*, 45> PRESET_KEYS{
+    inline const std::array<const char*, 49> PRESET_KEYS{
             "follow_rate_h", "follow_rate_v", "curve_h", "curve_v", "catchup_distance", "min_rate_scale", "max_lag_h", "max_lag_v",
-            "soft_leash", "aiming_follow", "combat_follow", "traversal_follow", "rotation_smoothing", "rotation_rate", "combat_rotation",
-            "traversal_rotation", "pitch_min", "pitch_max", "exploration_distance", "exploration_height", "exploration_shoulder",
+            "soft_leash", "aiming_follow", "combat_follow", "traversal_follow", "focus_follow", "interior_follow", "rotation_smoothing",
+            "rotation_rate", "combat_rotation", "traversal_rotation", "focus_rotation", "interior_rotation", "pitch_min", "pitch_max", "exploration_distance", "exploration_height", "exploration_shoulder",
             "exploration_fov", "sprint_distance", "sprint_height", "sprint_shoulder", "sprint_fov", "combat_distance", "combat_height",
             "combat_shoulder", "combat_fov", "focus_distance", "focus_height", "focus_shoulder", "focus_fov", "aiming_distance", "aiming_height", "aiming_shoulder", "aiming_fov", "traversal_distance",
             "traversal_height", "traversal_fov", "interior_distance", "interior_height", "interior_shoulder", "interior_fov"};
 
     // Every numeric setting: the ones the Mod Menu can move and the mod writes back.
-    inline const std::array<const char*, 58> NUMERIC_KEYS{
+    inline const std::array<const char*, 62> NUMERIC_KEYS{
             "enabled", "follow_rate_h", "follow_rate_v", "curve_h", "curve_v", "catchup_distance", "min_rate_scale", "max_lag_h",
-            "max_lag_v", "soft_leash", "aiming_follow", "combat_follow", "traversal_follow", "rotation_smoothing", "rotation_rate", "combat_rotation",
-            "traversal_rotation", "wall_clamp", "reset_distance", "reset_gap", "show_banner",
+            "max_lag_v", "soft_leash", "aiming_follow", "combat_follow", "traversal_follow", "focus_follow", "interior_follow", "rotation_smoothing",
+            "rotation_rate", "combat_rotation", "traversal_rotation", "focus_rotation", "interior_rotation", "wall_clamp", "reset_distance", "reset_gap", "show_banner",
             "camera_tuning", "exploration_distance", "exploration_height", "exploration_shoulder", "exploration_fov", "sprint_distance",
             "sprint_height", "sprint_shoulder", "sprint_fov", "combat_distance", "combat_height", "combat_shoulder", "combat_fov", "focus_distance", "focus_height", "focus_shoulder", "focus_fov",
             "aiming_distance", "aiming_height", "aiming_shoulder", "aiming_fov", "traversal_distance", "traversal_height", "traversal_fov",
@@ -147,10 +151,14 @@ namespace dw::smoothwalker::settings
         else if (key == "aiming_follow") number(s.aiming_follow);
         else if (key == "combat_follow") number(s.combat_follow);
         else if (key == "traversal_follow") number(s.traversal_follow);
+        else if (key == "focus_follow") number(s.focus_follow);
+        else if (key == "interior_follow") number(s.interior_follow);
         else if (key == "rotation_smoothing") flag(s.rotation_smoothing);
         else if (key == "rotation_rate") number(s.rotation_rate);
         else if (key == "combat_rotation") number(s.combat_rotation);
         else if (key == "traversal_rotation") number(s.traversal_rotation);
+        else if (key == "focus_rotation") number(s.focus_rotation);
+        else if (key == "interior_rotation") number(s.interior_rotation);
         else if (key == "wall_clamp") flag(s.wall_clamp);
         else if (key == "reset_distance") number(s.reset_distance);
         else if (key == "reset_gap") number(s.reset_gap);
@@ -211,9 +219,13 @@ namespace dw::smoothwalker::settings
         s.aiming_follow = std::clamp(s.aiming_follow, 0.0, 100.0);
         s.combat_follow = std::clamp(s.combat_follow, 0.0, 100.0);
         s.traversal_follow = std::clamp(s.traversal_follow, 0.0, 100.0);
+        s.focus_follow = std::clamp(s.focus_follow, 0.0, 100.0);
+        s.interior_follow = std::clamp(s.interior_follow, 0.0, 100.0);
         s.rotation_rate = std::clamp(s.rotation_rate, 1.0, 60.0);
         s.combat_rotation = std::clamp(s.combat_rotation, 0.0, 100.0);
         s.traversal_rotation = std::clamp(s.traversal_rotation, 0.0, 100.0);
+        s.focus_rotation = std::clamp(s.focus_rotation, 0.0, 100.0);
+        s.interior_rotation = std::clamp(s.interior_rotation, 0.0, 100.0);
         s.reset_distance = std::clamp(s.reset_distance, 100.0, 3000.0);
         s.reset_gap = std::clamp(s.reset_gap, 0.05, 2.0);
         for (double* d : {&s.exploration_distance, &s.sprint_distance, &s.combat_distance, &s.focus_distance, &s.aiming_distance, &s.traversal_distance})
@@ -257,10 +269,14 @@ namespace dw::smoothwalker::settings
         if (key == "aiming_follow") return s.aiming_follow;
         if (key == "combat_follow") return s.combat_follow;
         if (key == "traversal_follow") return s.traversal_follow;
+        if (key == "focus_follow") return s.focus_follow;
+        if (key == "interior_follow") return s.interior_follow;
         if (key == "rotation_smoothing") return flag(s.rotation_smoothing);
         if (key == "rotation_rate") return s.rotation_rate;
         if (key == "combat_rotation") return s.combat_rotation;
         if (key == "traversal_rotation") return s.traversal_rotation;
+        if (key == "focus_rotation") return s.focus_rotation;
+        if (key == "interior_rotation") return s.interior_rotation;
         if (key == "wall_clamp") return flag(s.wall_clamp);
         if (key == "reset_distance") return s.reset_distance;
         if (key == "reset_gap") return s.reset_gap;

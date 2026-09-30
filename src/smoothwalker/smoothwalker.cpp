@@ -340,8 +340,12 @@ struct Smoothwalker::Impl
         m_processor.set_aiming(state.aiming);
         if (state.combat != m_processor.swap_combat(state.combat) && dw::verbose())
             Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] combat camera {}\n"), state.combat ? STR("on") : STR("off"));
+        if (state.focus != m_processor.swap_focus(state.focus) && dw::verbose())
+            Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] focus camera {}\n"), state.focus ? STR("on") : STR("off"));
         if (state.traversal != m_processor.swap_traversal(state.traversal) && dw::verbose())
             Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] traversal camera {}\n"), state.traversal ? STR("on") : STR("off"));
+        if (state.interior != m_processor.swap_interior(state.interior) && dw::verbose())
+            Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] interior {}\n"), state.interior ? STR("on") : STR("off"));
         if (!camera) return;
         auto generation = m_position_generation.load();
         if (generation == m_position_applied_generation) return;

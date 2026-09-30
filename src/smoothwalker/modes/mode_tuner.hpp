@@ -32,13 +32,15 @@ namespace dw::smoothwalker::modes
 {
     using namespace RC::Unreal;
 
-    // Whether an Aiming-, a Combat- or a Traversal-group mode is blending in or active, from one scan of the
-    // player's live modes.
+    // Whether an Aiming-, Combat-, Focus- or Traversal-group mode is blending in or active, from one scan of the
+    // player's live modes, and whether the player's camera type is Interior.
     struct ModeState
     {
         bool aiming = false;
         bool combat = false;
+        bool focus = false;
         bool traversal = false;
+        bool interior = false;
     };
 
     class ModeTuner
@@ -56,9 +58,11 @@ namespace dw::smoothwalker::modes
         // Before a map load: classes may unload.
         auto forget() -> void;
 
-        // Whether an Aiming-, Combat- or Traversal-group mode is blending in or active (ECameraModeState 0 or 1;
-        // 2 blending out, 3 popped). One GetState call per live instance of those three groups per engine tick,
-        // skipped once a group's flag is already set. A rescan request (a new camera or world, or an overflow in
+        // Whether an Aiming-, Combat-, Focus- or Traversal-group mode is blending in or active (ECameraModeState 0 or 1;
+        // 2 blending out, 3 popped). One GetState call per live instance of those four groups per engine tick,
+        // skipped once a group's flag is already set. Interior: one GetCameraType call per tick, on a
+        // RebelCameraComponent only; while the position flip has the camera type away, the type it left is reported
+        // (tick()). A rescan request (a new camera or world, or an overflow in
         // adopt_new) is served here on the next tick, not left to an apply that may never come. Only then does it
         // capture and walk every object; every other tick only adopts the hand-off. capture() on every tick would
         // retry a class dropped by an unload each time (about 50 ms a failed lookup) and capture a reloaded one
@@ -183,7 +187,7 @@ namespace dw::smoothwalker::modes
         UFunction* m_get_type = nullptr;
         UFunction* m_get_state = nullptr; // RebelCameraMode:GetState; without it aiming() stays false
         UStruct* m_mode_base = nullptr;   // RebelCameraMode: what an untracked object must derive from to be listed
-        UClass* m_camera_class = nullptr; // RebelCameraComponent: camera_type_name() calls GetCameraType only on one
+        UClass* m_camera_class = nullptr; // RebelCameraComponent: GetCameraType is called only on one
         bool m_camera_class_read = false;
         bool m_type_names_read = false;   // camera_type_name(): the enum names, read once
         int32_t m_type_offset = -1;       // GetCameraType's return value in its params
@@ -294,7 +298,12 @@ namespace dw::smoothwalker::modes
         // ECameraModeState; 0xFF if the call wrote nothing.
         auto get_state(UObject* mode) -> uint8_t;
 
+        // The return value at its reflected offset once camera_type_name() has resolved it, else at 0.
         auto get_camera_type(UObject* camera) -> uint8_t;
+
+        // Whether the object is a RebelCameraComponent, the class GetCameraType belongs to. The class is looked up
+        // once.
+        auto is_rebel_camera(UObject* camera) -> bool;
 
         auto set_camera_type(UObject* camera, uint8_t type) -> void;
 

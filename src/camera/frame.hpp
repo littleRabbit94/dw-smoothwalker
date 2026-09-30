@@ -12,7 +12,7 @@
 namespace dw::camera
 {
     // Filled by the core for one player-camera update. Whatever else a processor reads (its own settings, mode
-    // writes, the aiming / combat / traversal flags) is its own.
+    // writes, the aiming / combat / focus / traversal / interior flags) is its own.
     struct FrameIn
     {
         bool enabled;        // the processor's own switch as the core sampled it for this update (Processor::state)

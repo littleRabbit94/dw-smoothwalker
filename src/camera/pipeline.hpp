@@ -218,7 +218,7 @@ namespace dw::camera
         // The debug overlay's feed (CameraCore::read_debug): written by the hook on the player's camera updates, read
         // on the game thread at the overlay's refresh. Numbers only and relaxed, so a refresh may pair values from two
         // frames. NAN: not following (off, or the view was lost).
-        std::atomic<double> m_debug_keep_follow{NAN}; // share of the trail shown after the traversal, combat and aiming blends
+        std::atomic<double> m_debug_keep_follow{NAN}; // share of the trail shown after the interior, traversal, focus, combat and aiming blends
         std::atomic<double> m_debug_keep_turn{NAN};   // share of the turning smoothing shown
         std::atomic<int> m_debug_influence{0};        // follow::Influence: the largest weight in those blends
         std::atomic<double> m_debug_lag_h{NAN};       // cm of lag on screen (out_offset), horizontal

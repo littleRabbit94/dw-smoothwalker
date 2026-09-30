@@ -1,6 +1,6 @@
 // The follow as the camera core's view processor (camera/api.hpp, docs/design.md "Core and processors"): its switch
 // and toggle generation, its settings and their generation, and what the follow reads besides the core's frame
-// (mode writes, the aiming / combat / traversal flags), all on Smoothwalker's side of the interface. No Unreal or UE4SS
+// (mode writes, the aiming / combat / focus / traversal / interior flags), all on Smoothwalker's side of the interface. No Unreal or UE4SS
 // types: the core calls frame() and state() on the hook thread. Owned by the Smoothwalker component
 // (smoothwalker/smoothwalker.cpp) and registered with the core for its whole life.
 #pragma once
@@ -43,6 +43,10 @@ namespace dw::smoothwalker::follow
         t.combat_rotation_keep = s.combat_rotation / 100.0;
         t.traversal_follow_keep = s.traversal_follow / 100.0;
         t.traversal_rotation_keep = s.traversal_rotation / 100.0;
+        t.focus_follow_keep = s.focus_follow / 100.0;
+        t.focus_rotation_keep = s.focus_rotation / 100.0;
+        t.interior_follow_keep = s.interior_follow / 100.0;
+        t.interior_rotation_keep = s.interior_rotation / 100.0;
         t.transition = s.position_transition;
         return t;
     }
@@ -93,11 +97,14 @@ namespace dw::smoothwalker::follow
         auto set_log_stats(bool on) -> void { m_log_stats.store(on); }
         auto log_stats() const -> bool { return m_log_stats.load(); }
 
-        // Game thread, each engine tick: which camera-mode groups are blending in or active. The combat and
-        // traversal setters return the previous value, for the verbose log.
+        // Game thread, each engine tick: which camera-mode groups are blending in or active, and whether the game's
+        // camera type is Interior. The combat, focus, traversal and interior setters return the previous value, for
+        // the verbose log.
         auto set_aiming(bool on) -> void { m_aiming.store(on); }
         auto swap_combat(bool on) -> bool { return m_combat.exchange(on); }
+        auto swap_focus(bool on) -> bool { return m_focus.exchange(on); }
         auto swap_traversal(bool on) -> bool { return m_traversal.exchange(on); }
+        auto swap_interior(bool on) -> bool { return m_interior.exchange(on); }
 
         // Game thread: a camera-mode write landed; its FOV shows on the next camera update, so it crossfades, and its
         // distance glides in, so the wall clamp holds off meanwhile.
@@ -128,7 +135,9 @@ namespace dw::smoothwalker::follow
         std::atomic<uint64_t> m_position_generation{0}; // mode writes; their FOV lands on the next camera update
         std::atomic<bool> m_aiming{false};    // an aiming camera mode is blending in or active
         std::atomic<bool> m_combat{false};    // a combat camera mode is blending in or active
+        std::atomic<bool> m_focus{false};     // a focus camera mode is blending in or active
         std::atomic<bool> m_traversal{false}; // a traversal camera mode is blending in or active
+        std::atomic<bool> m_interior{false};  // the game's camera type is Interior
         std::atomic<bool> m_log_stats{false};
         std::atomic<uint64_t> m_frames{0};
         std::atomic<uint64_t> m_clamped{0};
@@ -153,7 +162,9 @@ namespace dw::smoothwalker::follow
             m_seen_position = position;
             sw.aiming = m_aiming.load(std::memory_order_relaxed);
             sw.combat = m_combat.load(std::memory_order_relaxed);
+            sw.focus = m_focus.load(std::memory_order_relaxed);
             sw.traversal = m_traversal.load(std::memory_order_relaxed);
+            sw.interior = m_interior.load(std::memory_order_relaxed);
             if (settings != m_seen_settings || sw.mode_write) ++m_generation;
             m_seen_settings = settings;
 

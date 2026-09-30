@@ -1,6 +1,6 @@
 // The follow: the math behind Smoothwalker's view processor (processor.hpp, camera/frame.hpp). A smoothed pivot
 // trails the capsule, the camera becomes smoothed pivot + (game camera - pivot), so orbiting stays instant and only
-// following lags. Optional rotation smoothing, the crouch hold, the aiming / combat / traversal shares and the wall
+// following lags. Optional rotation smoothing, the crouch hold, the aiming / combat / focus / traversal / interior shares and the wall
 // clamp live here too. docs/design.md, "Follow", "Pivot" and "Walls". Numbers only: runs on the hook thread, no
 // Unreal or UE4SS types.
 #pragma once
@@ -16,13 +16,16 @@
 
 namespace dw::smoothwalker::follow
 {
-    // Which override the shown trail mostly follows: the largest weight in the traversal, combat, aiming chain.
+    // Which override the shown trail mostly follows: the largest weight in the interior, traversal, focus, combat,
+    // aiming chain.
     enum class Influence : int
     {
         None,
         Traversal,
         Combat,
         Aiming,
+        Focus,    // after the first four: the ints are recorded (session goldens), so new values append
+        Interior,
     };
 
     // The follow's settings. Numbers only, so the hook's copy allocates nothing on a worker thread.
@@ -38,6 +41,10 @@ namespace dw::smoothwalker::follow
         double combat_rotation_keep = 1.0;    // combat_rotation as a share: the turning smoothing kept while a combat camera is up
         double traversal_follow_keep = 1.0;   // traversal_follow as a share: the trail kept while a traversal camera is up
         double traversal_rotation_keep = 1.0; // traversal_rotation as a share: the turning smoothing kept while a traversal camera is up
+        double focus_follow_keep = 1.0;       // focus_follow as a share: the trail kept while a focus camera is up
+        double focus_rotation_keep = 1.0;     // focus_rotation as a share: the turning smoothing kept while a focus camera is up
+        double interior_follow_keep = 1.0;    // interior_follow as a share: the trail kept while the game's camera type is Interior
+        double interior_rotation_keep = 1.0;  // interior_rotation as a share: the turning smoothing kept while the game's camera type is Interior
         double transition = 0.0;              // s, position_transition: the core's crossfade, and a mode write's wall-clamp hold
     };
 
@@ -49,15 +56,18 @@ namespace dw::smoothwalker::follow
                a.wall_clamp == b.wall_clamp && a.rotation_rate == b.rotation_rate && a.aiming_keep == b.aiming_keep &&
                a.combat_follow_keep == b.combat_follow_keep && a.combat_rotation_keep == b.combat_rotation_keep &&
                a.traversal_follow_keep == b.traversal_follow_keep && a.traversal_rotation_keep == b.traversal_rotation_keep &&
+               a.focus_follow_keep == b.focus_follow_keep && a.focus_rotation_keep == b.focus_rotation_keep &&
+               a.interior_follow_keep == b.interior_follow_keep && a.interior_rotation_keep == b.interior_rotation_keep &&
                a.transition == b.transition;
     }
 
     // What the follow reads besides the core's frame, all Smoothwalker's: a camera-mode write landed since the last
-    // frame (its distance glides in over the transition), and which camera-mode groups are blending in or active.
+    // frame (its distance glides in over the transition), which camera-mode groups are blending in or active, and
+    // whether the game's camera type is Interior.
     struct FollowInputs
     {
         bool mode_write = false;
-        bool aiming = false, combat = false, traversal = false;
+        bool aiming = false, combat = false, focus = false, traversal = false, interior = false;
     };
 
     // The log_stats numbers of one frame.
@@ -114,7 +124,9 @@ namespace dw::smoothwalker::follow
         double m_nominal_distance = 0.0;
         double m_aim = 0.0;          // 0 to 1, eased toward aiming: how far the follow is handed to the player's aim
         double m_combat = 0.0;       // 0 to 1, eased toward combat: how far the follow is handed to the combat camera
+        double m_focus = 0.0;        // 0 to 1, eased toward focus: how far the follow is handed to the focus camera
         double m_traversal = 0.0;    // 0 to 1, eased toward traversal: how far the follow is handed to the traversal camera
+        double m_interior = 0.0;     // 0 to 1, eased toward interior: how far the follow is handed to the indoor camera type
         double m_nominal_hold = 0.0; // s left in which m_nominal_distance tracks the game: a position write is gliding
 
         // A crouch drops the capsule centre by the half-height change in one frame (54 cm here) while the game
@@ -129,7 +141,9 @@ namespace dw::smoothwalker::follow
         {
             m_aim = sw.aiming ? 1.0 : 0.0;
             m_combat = sw.combat ? 1.0 : 0.0;
+            m_focus = sw.focus ? 1.0 : 0.0;
             m_traversal = sw.traversal ? 1.0 : 0.0;
+            m_interior = sw.interior ? 1.0 : 0.0;
             m_pivot_smoothed = dw::Vec3{in.pivot.x, in.pivot.y, feet_z(in)};
             m_rotation_smoothed = in.rotation;
             m_half_last = in.half_height;
@@ -186,30 +200,46 @@ namespace dw::smoothwalker::follow
             m_aim += (aim_target - m_aim) * (1.0 - std::exp(-8.0 * dt));
             double combat_target = sw.combat ? 1.0 : 0.0;
             m_combat += (combat_target - m_combat) * (1.0 - std::exp(-8.0 * dt));
+            double focus_target = sw.focus ? 1.0 : 0.0;
+            m_focus += (focus_target - m_focus) * (1.0 - std::exp(-8.0 * dt));
             double traversal_target = sw.traversal ? 1.0 : 0.0;
             m_traversal += (traversal_target - m_traversal) * (1.0 - std::exp(-8.0 * dt));
+            double interior_target = sw.interior ? 1.0 : 0.0;
+            m_interior += (interior_target - m_interior) * (1.0 - std::exp(-8.0 * dt));
 
-            // Traversal hands the shown trail and turning to traversal_follow/traversal_rotation as it comes up;
-            // combat takes over from wherever traversal left it, and aiming from wherever combat left it, smoothly.
-            // Aiming wins over traversal: AimingClawRide and AntiGravAiming stack on top of ClawRide and AntiGrav.
+            // Indoors is the base context: interior_follow/interior_rotation replace the full trail and turning
+            // smoothing while the game's camera type is Interior. Each camera-mode override takes over from wherever
+            // the one below left it, smoothly, and its percentage is absolute in its own context: traversal over
+            // interior, focus over traversal, combat over focus, aiming over combat. Aiming wins over traversal:
+            // AimingClawRide and AntiGravAiming stack on top of ClawRide and AntiGrav.
             auto lerp = [](double a, double b, double f) { return a + (b - a) * f; };
             double aiming_keep = std::clamp(t.aiming_keep, 0.0, 1.0);
             double combat_follow_keep = std::clamp(t.combat_follow_keep, 0.0, 1.0);
             double combat_rotation_keep = std::clamp(t.combat_rotation_keep, 0.0, 1.0);
             double traversal_follow_keep = std::clamp(t.traversal_follow_keep, 0.0, 1.0);
             double traversal_rotation_keep = std::clamp(t.traversal_rotation_keep, 0.0, 1.0);
-            double keep_pos = lerp(lerp(lerp(1.0, traversal_follow_keep, m_traversal), combat_follow_keep, m_combat), aiming_keep, m_aim);
-            double keep_rot = lerp(lerp(lerp(1.0, traversal_rotation_keep, m_traversal), combat_rotation_keep, m_combat), aiming_keep, m_aim);
+            double focus_follow_keep = std::clamp(t.focus_follow_keep, 0.0, 1.0);
+            double focus_rotation_keep = std::clamp(t.focus_rotation_keep, 0.0, 1.0);
+            double interior_follow_keep = std::clamp(t.interior_follow_keep, 0.0, 1.0);
+            double interior_rotation_keep = std::clamp(t.interior_rotation_keep, 0.0, 1.0);
+            double keep_pos = lerp(lerp(lerp(lerp(lerp(1.0, interior_follow_keep, m_interior), traversal_follow_keep, m_traversal), focus_follow_keep, m_focus),
+                                        combat_follow_keep, m_combat),
+                                   aiming_keep, m_aim);
+            double keep_rot = lerp(lerp(lerp(lerp(lerp(1.0, interior_rotation_keep, m_interior), traversal_rotation_keep, m_traversal), focus_rotation_keep, m_focus),
+                                        combat_rotation_keep, m_combat),
+                                   aiming_keep, m_aim);
             out.feed = true;
             out.keep_follow = keep_pos;
             out.keep_turn = keep_rot;
             {
-                // The weight each keep carries in the chain above: aiming's, combat's under it, traversal's under
-                // both, and the rest (none). They sum to 1; the largest names the influence.
+                // The weight each keep carries in the chain above: aiming's, combat's under it, then focus's,
+                // traversal's and interior's, and the rest (none). They sum to 1; the largest names the influence.
                 double w_aim = m_aim;
                 double w_combat = m_combat * (1.0 - m_aim);
-                double w_traversal = m_traversal * (1.0 - m_combat) * (1.0 - m_aim);
-                double weights[4]{1.0 - w_aim - w_combat - w_traversal, w_traversal, w_combat, w_aim}; // in Influence order
+                double w_focus = m_focus * (1.0 - m_combat) * (1.0 - m_aim);
+                double w_traversal = m_traversal * (1.0 - m_focus) * (1.0 - m_combat) * (1.0 - m_aim);
+                double w_interior = m_interior * (1.0 - m_traversal) * (1.0 - m_focus) * (1.0 - m_combat) * (1.0 - m_aim);
+                double weights[6]{1.0 - w_aim - w_combat - w_focus - w_traversal - w_interior, w_traversal, w_combat, w_aim, w_focus, w_interior}; // in Influence order
                 out.influence = static_cast<int>(std::max_element(std::begin(weights), std::end(weights)) - std::begin(weights));
             }
 

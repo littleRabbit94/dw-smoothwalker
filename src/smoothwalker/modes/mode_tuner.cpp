@@ -162,10 +162,18 @@ namespace
         ModeState state;
         if (m_scan_needed) ensure_scanned(player_camera);
         else adopt_new();
+        if (m_get_type && player_camera && is_rebel_camera(player_camera))
+        {
+            // The flip switches the type away from its home for one update: that is not the game leaving or
+            // entering an interior, so the type it left stands in for the read.
+            if (m_flip_stage == Away && player_camera == m_flip_camera) state.interior = m_flip_home == INTERIOR_KEY;
+            else state.interior = get_camera_type(player_camera) == INTERIOR_KEY;
+        }
         if (!m_layout_ok || !m_get_state || m_scan_needed) return state;
         for_each_instance([&](UObject* instance, Mode& mode) {
             bool* found = mode.spec.group == Aiming      ? &state.aiming
                           : mode.spec.group == Combat    ? &state.combat
+                          : mode.spec.group == Focus     ? &state.focus
                           : mode.spec.group == Traversal ? &state.traversal
                                                          : nullptr;
             if (!found || *found) return;
@@ -206,13 +214,7 @@ namespace
     auto ModeTuner::camera_type_name(UObject* player_camera) -> std::wstring
     {
         if (!m_get_type || !player_camera) return {};
-        if (!m_camera_class_read)
-        {
-            m_camera_class_read = true;
-            m_camera_class = UObjectGlobals::StaticFindObject<UClass*>(nullptr, nullptr, STR("/Script/RebelCamera.RebelCameraComponent"));
-        }
-        auto* cls = player_camera->GetClassPrivate();
-        if (!m_camera_class || !cls || !cls->IsChildOf(m_camera_class)) return L"n/a";
+        if (!is_rebel_camera(player_camera)) return L"n/a";
         if (!m_type_names_read)
         {
             m_type_names_read = true;
@@ -748,7 +750,18 @@ namespace
     {
         uint8_t params[16]{};
         camera->ProcessEvent(m_get_type, params);
-        return params[0];
+        return params[m_type_offset >= 0 && m_type_offset < static_cast<int32_t>(sizeof(params)) ? m_type_offset : 0];
+    }
+
+    auto ModeTuner::is_rebel_camera(UObject* camera) -> bool
+    {
+        if (!m_camera_class_read)
+        {
+            m_camera_class_read = true;
+            m_camera_class = UObjectGlobals::StaticFindObject<UClass*>(nullptr, nullptr, STR("/Script/RebelCamera.RebelCameraComponent"));
+        }
+        auto* cls = camera->GetClassPrivate();
+        return m_camera_class && cls && cls->IsChildOf(m_camera_class);
     }
 
     auto ModeTuner::set_camera_type(UObject* camera, uint8_t type) -> void
