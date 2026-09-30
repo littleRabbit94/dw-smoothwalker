@@ -176,16 +176,33 @@ TEST(speed_blend, eased_speed_and_restart)
     p.x += 460.0 * DT;
     b.share(t, none, NAN, p, DT, 1.0);
     CHECK_NEAR(b.speed(), 460.0, 1e-6);
-    // Then eased: a step to 558 is about 63 % there after 0.4 s.
-    for (int i = 0; i < 24; ++i)
+    // Then eased through two stages: a step to 558 starts slower than one stage would move it, and is 98 % there after
+    // six rise times (1 - e^-6 * 7 for two equal stages).
+    p.x += 558.0 * DT;
+    b.share(t, none, NAN, p, DT, 1.0);
+    CHECK(b.speed() - 460.0 < (558.0 - 460.0) * (1.0 - std::exp(-DT / t.rise)) * 0.1);
+    for (int i = 1; i < 180; ++i)
     {
         p.x += 558.0 * DT;
         b.share(t, none, NAN, p, DT, 1.0);
     }
-    CHECK_NEAR(b.speed(), 460.0 + (558.0 - 460.0) * (1.0 - std::exp(-24.0 * DT / SPEED_EASE)), 1e-6);
+    CHECK(b.speed() > 460.0 + (558.0 - 460.0) * 0.98 && b.speed() < 558.0);
+    // A turn's dip, 0.5 s at 330 from a run of 460, falls on the slower fall: the eased speed stays above 425 (433.8 at
+    // the defaults; one 0.4 s stage, before 2026-09-30, went down to 367).
+    b.restart(p, false);
+    p.x += 460.0 * DT;
+    b.share(t, none, NAN, p, DT, 1.0);
+    double low = b.speed();
+    for (int i = 0; i < 90; ++i)
+    {
+        p.x += (i < 30 ? 330.0 : 460.0) * DT;
+        b.share(t, none, NAN, p, DT, 1.0);
+        low = std::min(low, b.speed());
+    }
+    CHECK(low > 425.0);
     // Vertical motion is not speed.
     const double before = b.speed();
-    for (int i = 0; i < 60; ++i)
+    for (int i = 0; i < 360; ++i)
     {
         p.z += 300.0 * DT;
         b.share(t, none, NAN, p, DT, 1.0);

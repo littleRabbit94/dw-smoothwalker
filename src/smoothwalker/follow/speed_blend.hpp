@@ -20,6 +20,8 @@ namespace dw::smoothwalker::follow
         double amount = 0.0;         // speed_blend as a share; 0 with camera_tuning off: the modes hold no Sprint settings then
         double start = 0.0;          // cm/s at which the blend starts (speed_blend_start)
         double full = 0.0;           // cm/s at which it is complete (speed_blend_full)
+        double rise = 0.35;          // s per easing stage while the speed climbs (speed_blend_rise); the defaults run while off
+        double fall = 0.75;          // s per easing stage while it drops (speed_blend_fall)
         double distance_ratio = 1.0; // sprint_distance / exploration_distance
         double height = 0.0;         // cm, sprint_height - exploration_height
         double shoulder = 0.0;       // cm, sprint_shoulder - exploration_shoulder
@@ -28,8 +30,8 @@ namespace dw::smoothwalker::follow
 
     inline auto operator==(const SpeedBlendTuning& a, const SpeedBlendTuning& b) -> bool
     {
-        return a.amount == b.amount && a.start == b.start && a.full == b.full && a.distance_ratio == b.distance_ratio && a.height == b.height &&
-               a.shoulder == b.shoulder && a.fov == b.fov;
+        return a.amount == b.amount && a.start == b.start && a.full == b.full && a.rise == b.rise && a.fall == b.fall &&
+               a.distance_ratio == b.distance_ratio && a.height == b.height && a.shoulder == b.shoulder && a.fov == b.fov;
     }
 
     // What the game thread knows of the Sprint camera (ModeTuner::mode_state): the FOVs as written of the live exploring
@@ -42,7 +44,6 @@ namespace dw::smoothwalker::follow
         bool sprint = false;
     };
 
-    inline constexpr double SPEED_EASE = 0.4;    // s, time constant of the eased speed: turn dips and the run-to-sprint step do not pump the camera
     inline constexpr double SPEED_CAP = 1500.0;  // cm/s, one frame's reading at most (haste is about 900): a root-motion snap under reset_distance stays a blip
     inline constexpr double SPRINT_IN = 0.5;     // s, Sprint's BlendInArgs: the state weight's rise
     inline constexpr double SPRINT_OUT = 1.0;    // s, Sprint's BlendOutArgs: its fall
@@ -104,7 +105,7 @@ namespace dw::smoothwalker::follow
         {
             m_last = pivot;
             m_primed = false;
-            m_speed = 0.0;
+            m_stage = m_speed = 0.0;
             m_ramp = sprint ? 1.0 : 0.0;
         }
 
@@ -117,7 +118,14 @@ namespace dw::smoothwalker::follow
             {
                 const double dx = pivot.x - m_last.x, dy = pivot.y - m_last.y;
                 const double reading = std::min(std::sqrt(dx * dx + dy * dy) / dt, SPEED_CAP);
-                m_speed = m_primed ? m_speed + (reading - m_speed) * (1.0 - std::exp(-dt / SPEED_EASE)) : reading;
+                if (m_primed)
+                {
+                    // Two stages in series: the camera starts moving gently rather than with a keyboard's step to a run,
+                    // and a slower fall lets a turn's short dip pass while a stop still settles.
+                    m_stage = ease(m_stage, reading, t, dt);
+                    m_speed = ease(m_speed, m_stage, t, dt);
+                }
+                else m_stage = m_speed = reading;
                 m_primed = true;
                 const double target = v.sprint ? 1.0 : 0.0;
                 const double step = dt / (target > m_ramp ? SPRINT_IN : SPRINT_OUT);
@@ -134,9 +142,16 @@ namespace dw::smoothwalker::follow
         auto speed() const -> double { return m_speed; }
 
       private:
+        static auto ease(double from, double to, const SpeedBlendTuning& t, double dt) -> double
+        {
+            const double time = std::max(to > from ? t.rise : t.fall, 1e-3);
+            return from + (to - from) * (1.0 - std::exp(-dt / time));
+        }
+
         dw::Vec3 m_last{};
         bool m_primed = false; // a reading since the restart: the first sets the speed, later ones ease it
-        double m_speed = 0.0;  // cm/s, eased
+        double m_stage = 0.0;  // cm/s, the first easing stage
+        double m_speed = 0.0;  // cm/s, eased through both
         double m_ramp = 0.0;   // 0 to 1, the Sprint state weight before its S-curve
     };
 } // namespace dw::smoothwalker::follow

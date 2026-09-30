@@ -673,13 +673,23 @@ Sprint base (20 cm closer, +5 FOV) still arrives with `w`.
 - **Exploring only.** The share is multiplied by `1 - max(aim, combat, focus, traversal)`, the factors the follow
   already eases, so every context override wins.
 - **Speed** (`SpeedBlend`). Pivot displacement over world delta, horizontal only, one frame's reading capped at
-  1500 cm/s, eased with a 0.4 s time constant; a cut takes the next frame's reading as is.
+  1500 cm/s, eased through two stages in series, each with `speed_blend_rise` (0.35 s) while it climbs and
+  `speed_blend_fall` (0.75 s) while it drops; a cut takes the next frame's reading as is. Two stages start the camera
+  gently from a keyboard's step to a run (0 to 460 in about 0.75 s), and the slower fall lets a turn's short dip pass
+  while a stop still settles. One 0.4 s stage, the first build, pumped visibly on keyboard and mouse: a direction
+  change dips speed to 250 to 360 for about half a second.
+- **Easing tuned 2026-09-30** on keyboard and mouse (the same settings as below), by replaying recorded pivot speeds
+  through the filter; the replay matched the shown FOV to 0.013 degree median. Per turn dip while running, the FOV
+  add's peak to peak in 1 s windows: one 0.4 s stage 0.96 degree mean (up to 2.9), 0.5 / 1.0 s 0.42, 0.31 / 0.8 s
+  0.31 (a later run, measured). At 0.35 / 0.75 on the first trace: a standing start reaches 90 % of the run's add in
+  about 2.4 s (one stage: 1.6 s), a stop settles to 10 % in about 1.2 s (one stage: 0.3 s; 0.31 / 0.8 measured 1.26
+  and 1.41 s), turn dips 0.48 degree. The player chose 0.35 / 0.75 from those trade-offs.
 - **Settings.** `speed_blend`, percent 0 to 100, on the page under Camera: Sprinting, and a preset key (0 in every
   built-in, so no preset changes). `speed_blend_start` 150 and `speed_blend_full` 558, ini only, clamped 0 to 2000;
-  full at or below start makes the blend a step at start. A change bumps the follow's generation (`same_values`) and
+  full at or below start makes the blend a step at start. `speed_blend_rise` and `speed_blend_fall`, ini only, clamped
+  0.05 to 5 s. A change bumps the follow's generation (`same_values`) and
   crossfades; while `speed_blend` or `camera_tuning` is 0 the tuning stays neutral and bumps nothing.
-- **Guessed, not measured:** the 0.4 s speed easing, the 1500 cm/s cap, the fallback ramp's shape, the 5 cm shoulder
-  ramp. The easing read fine in play: the add wanders about 0.5 to 0.8 degree on turns at a run, not noticed.
+- **Guessed, not measured:** the 1500 cm/s cap, the fallback ramp's shape, the 5 cm shoulder ramp.
 - **The debug overlay's lag and the markers' follow offset include the push**, since it is part of the follow's
   output: tens of cm while running read as lag there.
 - **Verified in game 2026-09-30** (exploring 115 % / FOV +5, sprint 130 % / FOV +10, `speed_blend` 100,
@@ -2056,4 +2066,5 @@ each group's settings. Preset keys 41 to 45, menu page 48 to 52 settings. See "I
 
 Speed blend (2026-09-30): `speed_blend` brings the Sprint group's settings in with the character's speed, from a walk
 to a sprint, and hands over to the game's own Sprint blend with no step. `FrameIn` carries the game's FOV and
-`FrameOut` an added FOV. Preset keys 50, menu page 59 settings. See "Speed blend (`speed_blend`)".
+`FrameOut` an added FOV. Preset keys 50, menu page 59 settings. See "Speed blend (`speed_blend`)". The speed eases through two stages, `speed_blend_rise` 0.35 s and `speed_blend_fall` 0.75 s (ini only), after one
+0.4 s stage pumped the camera on keyboard turns.

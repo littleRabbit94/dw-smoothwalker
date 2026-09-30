@@ -57,7 +57,9 @@ namespace dw::smoothwalker::settings
         double sprint_distance = 100, sprint_height = 0, sprint_shoulder = 0, sprint_fov = 0;
         // The speed blend (follow/speed_blend.hpp): percent of the Sprint group's difference from the Exploration group's
         // that arrives with speed, from speed_blend_start to speed_blend_full cm/s (ini only; guessed: just above walk, sprint).
-        double speed_blend = 0, speed_blend_start = 150, speed_blend_full = 558;
+        // The speed eases through two stages of speed_blend_rise s each while it climbs and speed_blend_fall s while it drops
+        // (ini only; tuned on a keyboard run 2026-09-30: a start in about 2.4 s, a stop settled in about 1.2 s).
+        double speed_blend = 0, speed_blend_start = 150, speed_blend_full = 558, speed_blend_rise = 0.35, speed_blend_fall = 0.75;
         double combat_distance = 100, combat_height = 0, combat_shoulder = 0, combat_fov = 0;
         double focus_distance = 100, focus_height = 0, focus_shoulder = 0, focus_fov = 0; // 0.9.0; a file without them takes combat's
         double aiming_distance = 100, aiming_height = 0, aiming_shoulder = 0, aiming_fov = 0;
@@ -90,12 +92,12 @@ namespace dw::smoothwalker::settings
             "traversal_height", "traversal_fov", "interior_distance", "interior_height", "interior_shoulder", "interior_fov"};
 
     // Every numeric setting: the ones the Mod Menu can move and the mod writes back.
-    inline const std::array<const char*, 65> NUMERIC_KEYS{
+    inline const std::array<const char*, 67> NUMERIC_KEYS{
             "enabled", "follow_rate_h", "follow_rate_v", "curve_h", "curve_v", "catchup_distance", "min_rate_scale", "max_lag_h",
             "max_lag_v", "soft_leash", "aiming_follow", "combat_follow", "traversal_follow", "focus_follow", "interior_follow", "rotation_smoothing",
             "rotation_rate", "combat_rotation", "traversal_rotation", "focus_rotation", "interior_rotation", "wall_clamp", "reset_distance", "reset_gap", "show_banner",
             "camera_tuning", "exploration_distance", "exploration_height", "exploration_shoulder", "exploration_fov", "sprint_distance",
-            "sprint_height", "sprint_shoulder", "sprint_fov", "speed_blend", "speed_blend_start", "speed_blend_full", "combat_distance", "combat_height", "combat_shoulder", "combat_fov", "focus_distance", "focus_height", "focus_shoulder", "focus_fov",
+            "sprint_height", "sprint_shoulder", "sprint_fov", "speed_blend", "speed_blend_start", "speed_blend_full", "speed_blend_rise", "speed_blend_fall", "combat_distance", "combat_height", "combat_shoulder", "combat_fov", "focus_distance", "focus_height", "focus_shoulder", "focus_fov",
             "aiming_distance", "aiming_height", "aiming_shoulder", "aiming_fov", "traversal_distance", "traversal_height", "traversal_fov",
             "interior_distance", "interior_height", "interior_shoulder", "interior_fov", "shoulder_swap", "pitch_min", "pitch_max", "position_transition", "preset", "log_stats", "log_verbose", "debug_overlay",
             "debug_markers"};
@@ -181,6 +183,8 @@ namespace dw::smoothwalker::settings
         else if (key == "speed_blend") number(s.speed_blend);
         else if (key == "speed_blend_start") number(s.speed_blend_start);
         else if (key == "speed_blend_full") number(s.speed_blend_full);
+        else if (key == "speed_blend_rise") number(s.speed_blend_rise);
+        else if (key == "speed_blend_fall") number(s.speed_blend_fall);
         else if (key == "combat_distance") number(s.combat_distance);
         else if (key == "combat_height") number(s.combat_height);
         else if (key == "combat_shoulder") number(s.combat_shoulder);
@@ -253,6 +257,8 @@ namespace dw::smoothwalker::settings
         s.speed_blend = std::clamp(s.speed_blend, 0.0, 100.0);
         s.speed_blend_start = std::clamp(s.speed_blend_start, 0.0, 2000.0); // ini only: no page range; haste is about 900 cm/s
         s.speed_blend_full = std::clamp(s.speed_blend_full, 0.0, 2000.0);
+        s.speed_blend_rise = std::clamp(s.speed_blend_rise, 0.05, 5.0);
+        s.speed_blend_fall = std::clamp(s.speed_blend_fall, 0.05, 5.0);
         s.interior_distance = std::clamp(s.interior_distance, 50.0, 200.0);
         s.interior_height = std::clamp(s.interior_height, -50.0, 50.0);
         s.interior_shoulder = std::clamp(s.interior_shoulder, -60.0, 60.0);
@@ -302,6 +308,8 @@ namespace dw::smoothwalker::settings
         if (key == "speed_blend") return s.speed_blend;
         if (key == "speed_blend_start") return s.speed_blend_start;
         if (key == "speed_blend_full") return s.speed_blend_full;
+        if (key == "speed_blend_rise") return s.speed_blend_rise;
+        if (key == "speed_blend_fall") return s.speed_blend_fall;
         if (key == "combat_distance") return s.combat_distance;
         if (key == "combat_height") return s.combat_height;
         if (key == "combat_shoulder") return s.combat_shoulder;

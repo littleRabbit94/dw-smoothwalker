@@ -56,6 +56,8 @@ namespace dw::smoothwalker::follow
             t.speed.amount = s.speed_blend / 100.0;
             t.speed.start = s.speed_blend_start;
             t.speed.full = s.speed_blend_full;
+            t.speed.rise = s.speed_blend_rise;
+            t.speed.fall = s.speed_blend_fall;
             t.speed.distance_ratio = s.exploration_distance > 0.0 ? s.sprint_distance / s.exploration_distance : 1.0;
             t.speed.height = s.sprint_height - s.exploration_height;
             t.speed.shoulder = s.sprint_shoulder - s.exploration_shoulder;

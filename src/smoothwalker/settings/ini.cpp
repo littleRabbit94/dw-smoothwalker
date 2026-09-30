@@ -169,6 +169,8 @@ namespace dw::smoothwalker::settings
             {"speed_blend", "percent of the sprinting settings above that arrive with speed, from a walk to a sprint; 0 switches at the sprint as the game does"},
             {"speed_blend_start", "cm/s at which that blend starts (walk is about 131)"},
             {"speed_blend_full", "cm/s at which it is complete (sprint is about 558)"},
+            {"speed_blend_rise", "s the speed takes to ease up, per stage of two (higher: a gentler start)"},
+            {"speed_blend_fall", "s the speed takes to ease down, per stage of two (higher: turns pump the camera less, stops settle slower)"},
             {"combat_distance", "percent of the game's distance behind the character"},
             {"combat_height", "cm higher"},
             {"combat_shoulder", "cm further out to the side (centred camera modes are left alone)"},
