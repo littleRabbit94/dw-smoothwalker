@@ -1,0 +1,9 @@
+# seed frames fnv1a64: tests/unit/session_test.cpp, MSVC only; re-record with dw_unit --record-session
+1 20000 14e0912b1388c6fd
+2 20000 aec36afede293f8f
+3 20000 680606a557a911c6
+4 20000 db2c5b4ad7e3517a
+5 20000 f44a4219454ce8b0
+6 20000 f6b7b9e67e184398
+7 20000 1e377c1ed25059ba
+8 20000 4bf8cf1846403ac4

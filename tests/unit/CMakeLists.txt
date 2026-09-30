@@ -18,20 +18,25 @@ add_executable(dw_unit
     store_test.cpp
     panel_test.cpp
     position_test.cpp
+    session_test.cpp
     "${DW_SRC}/camera/authority.cpp"
     "${DW_SRC}/camera/guarded.cpp"
+    "${DW_SRC}/camera/hook.cpp"
     "${DW_SRC}/camera/pipeline.cpp"
     "${DW_SRC}/smoothwalker/settings/ini.cpp"
     "${DW_SRC}/smoothwalker/settings/presets.cpp"
     "${DW_SRC}/smoothwalker/settings/store.cpp")
 target_compile_features(dw_unit PRIVATE cxx_std_23)
+# hook.cpp logs through UE4SS: session/ holds a sink for its DynamicOutput include, on its include path only.
+set_source_files_properties("${DW_SRC}/camera/hook.cpp" PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/session")
 target_include_directories(dw_unit PRIVATE "${DW_SRC}" "${CMAKE_CURRENT_SOURCE_DIR}")
-# store_test reads the shipped smoothwalker.ini and mod_settings.ini as fixtures.
+# store_test reads the shipped smoothwalker.ini and mod_settings.ini as fixtures; session_test reads and records
+# tests/unit/session_golden.txt.
 target_compile_definitions(dw_unit PRIVATE DW_REPO="${PROJECT_SOURCE_DIR}")
 if(MSVC)
     target_compile_options(dw_unit PRIVATE /W4 /utf-8 /permissive-)
 endif()
 
-foreach(suite math curves wall follow pipeline authority ini presets store panel position)
+foreach(suite math curves wall follow pipeline authority ini presets store panel position session)
     add_test(NAME ${suite} COMMAND dw_unit ${suite})
 endforeach()
