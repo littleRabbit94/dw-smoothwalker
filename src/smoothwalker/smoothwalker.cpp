@@ -9,7 +9,10 @@
 #include "settings/presets.hpp"
 #include "settings/settings.hpp"
 #include "settings/store.hpp"
+#include "ui/banner.hpp"
 #include "ui/debug_overlay.hpp"
+#include "ui/menu_probe.hpp"
+#include "ui/panel.hpp"
 #include "modes/mode_tuner.hpp"
 #include "../common/live_ref.hpp"
 #include "../common/log.hpp"
@@ -92,7 +95,7 @@ struct Smoothwalker::Impl
             else if (level == settings::Level::Verbose) Output::send<LogLevel::Verbose>(STR("{}"), line);
             else Output::send<LogLevel::Normal>(STR("{}"), line);
         }
-        auto banner(const std::wstring& text) -> void override { self.request_banner(text); }
+        auto banner(const std::wstring& text) -> void override { self.m_banner.request(text); }
         auto publish() -> void override { self.publish_locked(); }
         auto set_enabled(bool on) -> void override { self.set_enabled_locked(on); }
         auto store_enabled(bool on) -> void override { self.m_processor.store_enabled(on); }
@@ -100,9 +103,7 @@ struct Smoothwalker::Impl
     settings::Win32Files m_files;
     StoreEvents m_store_events{*this};
     settings::SettingsStore m_store{m_files, m_store_events};
-    UClass* m_activatable_class = nullptr;        // CommonActivatableWidget, the Mod Menu's host class
-    UObject* m_menu_host = nullptr;               // the Mod Menu host last seen open; checked before any rescan
-    bool m_menu_logged = false;
+    ui::MenuProbe m_menu;                         // game thread only
 
     modes::ModeTuner m_tuner; // game thread only
     std::mutex m_position_mutex;
@@ -112,18 +113,7 @@ struct Smoothwalker::Impl
 
     std::chrono::steady_clock::time_point m_last_report{}, m_last_poll{};
 
-    std::mutex m_banner_mutex; // m_banner_text, m_banner_due, m_banner_pending
-    std::wstring m_banner_text;
-    std::chrono::steady_clock::time_point m_banner_due{};
-    bool m_banner_pending = false;
-    int32_t m_queue_offset = -1;        // NotificationSubsystem::NotificationQueue
-    int32_t m_region_data_offset = -1;  // RegionEnteredNotificationInfo::RegionData
-    UClass* m_region_info_class = nullptr;
-    std::atomic<bool> m_show_banner{true};
-    int m_banner_state = 0; // 0 unresolved, 1 ready, -1 unavailable (game thread only)
-    UFunction* m_banner_function = nullptr;
-    UObject* m_banner_library = nullptr;
-    dw::LiveRef m_notifications; // NotificationSubsystem, game thread only, checked live before use
+    ui::Banner m_banner;
 
     ui::DebugOverlay m_overlay;            // game thread only
     std::atomic<bool> m_debug_overlay{false};
@@ -143,7 +133,8 @@ struct Smoothwalker::Impl
     };
     Hooks m_hooks{*this};
 
-    Impl(camera::CameraCore& core, BindKey bind_key, std::wstring version) : m_core(core), m_bind_key(std::move(bind_key)), m_version(std::move(version))
+    Impl(camera::CameraCore& core, BindKey bind_key, std::wstring version)
+        : m_core(core), m_bind_key(std::move(bind_key)), m_version(std::move(version)), m_banner(core)
     {
         if (!m_core.register_processor(m_processor))
             Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] the camera core already runs another view processor: smoothing inactive\n"));
@@ -185,7 +176,7 @@ struct Smoothwalker::Impl
             publish_locked();
             m_store.mark_pending_locked();
             Output::send<LogLevel::Normal>(STR("[DWSmoothwalker] smoothing {}\n"), now ? STR("on") : STR("off"));
-            request_banner(now ? STR("Smoothwalker: On") : STR("Smoothwalker: Off"));
+            m_banner.request(now ? STR("Smoothwalker: On") : STR("Smoothwalker: Off"));
         });
         bind(m_store.preset_key(), STR("preset_key"), [this]() {
             if (key_live(STR("preset"))) cycle_preset();
@@ -218,7 +209,7 @@ struct Smoothwalker::Impl
         // After the poll, so a file change is applied before the live values are written over it. Written while the
         // camera is live, or paused with the Mod Menu closed: a page reopened from the pause menu then shows the
         // loaded values, and no page is open to refuse its next Apply over the write.
-        if (m_store.flush_due(now) && (m_core.camera_live() || !mod_menu_open()))
+        if (m_store.flush_due(now) && (m_core.camera_live() || !m_menu.open()))
         {
             std::lock_guard guard(m_store.mutex());
             m_store.flush_locked(now);
@@ -259,7 +250,7 @@ struct Smoothwalker::Impl
     // Game thread, every engine tick, after the core checked and discovered the controller.
     auto on_tick() -> void
     {
-        show_pending_banner();
+        m_banner.show_pending();
         apply_position();
         auto* controller = m_core.player_controller();
         auto* camera = m_core.player_camera();
@@ -276,135 +267,6 @@ struct Smoothwalker::Impl
         s.lease = owner.lease;
         return s;
     }
-
-    // Debounced: a burst of presses shows one banner, with the last text.
-    // Dropped without a player: a banner queued at the main menu would show minutes later, after a load.
-    auto request_banner(std::wstring text) -> void
-    {
-        if (!m_show_banner.load() || !m_core.player_known()) return;
-        std::lock_guard guard(m_banner_mutex);
-        m_banner_text = std::move(text);
-        m_banner_due = std::chrono::steady_clock::now() + BANNER_SETTLE;
-        m_banner_pending = true;
-    }
-
-    static constexpr auto BANNER_SETTLE = std::chrono::milliseconds(400);
-
-    struct ObjectArray
-    {
-        UObject** data;
-        int32_t num;
-        int32_t max;
-    };
-
-    // Thins our own waiting banners so presses cannot build a backlog. The banner on screen is left alone:
-    // ending a notification its widget is showing crashed the game (docs/design.md, "Rapid banners queue").
-    // Ours are recognised by class and text, never by a remembered address, which the game may reuse.
-    auto drop_stale_banners(UObject* subsystem) -> void
-    {
-        if (!subsystem) return;
-        if (m_queue_offset < 0 || m_region_data_offset < 0 || !m_region_info_class)
-        {
-            auto* slot = subsystem->GetValuePtrByPropertyNameInChain<void>(STR("NotificationQueue"));
-            m_region_info_class = UObjectGlobals::StaticFindObject<UClass*>(nullptr, nullptr, STR("/Script/DogwoodUI.RegionEnteredNotificationInfo"));
-            int32_t data = -1;
-            if (m_region_info_class)
-            {
-                for (FProperty* property : m_region_info_class->ForEachProperty())
-                {
-                    if (property->GetName() == STR("RegionData")) data = property->GetOffset_ForInternal();
-                }
-            }
-            if (!slot || data < 0) return;
-            m_queue_offset = static_cast<int32_t>(reinterpret_cast<uint8_t*>(slot) - reinterpret_cast<uint8_t*>(subsystem));
-            m_region_data_offset = data;
-        }
-        auto* queue = reinterpret_cast<ObjectArray*>(reinterpret_cast<uint8_t*>(subsystem) + m_queue_offset);
-        if (queue->num < 0 || queue->num > queue->max || queue->max > 4096 || (queue->num > 0 && !queue->data)) return;
-
-        int32_t kept = 0;
-        for (int32_t i = 0; i < queue->num; ++i)
-        {
-            auto* entry = queue->data[i];
-            if (!is_our_banner(entry)) queue->data[kept++] = entry;
-        }
-        queue->num = kept;
-    }
-
-    auto is_our_banner(UObject* entry) -> bool
-    {
-        if (!entry || entry->GetClassPrivate() != m_region_info_class) return false;
-        auto* text = reinterpret_cast<FText*>(reinterpret_cast<uint8_t*>(entry) + m_region_data_offset + BANNER_TEXT);
-        return text->ToString().starts_with(BANNER_PREFIX);
-    }
-
-    static constexpr const wchar_t* BANNER_PREFIX = L"Smoothwalker:";
-
-    // The region banner shows RegionData.RegionDisplayText. The hard-coded parameter layout must match
-    // reflection, or banners stay off.
-    auto resolve_banner() -> bool
-    {
-        m_banner_state = -1;
-        m_banner_function = UObjectGlobals::StaticFindObject<UFunction*>(
-                nullptr, nullptr, STR("/Script/DogwoodUI.NotificationSystemLibrary:PushRegionEnteredNotification"));
-        m_banner_library = UObjectGlobals::StaticFindObject<UObject*>(nullptr, nullptr, STR("/Script/DogwoodUI.Default__NotificationSystemLibrary"));
-        auto* region = UObjectGlobals::StaticFindObject<UStruct*>(nullptr, nullptr, STR("/Script/DogwoodSystem.RegionData"));
-        if (!m_banner_function || !m_banner_library || !region)
-        {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] notification function not found, banners off\n"));
-            return false;
-        }
-
-        auto offset_of = [](UStruct* owner, const wchar_t* name) -> int32_t {
-            for (FProperty* property : owner->ForEachProperty())
-            {
-                if (property->GetName() == name) return property->GetOffset_ForInternal();
-            }
-            return -1;
-        };
-        auto world = offset_of(m_banner_function, STR("WorldContextObject"));
-        auto data = offset_of(m_banner_function, STR("RegionData"));
-        auto flag = offset_of(m_banner_function, STR("IsNewlyDiscovered"));
-        auto text = offset_of(region, STR("RegionDisplayText"));
-        if (world != BANNER_WORLD || data != BANNER_DATA || flag != BANNER_FLAG || text != BANNER_TEXT)
-        {
-            Output::send<LogLevel::Warning>(STR("[DWSmoothwalker] notification layout changed ({}, {}, {}, {}), banners off\n"), world, data, flag, text);
-            return false;
-        }
-        m_banner_state = 1;
-        return true;
-    }
-
-    auto show_pending_banner() -> void
-    {
-        auto* controller = m_core.player_controller(); // checked live this tick
-        if (!controller) return;
-        std::wstring line;
-        {
-            std::lock_guard guard(m_banner_mutex);
-            if (!m_banner_pending || std::chrono::steady_clock::now() < m_banner_due) return;
-            m_banner_pending = false;
-            line = m_banner_text;
-        }
-        if (m_banner_state == 0) resolve_banner();
-        if (m_banner_state != 1) return;
-
-        // Cached: FindFirstOf walks the whole object array (28 ms measured), and this runs mid-glide after a preset change.
-        if (!m_notifications.alive()) m_notifications = dw::LiveRef::of(UObjectGlobals::FindFirstOf(STR("NotificationSubsystem")));
-        drop_stale_banners(m_notifications.object);
-        FText text(line.c_str());
-        uint8_t params[BANNER_PARAMS_SIZE]{};
-        memcpy(params + BANNER_WORLD, &controller, sizeof(controller));
-        text.CopyBorrowedTo(params + BANNER_DATA + BANNER_TEXT);
-        params[BANNER_FLAG] = 0; // not newly discovered: no discovery reward
-        m_banner_library->ProcessEvent(m_banner_function, params);
-    }
-
-    static constexpr int32_t BANNER_WORLD = 0x00;
-    static constexpr int32_t BANNER_DATA = 0x08;
-    static constexpr int32_t BANNER_TEXT = 0x20; // inside RegionData
-    static constexpr int32_t BANNER_FLAG = 0x40;
-    static constexpr size_t BANNER_PARAMS_SIZE = 0x48;
 
     auto bind(const std::string& name, const TCHAR* setting, std::function<void()> action) -> void
     {
@@ -440,7 +302,7 @@ struct Smoothwalker::Impl
         // No hard cut: the core crossfades on the new generations instead of snapping the lag away mid-motion. Only a
         // changed value starts one: a shoulder swap and the switches change none, and a fade holds part of the old lag.
         follow::publish_view(m_processor, m_core, m_store.settings());
-        m_show_banner.store(m_store.settings().show_banner);
+        m_banner.enable(m_store.settings().show_banner);
         m_debug_overlay.store(m_store.settings().debug_overlay);
         {
             auto* active = m_store.settings().preset != 0 ? m_store.find_preset(m_store.settings().preset) : nullptr;
@@ -501,39 +363,6 @@ struct Smoothwalker::Impl
         m_tuner.apply(position, camera);
         m_position_applied_generation = generation;
         m_processor.mode_written(); // mode FOV lands on the next camera update: crossfade it
-    }
-
-    // The Dawnwalker Mod Menu (Nexus 271) creates its host as a plain CommonActivatableWidget (main.lua, library:Create
-    // with the native class, which the game's own screens all subclass), enabled and shown while the menu is open and
-    // Collapsed once closed, when it lingers until GC. Any such widget not Collapsed means a settings page may be open.
-    // Only reached with a write pending and the camera not live. A menu that changes its host is not recognised, and
-    // the write then lands under the open page as it did before 0.9: the page refuses its next Apply until reopened.
-    auto mod_menu_open() -> bool
-    {
-        constexpr uint8_t COLLAPSED = 1; // ESlateVisibility
-        auto shown = [&](UObject* object) -> bool {
-            auto* visibility = object->GetValuePtrByPropertyNameInChain<uint8_t>(STR("Visibility"));
-            return visibility && *visibility != COLLAPSED;
-        };
-        if (!m_activatable_class)
-        {
-            m_activatable_class = UObjectGlobals::StaticFindObject<UClass*>(nullptr, nullptr, STR("/Script/CommonUI.CommonActivatableWidget"));
-            if (!m_activatable_class) return false;
-        }
-        if (m_menu_host && !m_menu_host->IsUnreachable() && m_menu_host->GetClassPrivate() == m_activatable_class && shown(m_menu_host)) return true;
-        m_menu_host = nullptr; // closed or gone; every open creates a new host
-        UObjectGlobals::ForEachUObject([&](UObject* object, int32_t, int32_t) {
-            if (!object || object->GetClassPrivate() != m_activatable_class || object->IsUnreachable() || !shown(object)) return LoopAction::Continue;
-            m_menu_host = object;
-            return LoopAction::Break;
-        });
-        if (m_menu_host && !m_menu_logged)
-        {
-            m_menu_logged = true;
-            if (dw::verbose())
-                Output::send<LogLevel::Verbose>(STR("[DWSmoothwalker] Mod Menu open: {}\n"), m_menu_host->GetFullName());
-        }
-        return m_menu_host != nullptr;
     }
 
     // Built-ins, saved slots, then drop-ins, starting after the active preset (at the first from Custom).

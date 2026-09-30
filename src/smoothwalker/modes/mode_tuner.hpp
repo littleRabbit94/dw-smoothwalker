@@ -12,6 +12,7 @@
 #include "../../common/live_ref.hpp"
 #include "../../common/log.hpp"
 #include "../settings/settings.hpp"
+#include "position.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -41,23 +42,6 @@ namespace dw::smoothwalker::modes
     using namespace RC;
     using namespace RC::Unreal;
     using settings::Settings;
-
-    enum Group : int
-    {
-        Exploration,
-        Sprint,
-        Combat,
-        Focus,
-        Aiming,
-        Traversal,
-        GroupCount
-    };
-
-    inline auto group_name(Group group) -> const wchar_t*
-    {
-        static constexpr const wchar_t* names[GroupCount]{L"Exploration", L"Sprint", L"Combat", L"Focus", L"Aiming", L"Traversal"};
-        return group >= 0 && group < GroupCount ? names[group] : L"?";
-    }
 
     struct ModeClassSpec
     {
@@ -150,15 +134,6 @@ namespace dw::smoothwalker::modes
         bool aiming = false;
         bool combat = false;
         bool traversal = false;
-    };
-
-    // One live mode on the player's camera, for the debug overlay.
-    struct ModeListing
-    {
-        std::wstring name; // BP_CameraMode_<name>_C, or the class name without _C
-        uint8_t state;     // ECameraModeState: 0 blending in, 1 active, 2 blending out
-        int group;         // Group; -1 for a mode this mod does not track
-        bool tuned;        // tracked, and the last apply wrote the camera position into it
     };
 
     class ModeTuner
