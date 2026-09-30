@@ -166,7 +166,7 @@ the camera does not update under one, so the gap exceeds `reset_gap`.
 
 ### Crossfade
 
-Settings changes crossfade instead of snapping (0.8.0). Every publish used to set `g_reset`, snapping the
+Settings changes crossfade instead of snapping (0.8.0). Every publish used to set the pipeline's reset flag (`Pipeline::m_reset`), snapping the
 smoothed pivot to the capsule: invisible standing, a jump of the whole lag (up to ~1 m) when V switched
 presets mid-motion, plus instant jumps from a new lag limit, rotation smoothing and mode FOV. Now only hard
 cuts snap (startup, player or pawn change, `reset_gap`, `reset_distance`). A tuning generation (read under
@@ -187,9 +187,9 @@ internal structure, not a packaging line: shipping the core as a second DLL is d
 
 | Side | Files | Owns |
 |---|---|---|
-| Core | `camera/core.hpp` / `core.cpp` (the component), `camera/hook.hpp` / `hook.cpp` (slot 214 and the image-level statics), `camera/pipeline.hpp` / `pipeline.cpp` (the hook side and `CoreApi`), `camera/authority.hpp` / `authority.cpp` (the API's state), `camera/lua_api.hpp`, `camera/api.hpp`, `camera/frame.hpp` (with `Snap`), `camera/snapshot.hpp`, `camera/clock.hpp`, `camera/guarded.hpp` / `guarded.cpp` | Slot 214 and its pin, the `Pipeline` and the `Authority` (the Core's own instances, with `CoreApi` over both), player and camera discovery, `g_view_updates` / `g_view_seconds`, cuts, the crossfade, layers, the write and the API snapshot, `claim` / `release` / `owner`, `view()` / `live()`, the Lua injection, the processor and listener slots |
-| Smoothwalker | `smoothwalker/smoothwalker.cpp` (the component), `smoothwalker/follow/processor.hpp`, `smoothwalker/follow/follow.hpp` (with `Influence`), `smoothwalker/follow/curves.hpp`, `smoothwalker/modes/mode_tuner.hpp`, `smoothwalker/settings/settings.hpp`, `smoothwalker/ui/debug_overlay.hpp` | The follow as a processor, mode classification and writes, the flip, the lag switch, other mods' writes, presets and slots, `smoothwalker.ini`, keys, banners, the debug overlay |
-| Shared, header-only | `common/math.hpp`, `camera/wall.hpp`, `common/live_ref.hpp`, `common/active_slot.hpp`, `common/log.hpp` | Math, the wall clamp, `LiveRef`, `ActiveSlot` (a pointer other threads call through and the count of calls in flight through it) with `wait_for_zero`, the verbose flag `dw::g_verbose` (the one static of the shared files, written at every construction) |
+| Core | `camera/core.hpp` / `core.cpp` (the component), `camera/hook.hpp` / `hook.cpp` (slot 214 and the image-level statics), `camera/pipeline.hpp` / `pipeline.cpp` (the hook side and `CoreApi`), `camera/authority.hpp` / `authority.cpp` (the API's state), `camera/lua_api.hpp`, `camera/api.hpp`, `camera/frame.hpp` (with `Snap`), `camera/snapshot.hpp`, `camera/clock.hpp`, `camera/guarded.hpp` / `guarded.cpp` | Slot 214 and its pin, the `Pipeline` and the `Authority` (the Core's own instances, with `CoreApi` over both), player and camera discovery, `Pipeline::m_view_updates` / `m_view_seconds`, cuts, the crossfade, layers, the write and the API snapshot, `claim` / `release` / `owner`, `view()` / `live()`, the Lua injection, the processor and listener slots |
+| Smoothwalker | `smoothwalker/smoothwalker.hpp` / `smoothwalker.cpp` (the component: orchestration, the keys, the `Listener`, `publish`, `apply_position`, the panel's gathering), `smoothwalker/follow/` (`processor.hpp`, `follow.hpp` with `Influence`, `curves.hpp`), `smoothwalker/settings/` (`settings.hpp`, `ini.hpp` / `ini.cpp`, `presets.hpp` / `presets.cpp`, `store.hpp` / `store.cpp`), `smoothwalker/modes/` (`position.hpp`, `mode_tuner.hpp` / `mode_tuner.cpp`), `smoothwalker/ui/` (`banner.hpp` / `banner.cpp`, `menu_probe.hpp` / `menu_probe.cpp`, `panel.hpp`, `debug_overlay.hpp` / `debug_overlay.cpp`) | The follow as a processor, `SettingsStore` (`smoothwalker.ini`, presets and slots, the write-back), mode classification and writes, the flip, the lag switch, other mods' writes, keys, banners, the Mod Menu probe, the debug overlay |
+| Shared, header-only | `common/math.hpp`, `camera/wall.hpp`, `common/live_ref.hpp`, `common/active_slot.hpp`, `common/log.hpp`, `common/text.hpp` | Math, the wall clamp, `LiveRef`, UTF-8 and wide string conversion, `ActiveSlot` (a pointer other threads call through and the count of calls in flight through it) with `wait_for_zero`, the verbose flag `dw::g_verbose` (the one static of the shared files, written at every construction) |
 
 Core files include no Smoothwalker header; Smoothwalker's include only `camera/api.hpp` (and through it
 `camera/frame.hpp`) and the shared headers. The two sides are separate translation units, so the compiler holds the line.
@@ -311,6 +311,48 @@ and 860 to 935 injected faults. Three planted changes, applied to a copy by `run
 crossfade eased linearly (core, first difference at frame 35 to 1,018), the follow's wall-clamp hold at 0.35 s
 (frame 15,402 to 113,952), mode writes not folded into the processor's generation (frame 114 to 1,341). Built with
 MSVC: the 4 known C4996 warnings, no others. Not yet played.
+
+### Unit tests
+
+`tests/unit` builds one executable, `dw_unit`, over the UE4SS-free code, with an in-house framework (`check.hpp`:
+`TEST(suite, name)`, `CHECK`, `CHECK_EQ`, `CHECK_NEAR`; a failed check is recorded and the test carries on). It needs
+MSVC and the Windows SDK, but neither the RE-UE4SS tree nor WSL. From the repo root:
+
+```
+cmake -S . -B build-tests -DDW_BUILD_MOD=OFF -DDW_BUILD_TESTS=ON
+cmake --build build-tests --config Release
+ctest --test-dir build-tests -C Release --output-on-failure
+```
+
+`--config Debug` and `-C Debug` work the same way. CTest runs one test per suite (`dw_unit <suite>`); `dw_unit` alone
+runs everything and exits non-zero on a failed check or a suite with no tests. Built at /W4 with `/permissive-`, no warnings.
+
+**What `dw_unit` compiles.** Product sources: `camera/authority.cpp`, `camera/guarded.cpp`, `camera/pipeline.cpp`,
+`smoothwalker/settings/ini.cpp`, `presets.cpp` and `store.cpp`. Product headers: `follow/*` (`processor.hpp` with
+`publish_view`), `camera/wall.hpp`, `common/math.hpp`, `common/text.hpp`, `modes/position.hpp`, `ui/panel.hpp`. What
+includes UE4SS headers stays out (`hook.cpp`, `core.cpp`, `mod.cpp`, `smoothwalker.cpp`, `mode_tuner.cpp`, `banner.cpp`,
+`menu_probe.cpp`, `debug_overlay.cpp`): the equivalence harness and the game cover those.
+
+**Injected seams.** `Clock` (`camera/clock.hpp`) is two function pointers, `now()` and `frequency()`; `Pipeline` and
+`Authority` each take one (`QPC_CLOCK` by default), so a test moves the ticks itself and every clock read stays at its place in
+the call. `GuardedCopy` (`camera/guarded.hpp`, `bool (*)(void* dst, const void* src, size_t n)`) is injected into `Pipeline`;
+the product default `seh_copy` (`camera/guarded.cpp`) is the only `__try` in the code, and a test passes a copier that
+fails the Nth access to reach each fault path. The store takes `settings::Files` and `settings::Events`
+(`settings/store.hpp`): tests keep the files in memory and record the events in the order they come.
+
+| Suite | Tests | Covers |
+|---|---|---|
+| `math` | 8 | `Vec3`, `Quat`, rotator and quaternion round trips, slerp, angle |
+| `curves` | 4 | `curve`, `follow_rate`, `follow_alpha`, frame-rate independence |
+| `wall` | 3 | the wall clamp |
+| `follow` | 15 | leash, restart, crouch hold, trail cap, `Influence`, the mode-write hold |
+| `pipeline` | 31 | gap, teleport, cut precedence, off and settled, crossfade, owned camera, glide, lease edge, layers, faults, odd `DeltaTime`, timing, seqlock |
+| `authority` | 16 | claim results, renewal, expiry, eight layer slots, layer sums, re-key, uninstall |
+| `ini` | 19 | parse, sanitize ranges, missing keys, rewrite (layout, CRLF), number format, file read and write |
+| `presets` | 13 | built-ins, preset file parse, normalization, labels, slot file, manifest lines |
+| `store` | 44 | startup, reload rules (a) to (e), the Custom pin, slots, cycle, deferred write-back and retry, the pending file |
+| `panel` | 11 | golden strings of `format_panel`, every snap reason and influence name |
+| `position` | 10 | `position_of` over the defaults and each built-in, equality, `written`, the tuned mode classes |
 
 ## Camera modes and position tuning
 
@@ -458,7 +500,7 @@ Shadowstep_2_Base. The other 14 ship -89 / 89, except AimingOnLadder at -40 / 89
 - **The flip waits for the camera.** `CameraOffsets` is only read on a camera type change. 0.7.0 flipped the
   type over two engine ticks, and an Apply from the Mod Menu landed while the menu had the world paused:
   the camera never updated between the two flips and the new distance showed only later. 0.7.1 counts
-  `GetCameraView` calls for the player's camera (`g_view_updates`) and advances each stage only after one:
+  `GetCameraView` calls for the player's camera (`Pipeline::m_view_updates`, read through `CameraCore::view_updates()`) and advances each stage only after one:
   pending, away, back. A request while away runs again after the switch back; one during the glide back
   starts over at once (queued behind the glide, a quick second press moved the camera in two steps). The flip abandons if the player camera
   changes, waits while the player camera is briefly null, and switches back only from the type it set
@@ -493,7 +535,10 @@ Shadowstep_2_Base. The other 14 ship -89 / 89, except AimingOnLadder at -40 / 89
   processors") under a shared SRW lock, so nothing allocates on the worker thread. `toggle_key` and `preset_key` stay startup-only. UE4SS runs key callbacks on the same
   thread as `on_update` (`UE4SSProgram.cpp`, `process_event` then `fire_update`).
 - **Robust reads** (0.7.4). Non-finite ini values (`std::stod` takes `nan`/`inf`) are ignored, and a
-  non-finite pivot, view or result skips the frame. The Mod Menu's rename leaves the ini briefly absent: a
+  non-finite pivot, view or result skips the frame. `DeltaTime` is clamped to 0 to 0.1 s for the follow, but a NaN passes
+  `std::clamp` unchanged (every comparison is false): the follow's result comes out non-finite and the update ends as a
+  lost view (`view lost`), the game's view left as built, so the follow snaps to the capsule on the next frame. Only a finite,
+  positive `DeltaTime` adds to the world seconds. The Mod Menu's rename leaves the ini briefly absent: a
   missing file after startup keeps the live settings and retries. The startup read retries for 200 ms so a
   Mod Menu rename cannot leave default key names; with the ini missing the default keys are bound.
   `sanitize` clamps to the Mod Menu's ranges.
@@ -522,7 +567,7 @@ Shadowstep_2_Base. The other 14 ship -89 / 89, except AimingOnLadder at -40 / 89
   for the menu to close instead, see below). An adopt or an autosave leaves the live numbers equal to what
   the Apply wrote, so nothing is pending. The desired file is every numeric live value, with `preset` = the
   active preset. `on_update` writes the differing numbers (in place, temp file plus rename) only when the
-  camera is live or the Mod Menu is closed (`mod_menu_open`), so never behind an open page, and only when
+  camera is live or the Mod Menu is closed (`MenuProbe::open`), so never behind an open page, and only when
   the file's mtime still equals the stamp last processed (otherwise the poll goes first). A load from the
   pause menu is therefore in the file within 250 ms of leaving the menu, and a page reopened from the pause
   menu shows the loaded values; the page still open after the load keeps its stale sliders, and an Apply
@@ -532,7 +577,7 @@ Shadowstep_2_Base. The other 14 ship -89 / 89, except AimingOnLadder at -40 / 89
   `CommonActivatableWidget` (`main.lua`, `library:Create` with `/Script/CommonUI.CommonActivatableWidget`),
   which the game's own screens all subclass, so an instance of exactly that class is the menu. Sampled live
   with the bridge: open, `Visibility` 4 (SelfHitTestInvisible), activated, in viewport; closed, the object
-  lingers until GC with `Visibility` 1 (Collapsed), disabled, out of the viewport. `mod_menu_open` keeps the
+  lingers until GC with `Visibility` 1 (Collapsed), disabled, out of the viewport. `MenuProbe::open` keeps the
   host last seen open and rescans (`ForEachUObject`, exact class, not unreachable, `Visibility` not
   Collapsed) only when that one is collapsed or gone; it runs only with a write pending and the camera not
   live, so never during play. If a menu update changes the host the check returns false and the write lands
@@ -596,9 +641,10 @@ Shadowstep_2_Base. The other 14 ship -89 / 89, except AimingOnLadder at -40 / 89
   names, the save range and the slot ids. The menu caps a picker at 64 values (`choices.lua`), and the
   Preset picker also carries Custom and the three built-ins, so 60 slots is the ceiling.
 - **Presets folder** (`config/presets/`, replaces `presets.ini`; created at startup if missing). A
-  slot save writes `Slot N.ini`: a two-line comment on turning it into a drop-in, `name = Slot N`, the 37
-  keys. The mod writes no other file there. Any other `*.ini` is a drop-in preset, parsed like a slot file:
-  `;`/`#` comments, `name = ...` for the label, keys outside the 37 and non-finite values ignored, values
+  slot save writes `Slot N.ini`: a three-line comment (what wrote it, how to rename it, how to turn it into a
+  drop-in), the `name` line (the slot's display name: `Slot N` on a first save, kept on later saves), the 41
+  `PRESET_KEYS`. The mod writes no other file there. Any other `*.ini` is a drop-in preset, parsed like a slot file:
+  `;`/`#` comments, `name = ...` for the label, keys outside the 41 and non-finite values ignored, values
   clamped on load, files with no preset keys or over 64 KiB skipped. Enumeration uses the wide Win32 APIs
   (the game path and file names may be non-ASCII). `release/example-preset/Template.ini` is a commented
   drop-in.
@@ -608,7 +654,7 @@ Shadowstep_2_Base. The other 14 ship -89 / 89, except AimingOnLadder at -40 / 89
   while the game runs are ignored until the next start. At most 64 - 4 - 6 = **54 drop-ins**; the rest
   are skipped with one log line. Label: `name`, else the file stem, with control characters and `|`
   stripped, trimmed, cut to 48 bytes on a code point boundary, and valid UTF-8 (invalid UTF-8 anywhere makes
-  the menu skip the whole manifest); else `Preset <id>`. Slots are always labelled `Slot N`. Banners and log
+  the menu skip the whole manifest); else `Preset <id>`. A slot is labelled by the `name` line of its file, else `Slot N`; a slot with no file is listed last as `Slot N (empty)`. Banners and log
   lines convert the UTF-8 name with `MultiByteToWideChar`. A file named `mod_settings.ini` is skipped: the
   menu's manifest scan is recursive and would read it as a page.
 - **Cached values are normalized.** Each slot or drop-in is applied onto default settings through the normal
@@ -618,7 +664,7 @@ Shadowstep_2_Base. The other 14 ship -89 / 89, except AimingOnLadder at -40 / 89
 - **Why the manifest is regenerated at startup.** The Mod Menu reads every `mod_settings.ini` once per game
   session, the first time its settings UI is built (`main.lua`, `Providers.discover` cached in
   `s.providers`), and the DLL constructor runs before that. So the constructor rewrites only the
-  `PresetValues` and `PresetLabels` lines of `[Setting.preset]` to `0|101|102|103|1..10|201..` and
+  `PresetValues` and `PresetLabels` lines of `[Setting.preset]` to `0|101|102|103|1..6|201..` and
   `Custom|Tight|Balanced|Cinematic|<saved slots by name>|<drop-in names>|<empty slots>` (empty slots last, so
   the picker has nothing dead between the presets that load; they stay listed because the page fails to open
   if the ini's `preset` id is not among the values, and a slot saved this session becomes that id), keeping
@@ -681,7 +727,7 @@ live; its `enabled` change is written back like the others, once the camera is l
   `EXCEPTION_ACCESS_VIOLATION reading address 0x38`, most likely the widget finishing its show/hide cycle
   and reaching back for the notification that was gone. Do not end a notification a widget is showing;
   thin the queue instead.
-- **Debounced, own entries thinned** (0.7.3). `request_banner` is debounced: the banner goes out 0.4 s after
+- **Debounced, own entries thinned** (0.7.3). `Banner::request` is debounced: the banner goes out 0.4 s after
   the last request, with the last text. Before the next push the DLL removes its own entries that are still
   waiting, compacting the TArray in place on the game thread. The game's own notifications are never
   touched, and a banner already on screen plays out (about 3-4 s). Shoulder swaps show no banner. The
@@ -1099,7 +1145,7 @@ Consumers are keyed by their main `lua_State*` (from `LUA_RIDX_MAINTHREAD`), nev
 | `Smoothwalker.live()` | `bool, age` (age in seconds; `math.huge` before the first update); live means age < 0.25 s |
 | `Smoothwalker.enabled()` | the mod's live switch |
 
-The hook publishes the snapshot once per player-camera update through a seqlock (`g_seq` odd while writing,
+The hook publishes the snapshot once per player-camera update through a seqlock (`ViewSnapshot::m_seq` in `camera/snapshot.hpp`, odd while writing,
 one writer): the game's view as read, what was handed back (equal when off), the pivot, a QPC stamp. Off and
 settled, the hook still publishes game = shown, without a pivot. All slice-1 calls read atomics only, so they
 are safe from any thread, including a mod's top level and `LoopAsync`; the game-thread id is captured on the
@@ -1135,7 +1181,7 @@ smoothstep over `blend`, on the world delta, restarted on every `generation` cha
 sum is added **after** the follow, the crossfade and the wall clamp, right before the write, and independently
 of the O switch: a layer is another mod's feature, so `enabled = 0` stays the clean A/B for this mod's own
 work while the other mod keeps its effect. The off-and-settled early return in the hook is skipped while any
-layer is live or fading (`g_layers_any`, set by a `layer_set` or clear, cleared by the hook once every slot is
+layer is live or fading (`Authority::m_layers_any`, set by a `layer_set` or clear, cleared by the hook once every slot is
 idle). FOV is clamped to 5..170 after the sum. Non-finite results are dropped to 0.
 A stopping consumer (`on_lua_stop`) has its layer faded out and its slot freed; so does one re-keyed by `install`
 without an `on_lua_stop` (a hot reload or a script error at load), which until the fix under "Unreleased" kept the slot taken.
@@ -1158,8 +1204,8 @@ by hand; record with a 500 ms `LoopAsync` reading `view()` (thread-agnostic, no 
 
 Camera authority, `api_version` 3. One owner at a time, first come, no priorities, keyed by the consumer's main
 `lua_State*` like the layers. The owner's identity (that state and its mod name) lives on the game-thread side
-under `g_mutex`; the hook only ever sees numbers: `g_owner_slot` (the owner's index in a one-wide owner table, -1
-for nobody), `g_owner_keep_layers`, `g_owner_expires` and `g_release_generation`, plus `g_blending`, which it
+under `Authority::m_mutex`; the hook only ever sees numbers, `Authority`'s `m_owner_slot` (the owner's index in a one-wide owner table, -1
+for nobody), `m_owner_keep_layers`, `m_owner_expires` and `m_release_generation`, plus `m_blending`, which it
 writes. Ownership is one sample taken at the top of `update_view` and used for that whole update: a release lands
 from the game thread while the hook runs on a worker, so reading the slot and the release generation at different
 points in one update could write a full follow offset for a frame, which would turn a glide into a cut.
@@ -1168,47 +1214,48 @@ points in one update could write a full follow offset for a frame, which would t
 |---|---|
 | `Smoothwalker.claim{ keep_layers = bool, ttl = s }` | `true`, or `nil` with `bad_thread`, `no_game_thread`, `unknown_state`, `already_yours` (this consumer already owns it; with a `ttl`, the call also restarted the lease from now and replaced `keep_layers`, `api_version` 4), `taken` (another does), `must_keep` (Smoothwalker's own crossfade is mid-flight), `not_finite`. The argument table is optional; `keep_layers` defaults to false and `ttl` to no lease. |
 | `Smoothwalker.release(mode)` | `mode` is `"cut"` (the default when absent) or `"glide"`. `true`, or `nil` with `bad_thread`, `no_game_thread`, `unknown_state`, `not_owner`, `bad_mode`. |
-| `Smoothwalker.owner()` | the owning mod's name, or `nil`. Reads under `g_mutex` only, so any thread may call it. |
+| `Smoothwalker.owner()` | the owning mod's name, or `nil`. Reads under `Authority::m_mutex` only, so any thread may call it. |
 
 `claim` and `release` write state the hook reads, so they are game thread only, like the layer writers; `owner()`
 is thread-agnostic.
 
 In the hook, while the camera is owned: the follow math runs exactly as it always does, so the pivot smoothing,
 the rotation smoothing, the crouch hold and the nominal distance stay warm, and then the view is put back to
-byte-exactly what the game built and nothing is written. `g_view.out_offset`, `out_rotation` and `out_fov`
+byte-exactly what the game built and nothing is written. `Pipeline::m_view`'s `out_offset`, `out_rotation` and `out_fov`
 therefore record a zero offset, an identity rotation and the game's FOV every update, which is what a later
 glide starts from. No crossfade of Smoothwalker's own runs while owned (the `cut || owned` arm), so a settings
 or mode write landing mid-claim is consumed silently rather than fighting the owner. Layers
 (`apply_layers`) are skipped while owned unless the owner claimed with `keep_layers = true`; with them kept, the
 layered view is written and `view().shown` is that layered view, otherwise `shown` equals `game`.
 
-`release("cut")` sets `g_reset`, the same flag a teleport or a player swap sets, so the next update snaps the
-follow to the capsule. `release("glide")` bumps `g_release_generation`, a new atomic folded into the hook's
-`changed` alongside `t.generation`, the follow's generation, `g_toggle_generation` and `g_position_generation` (with a
-`seen_release` field on `g_view`): the next update sees `changed && g_view.out_valid` and starts the existing crossfade
+`release("cut")` sets `Pipeline::m_reset`, the same flag a teleport or a player swap sets, so the next update snaps the
+follow to the capsule. `release("glide")` bumps `Authority::m_release_generation`, a new atomic folded into the hook's
+`changed` alongside `t.generation`, the processor's generation (`FollowProcessor::m_generation`, which folds in the mode writes,
+`m_position_generation`) and its toggle generation (`FollowProcessor::m_toggle_generation`) (with a
+`seen_release` field on `Pipeline::m_view`): the next update sees `changed && m_view.out_valid` and starts the existing crossfade
 from `from_offset`/`from_rotation`/`from_fov` copied from `out_*`, which is the game's view the owner left on
 screen, easing to the follow result over `position_transition`. With `position_transition` at 0 that arm is
 skipped and the glide degrades to a cut; that is the user's own setting and is left as is. `must_keep` reads
-`g_blending`, published by the hook at the end of every update from `g_view.blending`, and is only trusted
+`Authority::m_blending`, published by the hook at the end of every update from `m_view.blending`, and is only trusted
 while the snapshot is live (under 250 ms old), so a pause or a cutscene mid-fade cannot pin a claim out forever.
-`g_blending` is published at the end of the update that starts a crossfade, so a claim arriving during that one
+`m_blending` is published at the end of the update that starts a crossfade, so a claim arriving during that one
 update passes rather than answering `must_keep`; the stranded fade is then discarded by the `cut || owned` arm on
 the next update and the owner has the screen, which is the point of the claim.
 
 `ttl` is a lease, like the one on a layer: past it the hook stops treating the claim as ownership and the game
 thread drops the identity the next time `claim` or `release` looks (`owner()` stays a pure read and simply
 reports `nil` on an expired lease), which is a `release("cut")`. The hook makes that cut itself: a falling edge of
-ownership (`was_owned` on `g_view`) that the release generation does not explain sets `g_view.valid = false`
+ownership (`was_owned` on `Pipeline::m_view`) that the release generation does not explain sets `m_view.valid = false`
 in the same update, so the follow restarts from the capsule instead of writing the offset that piled up while
 owned. That covers the lease, an `uninstall` and an `install` re-key. A `release("glide")` is the one edge left
 alone: it bumped that generation, so the warm follow its crossfade eases back into is kept. An
 expired owner's `release` answers `not_owner`. A claim without a `ttl` is the consumer's own responsibility and
 holds the camera until it releases or stops, so anything that can crash or hang should take a lease and refresh
 it by calling `claim{ ttl = s }` again before it runs out. In the owner's branch of `l_claim`, a repeat claim that
-carries a `ttl` stores the new `g_owner_expires` (now plus that `ttl`) and `g_owner_keep_layers` (this call's value,
+carries a `ttl` stores the new `m_owner_expires` (now plus that `ttl`) and `m_owner_keep_layers` (this call's value,
 false when absent), then answers `already_yours`; one without a `ttl` stores nothing, so a bare `claim()` probe
 cannot turn a leased claim into an unleased one. The renewal writes only those two relaxed atomics under
-`g_mutex`, with the slot already held, so the hook picks the new expiry up on its next sample; a `keep_layers`
+`Authority::m_mutex`, with the slot already held, so the hook picks the new expiry up on its next sample; a `keep_layers`
 switch lands on that update without easing. `drop_expired_locked` runs first, so a refresh after the lease ran
 out is a first claim again (`true`, `taken` or `must_keep`), after the cut the lapse already made.
 Three things end a claim besides `release`: the lease, the consumer stopping (`uninstall`, which
@@ -1235,7 +1282,7 @@ game's view into the warm follow, a cut restarts the follow at the capsule; neit
 offset in one frame.
 
 **Lease renewal, `api_version` 4.** As first built, the owner's branch answered `already_yours` before
-writing `g_owner_expires`, so a repeat `claim{ ttl = N }` never extended the lease, while this doc and
+writing `m_owner_expires`, so a repeat `claim{ ttl = N }` never extended the lease, while this doc and
 `api.md` said it did. Fixed as described above and `api_version` bumped to 4, so a consumer can tell a
 renewing Smoothwalker from one that is not. DWFreeCam 1.5.0 (`swRefresh`) works around 3 by re-arming once
 half the lease is spent: `release("glide")` and a fresh `claim` in the same game-thread call. That stays
@@ -1322,7 +1369,7 @@ source at `97b7e501`, and the public source of Combat Camera - Configurable 3.1.
 
 ## Debug overlay
 
-Since 0.10.0 (`src/smoothwalker/ui/debug_overlay.hpp`). `debug_overlay = 1` (ini, or Debug overlay on the Mod Menu page) puts
+Since 0.10.0 (`src/smoothwalker/ui/`: `panel.hpp` lays the text out, `debug_overlay.hpp` / `.cpp` builds the widget). `debug_overlay = 1` (ini, or Debug overlay on the Mod Menu page) puts
 a text panel at the top right of the screen with the live camera state; `debug_key` (ini only, unbound by
 default) flips the same setting and writes it back like the toggle key. Off by default. Built for tuning
 presets and for bug reports: one screenshot shows what the follow, the game's modes and the API were doing.
@@ -1343,15 +1390,15 @@ api           none
 
 | Line | Source |
 |---|---|
-| Smoothwalker, preset, tuning | the processor's switch (`FollowProcessor::enabled`); the active preset's name (or Custom) and `camera_tuning`, copied by `publish_locked` into `m_debug_*` under `m_debug_mutex`, because the engine tick never takes `m_file_mutex` |
+| Smoothwalker, preset, tuning | the processor's switch (`FollowProcessor::enabled`); the active preset's name (or Custom) and `camera_tuning`, copied by `publish_locked` into `m_debug_*` under `m_debug_mutex`, because the engine tick never takes the store's mutex (`SettingsStore::mutex()`) |
 | camera type | `RebelCameraComponent:GetCameraType` on the player camera; the name from the return value's reflected `UEnum` (the part after `::`), else the number |
 | modes | `ModeTuner::list_modes`: every live `RebelCameraMode` on the player camera, newest first, with `RebelCameraMode:GetState` (0 blend in, 1 active, 2 blend out; 3, popped, is left out). Tracked modes show their group and `tuned` when the last apply wrote the camera position (`camera_tuning` and `enabled` on), else `as shipped`. At most 8 lines, then `+N more`; `(rescan pending)` while a scan is due |
 | follow, turn | the hook's `keep_pos` / `keep_rot` after the eased `aim`, `combat` and `traversal` blends; `turn off` without rotation smoothing. The name in brackets is the largest weight in that chain: aiming `aim`, combat `combat * (1 - aim)`, traversal `traversal * (1 - combat) * (1 - aim)`, none the rest |
 | lag | horizontal and vertical length of `out_offset`, the lag actually on screen (leash, keep share, wall clamp and crossfade included), over `max_lag_h` / `max_lag_v`; `rate` is `follow_rate_h` scaled by the curve at the current horizontal lag (`dw::smoothwalker::follow::follow_rate`, which `follow_alpha` now uses) |
 | last snap | the last restart of the follow from the capsule, with its age from QPC |
-| api | the claim as `Smoothwalker.owner()` reads it (`CameraCore::camera_owner`: under `dw::camera::lua::g_mutex`, an expired lease reads as nobody) with the lease left; `glide` while the crossfade started by a `release("glide")` runs |
+| api | the claim as `Smoothwalker.owner()` reads it (`CameraCore::camera_owner`: under `Authority::m_mutex`, an expired lease reads as nobody) with the lease left; `glide` while the crossfade started by a `release("glide")` runs |
 
-**Snap reasons.** Whoever sets `g_reset` names the reason first (`request_cut`, and `release_locked` for
+**Snap reasons.** Whoever sets `Pipeline::m_reset` names the reason first (`request_cut`, and `release_locked` for
 `api cut`); the first reason since the hook last took a cut is kept, so a level load reads `world change`,
 not the controller and pawn changes that follow it. The hook adds its own: `gap` (`reset_gap`), `teleport`
 (`reset_distance`), `toggle` (switched back on; wins over a cut left pending while off), `api lease ended`
@@ -1398,10 +1445,10 @@ Switched off, `RemoveFromParent` and the references go; switched on again, a new
 
 ### Threading and cost
 
-- **Game thread only.** Built, refreshed and removed from the engine tick (`on_engine_tick`, after
+- **Game thread only.** Built, refreshed and removed from the engine tick (`Impl::on_tick`, after
   `apply_position`, from the core's `Listener::tick`). The hook touches no UObject for it: it stores numbers in
-  relaxed atomics (`g_debug_keep_follow`, `g_debug_keep_turn`, `g_debug_influence`, `g_debug_lag_h`, `g_debug_lag_v`,
-  `g_debug_rate_h`, `g_debug_snap`, `g_debug_snap_qpc`, `g_debug_glide`, in `camera/pipeline.hpp`), a few stores per
+  relaxed atomics (`Pipeline::m_debug_keep_follow`, `m_debug_keep_turn`, `m_debug_influence`, `m_debug_lag_h`, `m_debug_lag_v`,
+  `m_debug_rate_h`, `m_debug_snap`, `m_debug_snap_qpc`, `m_debug_glide`, in `camera/pipeline.hpp`), a few stores per
   camera update whether the overlay is on or not, which the refresh reads through `CameraCore::read_debug`. A
   refresh may pair values from two frames.
 - **Lifecycle.** Built lazily, only while the setting is on and the player camera is known, so the main menu
@@ -1410,7 +1457,7 @@ Switched off, `RemoveFromParent` and the references go; switched on again, a new
   the panel off the viewport, and the next pawn gets a new one. Each refresh also asks `Widget:IsInViewport`,
   so a panel the game took off the screen without a level change is rebuilt instead of waiting for its GC.
 - **Cost.** Off: one atomic load per tick. On: at most one refresh per 250 ms, which calls `IsInViewport` and `GetCameraType` once,
-  `GetState` once per listed mode, takes `dw::camera::lua::g_mutex` (`CameraCore::camera_owner`) and the follow's settings lock
+  `GetState` once per listed mode, takes `Authority::m_mutex` (`CameraCore::camera_owner`) and the follow's settings lock
   shared briefly, and calls
   `SetText` only when the text changed. No `FindAllOf`, `ForEachUObject` or object-array walk on the refresh
   path (a per-tick `FindAllOf` sampler froze this game before). The listing also takes the new-object hand-off,
@@ -1523,8 +1570,8 @@ nothing, and nothing writes a camera mode.
   its generations. Alone, the core never writes, so a release has nothing to glide.
 - `reset_distance` and `reset_gap` stay in `smoothwalker.ini`; Smoothwalker pushes them to the core when it
   registers and on every publish. The core ships today's defaults.
-- The core hands Smoothwalker, read-only: the player camera (game thread), `g_view_updates` and
-  `g_view_seconds`, which the flip's stages and its blend-time restore run on.
+- The core hands Smoothwalker, read-only: the player camera (game thread), the `Pipeline`'s update count and
+  world seconds (`m_view_updates`, `m_view_seconds`), which the flip's stages and its blend-time restore run on.
 
 **Two DLLs.**
 

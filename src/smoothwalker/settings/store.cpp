@@ -211,14 +211,14 @@ namespace
         }
         else if (edited("preset"))
         {
-            // Custom: detached from whatever was active, nothing saved. Pinned, or the values would match the slot
+            // (d) Custom: detached from whatever was active, nothing saved. Pinned, or the values would match the slot
             // again and the next edit would be saved into it.
             m_loaded_id = 0;
             m_custom_pinned = true;
         }
         else if (is_slot(active_before) && !own.empty())
         {
-            // (d) An edit with a slot active is saved into it. Built-ins and drop-ins stay read-only: an edit
+            // (e) An edit with a slot active is saved into it. Built-ins and drop-ins stay read-only: an edit
             // there just falls through to update_active_locked, which gives Custom.
             if (save_slot(active_before))
             {

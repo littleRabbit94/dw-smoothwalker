@@ -44,13 +44,34 @@ will not open while a `ConfigKey` is missing from it.
 |---|---|
 | `CMakeLists.txt` | Superbuild: RE-UE4SS from `DW_RE_UE4SS_SOURCE_DIR`, then the `DWSmoothwalker` target |
 | `src/` | The DLL source: one mod, one DLL, made of two components, the camera core and Smoothwalker (docs/design.md, "Core and processors"): `mod.cpp` (the one mod class, owning both) |
-| `src/camera/` | The camera core, namespace `dw::camera`: `core.cpp` (hook install, player discovery, Lua injection), `pipeline.hpp` (the hook: cuts, crossfade, layers, the write), `api.hpp` (`CameraCore`, `Processor`, `Listener`: the C++ interface Smoothwalker uses), `frame.hpp` (the contract with a view processor, `Snap`), `lua_api.hpp` (the Lua API), `wall.hpp` |
-| `src/smoothwalker/` | Smoothwalker, namespace `dw::smoothwalker`: `smoothwalker.cpp` (settings, presets, keys, banners, the overlay's data), `follow/` (`processor.hpp`, the follow as the core's processor; `follow.hpp`, the follow and `Influence`; `curves.hpp`), `settings/settings.hpp` (settings and presets), `modes/mode_tuner.hpp` (camera position in the game's modes, aiming, combat and traversal state), `ui/debug_overlay.hpp` |
-| `src/common/` | Shared by both sides, namespace `dw`: `math.hpp`, `live_ref.hpp` (`LiveRef`) |
+| `src/camera/` | The camera core, namespace `dw::camera`: `core.hpp` / `core.cpp` (the component: player discovery, Lua injection), `hook.hpp` / `hook.cpp` (slot 214 and the image-level statics), `pipeline.hpp` / `pipeline.cpp` (the hook: cuts, crossfade, layers, the write; `CoreApi`), `authority.hpp` / `authority.cpp` (the API's state: consumers, claim and release, layers), `lua_api.hpp` (the Lua API), `api.hpp` (`CameraCore`, `Processor`, `Listener`: the C++ interface Smoothwalker uses), `frame.hpp` (the contract with a view processor, `Snap`), `snapshot.hpp`, `clock.hpp`, `guarded.hpp` / `guarded.cpp`, `wall.hpp` |
+| `src/smoothwalker/` | Smoothwalker, namespace `dw::smoothwalker`: `smoothwalker.hpp` / `smoothwalker.cpp` (orchestration: owns the parts below, the keys, the core's listener, publish, `apply_position`, the debug panel's gathering) |
+| `src/smoothwalker/follow/` | `processor.hpp` (`FollowProcessor`, the follow as the core's processor, `publish_view`), `follow.hpp` (the follow, `Influence`), `curves.hpp` |
+| `src/smoothwalker/settings/` | `settings.hpp` (`Settings`, the key lists, ranges), `ini.hpp` / `ini.cpp` (the file's text), `presets.hpp` / `presets.cpp` (built-ins, slot and drop-in files, labels), `store.hpp` / `store.cpp` (`SettingsStore`: reload rules, write-back, slots, cycle; behind `Files` and `Events`) |
+| `src/smoothwalker/modes/` | `position.hpp` (groups, `position_of`, `written`, the tuned mode classes), `mode_tuner.hpp` / `mode_tuner.cpp` (`ModeTuner`: camera position in the game's modes, the flip, aiming, combat and traversal state) |
+| `src/smoothwalker/ui/` | `banner.hpp` / `banner.cpp` (banners), `menu_probe.hpp` / `menu_probe.cpp` (is a Mod Menu page open), `panel.hpp` (`DebugPanel`, `format_panel`), `debug_overlay.hpp` / `debug_overlay.cpp` (the UMG widget) |
+| `src/common/` | Shared by both sides, namespace `dw`: `math.hpp`, `live_ref.hpp` (`LiveRef`), `active_slot.hpp`, `log.hpp` (the verbose flag), `text.hpp` (UTF-8 and wide strings) |
+| `tests/unit/` | Never shipped: CTest suites over the UE4SS-free code, built without the RE-UE4SS tree (Unit tests, below) |
 | `tests/equivalence/` | Never shipped: checks the hook against an earlier commit byte for byte (`run.sh`, README) |
 | `mod/` | Exactly what ships under `ue4ss/Mods/DWSmoothwalker/`: `enabled.txt`, `LICENSE`, `mod_settings.ini` (Mod Menu page), `config/smoothwalker.ini`; `dlls/` is build output |
 | `release/` | `Build-Package.py`, the Nexus page description and metadata, `example-preset/`, `example-consumer/` (a drop-in Lua mod using the camera API) |
 | `docs/design.md` | How the mod works, the game's camera, measurements and version history |
+
+## Unit tests
+
+`tests/unit` builds `dw_unit`, the suites over the code that needs no UE4SS: the camera pipeline and authority, the
+follow, settings, ini, presets, the settings store, `position_of` and the panel text. It needs MSVC and CMake, not the
+RE-UE4SS checkout:
+
+```
+cmake -S . -B build-tests -DDW_BUILD_MOD=OFF -DDW_BUILD_TESTS=ON
+cmake --build build-tests --config Release
+ctest --test-dir build-tests -C Release --output-on-failure
+```
+
+The camera core's clock (`Clock`) and its guarded memory copy (`GuardedCopy`) are injected, and the settings store takes
+its file access as an interface, so a test moves time, fails chosen accesses and keeps files in memory. What `dw_unit`
+compiles and what each suite covers: `docs/design.md`, "Unit tests".
 
 ## Packaging
 
