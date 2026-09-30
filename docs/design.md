@@ -424,7 +424,7 @@ combat set `CombatNear`, `CombatFromArm`, `CombatFromArm_LongRange`, `CombatFrom
 | `bUseCameraLagSubstepping`, `CameraLagMaxTimeStep` | false, 0 | |
 | `DefaultFieldOfView` | 90 | Sprint: 95 |
 | `ViewPitchMin` / `ViewPitchMax`, `ClampViewSpeed` | -60 / 40, 8 | |
-| `BlendInArgs` / `BlendOutArgs` (`AlphaBlendArgs`) | 1.0 s opt 5 / 1.5 s opt 4 | mode push / pop |
+| `BlendInArgs` / `BlendOutArgs` (`AlphaBlendArgs`) | 1.0 s opt 5 / 1.5 s opt 4 | mode push / pop; Sprint: 0.5 s opt 2 / 1.0 s opt 4 |
 | `CameraTypeBlendArgs` | 1.0 s opt 2 | camera type change |
 | `CameraOffsets` | TMap `ECameraType` -> `CameraOffset` | below |
 | `ModeCollisionSettings.PenetrationBlendInTime` / `OutTime` | 0.5 / 1.0 | |
@@ -597,6 +597,77 @@ key, as shipped (`X Y Z` of `TargetOffset`):
   same indoors, and a 1 s glide through a doorway mid-shot would move the aim framing.
 - Before these settings the Interior key already followed the group settings like every key, so indoor stayed in
   proportion to outdoor (Base_LongRange at 75 %: -142 against -188).
+
+### Speed blend (planned)
+
+Planned 2026-09-30, not built. Asked for on Nexus (2026-09-21): the camera close while walking or standing, further
+out as the character speeds up, and no step between running and sprinting, so analog-movement mods (more than the
+game's fixed gaits) get a matching camera. It is not a new camera: the Sprint group's settings arrive with speed
+instead of all at once when the game pushes `Sprint`.
+
+**Speeds** (measured 2026-09-30, vanilla locomotion, `WalkToggle.pak` installed, horizontal speed of the
+movement component's `Velocity` at 250 ms and of the pivot at every frame, outdoors):
+
+| Gait | cm/s | `PlayerMovementAttributeSet` |
+|---|---|---|
+| Walk | 131 | `WalkSpeed` 175 |
+| Run | about 460 (320 to 400 while turning) | `RunSpeed` 375 |
+| Sprint (Shift once, a toggle) | 554 to 558 | |
+| Haste (Shift again: wolf form's fast traversal) | 895 to 898 (730 to 800 while turning) | `SprintSpeed` 650 |
+
+- **Root motion sets the speed, not the attributes.** None of the attributes, nor the open-world profile's
+  `MaxSpeed` 425, matches a gait (`RotationSyncMode` 0, anim-driven). Read the pivot's motion, never these numbers.
+- **Four plateaus.** Between them only acceleration: 0 to 460 in about 0.75 s, 558 to 897 in about 0.5 s, 558 to 0
+  in about 0.3 s on a stop. A slow stick ramp settled on no speed between 131 and 460.
+- **The Sprint camera starts with the sprint gait.** The FOV rises exactly as speed steps 460 to 558, holds through
+  haste, and haste itself moves it only by a 0.5 degree dip for about 0.4 s: the blend into
+  `Sprint_VampiricFastTraversal` (wolf form's camera, same Sprint group, same FOV as written).
+
+**The Sprint blend, seen through the FOV** (measured 2026-09-30, `Smoothwalker.view()` sampled every frame from a
+33 ms async loop; exploring 95, sprint 103 on those settings): in 95 to 103 over about 0.5 s, an S-curve that never
+reverses; out 103 to 95 over about 0.95 s, an ease. Both match the `Sprint` CDO's `BlendInArgs` / `BlendOutArgs`.
+`RebelCameraMode` reflects no blend weight or alpha, only `GetState()`.
+
+**The blend.** Per frame, in the follow processor (the mode writes land once per Apply and stay that way):
+
+```
+s     = smoothstep(start, full, smoothed horizontal pivot speed)   // 0 at walk, 1 from sprint up
+w     = the Sprint mode's blend weight, 0..1
+share = s * (1 - w) + w
+shown = exploration settings + (sprint settings - exploration settings) * share
+```
+
+The mode writes already put the Sprint group into the Sprint modes, so the hook adds only
+`(sprint - exploration) * s * (1 - w)` on top of what the game built: its share fades as the game's own blend takes
+over, and at `w` = 1 the camera is exactly the Sprint group. With `s` = 1 the share is 1 whatever `w` reads, so the
+haste dip and any weight error at speed cost nothing. On a stop out of sprint `s` falls to 0 in about 0.3 s while the
+game blends out over 0.95 s, and the share follows `w`, the game's own curve.
+
+- **`w` from the FOV.** `w = (game FOV - exploring FOV) / (sprint FOV - exploring FOV)`, clamped 0..1, from the
+  hook's own `DesiredView` before any edit. The tuner publishes the two FOVs as written: the live exploring mode's
+  (`Base_LongRange` 90 on Far, `Base_CloseRange` on Close) and `Sprint`'s. When the two are within
+  1 degree (a `sprint_fov` that cancels the game's +5), or while a camera type blend is in flight with an
+  `interior_fov` override on (the FOV then moves without a sprint), `w` comes from `GetState()` on the live
+  `Sprint` instance in the `mode_state()` pass, eased at the game's times (0.5 s in, 1.0 s out).
+- **Terms.** Distance: the arm (camera minus pivot) scaled by `sprint_distance / exploration_distance`, blended by
+  the share. Height: up by the difference in cm. Shoulder: out by the difference along the view's right on the
+  current side (`N`), left alone in centred modes. FOV: added by the difference.
+- **Indoors too.** The blend runs on the Interior camera type as well; `interior_*` scales both modes' key 2 alike,
+  so the ratio and differences hold. The published FOVs are the ones as written for the live type, so an
+  `interior_fov` override does not read as a sprint.
+- **Walls.** The distance and height terms are multiplied by the wall clamp's factor (full at 0.85 of the recent
+  distance, none at 0.65 and closer), so collision pulling the camera in also takes the extra arm with it.
+- **Exploring only.** The share is multiplied by `1 - max(aim, combat, focus, traversal)`, the factors the follow
+  already eases, so every context override wins.
+- **Speed.** Pivot displacement over world delta, horizontal only, eased (0.3 to 0.5 s) so turn dips and the
+  run-to-sprint step do not pump the camera. A cut resets it to the next frame's reading.
+- **Settings.** `speed_blend`, percent, the one new slider: 0 is today's camera, 100 the full share. `start` and
+  `full` as ini keys only, guessed at 150 (just above walk) and 558 (sprint), so run sits at about 75 to 80 %.
+  Presets stay at `speed_blend` 0 until each is reviewed: with it on, Cinematic's sprint +8 FOV and 110 % distance
+  show while running.
+
+**Open:** indoor gaits (`DA_Interior_MovementProfile`, unmeasured), walk without `WalkToggle.pak`, and a check with
+an analog-movement mod installed.
 
 ## Presets and the Mod Menu page
 
