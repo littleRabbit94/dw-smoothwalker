@@ -1,48 +1,37 @@
-// Smoothwalker's side of the DLL (docs/design.md, "Core and processors"): the follow as the camera core's processor
-// (follow/processor.hpp), camera position in the game's modes (modes/mode_tuner.hpp), presets and slots,
-// smoothwalker.ini, keys, banners and the debug overlay (ui/debug_overlay.hpp). Reaches the core only through its
-// interface (camera/api.hpp).
+// Smoothwalker's side of the DLL, as orchestration (docs/design.md, "Core and processors"): it owns the parts and wires
+// them to each other and to the camera core's interface (camera/api.hpp): the follow processor (follow/processor.hpp),
+// the settings store (settings/store.hpp), the camera modes' tuner (modes/mode_tuner.hpp), the banners, the Mod Menu
+// probe and the debug overlay (ui/). What stays here is construction, start, update and shutdown, the key binds, the
+// core's game-thread listener, publish (the live settings out to the follow, the modes and the panel), apply_position,
+// the debug panel's gathering and the store's event forwarder.
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
-#include "follow/processor.hpp"
 #include "smoothwalker.hpp"
-#include "settings/presets.hpp"
-#include "settings/settings.hpp"
+#include "follow/processor.hpp"
+#include "modes/mode_tuner.hpp"
 #include "settings/store.hpp"
 #include "ui/banner.hpp"
 #include "ui/debug_overlay.hpp"
 #include "ui/menu_probe.hpp"
 #include "ui/panel.hpp"
-#include "modes/mode_tuner.hpp"
 #include "../common/live_ref.hpp"
 #include "../common/log.hpp"
-#include "../common/math.hpp"
 #include "../common/text.hpp"
 
-#include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <chrono>
-#include <cmath>
 #include <cstdint>
 #include <cstdlib>
-#include <cstring>
 #include <functional>
-#include <map>
 #include <mutex>
-#include <optional>
-#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <DynamicOutput/DynamicOutput.hpp>
-#include <Unreal/CoreUObject/UObject/Class.hpp>
-#include <Unreal/CoreUObject/UObject/UnrealType.hpp>
-#include <Unreal/FText.hpp>
 #include <Unreal/Hooks/Hooks.hpp>
 #include <Unreal/UClass.hpp>
-#include <Unreal/UFunction.hpp>
 #include <Unreal/UObject.hpp>
 #include <Unreal/UObjectGlobals.hpp>
 
@@ -103,23 +92,22 @@ struct Smoothwalker::Impl
     settings::Win32Files m_files;
     StoreEvents m_store_events{*this};
     settings::SettingsStore m_store{m_files, m_store_events};
-    ui::MenuProbe m_menu;                         // game thread only
 
-    modes::ModeTuner m_tuner; // game thread only
-    std::mutex m_position_mutex;
-    modes::PositionTuning m_position{};
-    std::atomic<uint64_t> m_position_generation{1};
-    uint64_t m_position_applied_generation = 0; // game thread only
-
-    std::chrono::steady_clock::time_point m_last_report{}, m_last_poll{};
-
-    ui::Banner m_banner;
-
+    ui::Banner m_banner;                   // any thread requests, the game thread shows
+    ui::MenuProbe m_menu;                  // game thread only
     ui::DebugOverlay m_overlay;            // game thread only
     std::atomic<bool> m_debug_overlay{false};
     std::mutex m_debug_mutex;              // m_debug_preset, m_debug_tuning: written by publish_locked, read by the overlay's refresh
     std::wstring m_debug_preset;           // the active preset's name, or Custom
     bool m_debug_tuning = true;            // camera_tuning
+
+    modes::ModeTuner m_tuner;              // game thread only
+    std::mutex m_position_mutex;           // m_position
+    modes::PositionTuning m_position{};
+    std::atomic<uint64_t> m_position_generation{1};
+    uint64_t m_position_applied_generation = 0; // game thread only
+
+    std::chrono::steady_clock::time_point m_last_report{}, m_last_poll{};
 
     // The core's game-thread notifications (camera::Listener), kept for this object's life. A member, so Impl itself
     // stays non-virtual.

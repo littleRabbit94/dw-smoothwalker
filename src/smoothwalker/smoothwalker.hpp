@@ -1,7 +1,8 @@
 // Smoothwalker as a component of the one UE4SS mod (mod.cpp): the follow (a processor of the camera core),
 // camera position in the game's modes, presets and slots, smoothwalker.ini, keys, banners and the debug overlay. It
 // reaches the core only through its interface (camera/api.hpp) and registers its own UE4SS callbacks, apart from the
-// core's (docs/design.md, "Core and processors"). Everything else of it is in smoothwalker.cpp.
+// core's (docs/design.md, "Core and processors"). smoothwalker.cpp owns the parts and wires them together; the parts are
+// in follow/, settings/, modes/ and ui/.
 #pragma once
 
 #include "../camera/api.hpp"
