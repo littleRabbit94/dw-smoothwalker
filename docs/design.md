@@ -372,6 +372,7 @@ fails the Nth access to reach each fault path. The store takes `settings::Files`
 | `panel` | 11 | golden strings of `format_panel`, every snap reason and influence name |
 | `markers` | 46 | the debug markers' numbers: the projection (MaintainY and X, major axis, constrained aspect, refusals), near-plane clipping, the pivots, the lift's fit, bisection and easing, the trail, the leash, label placement, hysteresis, the drawable gates and the layout |
 | `position` | 12 | `position_of` over the defaults and each built-in, equality, `written`, the tuned mode classes, `shown_fov` per camera type |
+| `offset_of` | 6 | `offset_of`: neutral tuning on every key, the interior settings on key 2 only and stacked on the groups, the combined shoulder stopping at the centre, the interior FOV override on key 2 |
 | `speed_blend` | 10 | the speed share's edges, the FOV weight and its refusals, the terms, the eased speed and restart, weight and context, the state-weight fallback, settings into the tuning, through the follow, walls, the processor's sprint view |
 | `session` | 2 | seeded sessions through the hook against `session_golden.txt`, and their coverage (below) |
 

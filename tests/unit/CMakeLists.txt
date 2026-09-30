@@ -39,6 +39,6 @@ if(MSVC)
     target_compile_options(dw_unit PRIVATE /W4 /utf-8 /permissive-)
 endif()
 
-foreach(suite math curves markers wall follow speed_blend pipeline authority ini presets store panel position session)
+foreach(suite math curves markers wall follow speed_blend pipeline authority ini presets store panel position offset_of session)
     add_test(NAME ${suite} COMMAND dw_unit ${suite})
 endforeach()
