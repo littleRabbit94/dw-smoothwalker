@@ -27,7 +27,8 @@ if(DW_BUILD_MOD)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/camera/pipeline.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/smoothwalker.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/settings/ini.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/settings/presets.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/settings/presets.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/settings/store.cpp")
     target_link_libraries(DWSmoothwalker PUBLIC UE4SS)
     # Record the PDB by file name rather than absolute path. The name is literal because the Visual Studio
     # generator escapes the percent signs in %_PDB%.
