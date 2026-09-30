@@ -94,7 +94,7 @@ namespace
 
     // ------------------------------------------------------------------------------------------------ records
 
-    // The settings the hook reads, by smoothwalker.ini key, with the harness's starting values.
+    // The settings the hook reads, by smoothwalker.ini key, with each session's starting values.
     struct HSettings
     {
         double follow_rate_h = 6.5, follow_rate_v = 10.0;
@@ -143,8 +143,8 @@ namespace
         double fov = 0.0, fov_abs = NAN, weight = 1.0, blend = 0.0, ttl = 0.0;
     };
 
-    // Bytes in the order they were put. The label names the field at the call site only: a hash has no field to
-    // report, so the harness's per-put labels are gone.
+    // Bytes in the order they were put. The label names the field at the call site only: a hash has no per-field
+    // report.
     struct Record
     {
         static constexpr size_t CAPACITY = 8192; // an event's record is about 2.4 KB

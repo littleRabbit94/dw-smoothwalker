@@ -1,5 +1,5 @@
 // The camera API's state: consumers, the owner, layers (camera/authority.hpp). The clock's now() calls are part of
-// the contract: the equivalence harness counts them, in order.
+// the contract: the session test (tests/unit/session_test.cpp) hashes their count per event.
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
 #ifndef WIN32_LEAN_AND_MEAN

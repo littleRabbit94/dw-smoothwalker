@@ -76,7 +76,7 @@ namespace dw::camera
             int slot = -1;       // its layer, once it set one
         };
 
-        // Read-only copy of the state, for a single-threaded check (the equivalence harness).
+        // Read-only copy of the state, for a single-threaded check (tests/unit/session_test.cpp).
         struct Inspect
         {
             bool blending, layers_any;

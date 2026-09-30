@@ -1,5 +1,6 @@
 // The camera core's hook side (camera/pipeline.hpp): one player-camera update, and the CameraCore state around it.
-// The clock's now() calls are part of the contract: the equivalence harness counts them, in order.
+// The clock's now() calls are part of the contract: the session test (tests/unit/session_test.cpp) hashes their
+// count per event.
 // Copyright (C) 2026 littleRabbit6. GPL-3.0-or-later; see LICENSE.
 
 #include "pipeline.hpp"

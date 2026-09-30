@@ -164,7 +164,7 @@ namespace dw::camera
         auto reset_reason() -> std::atomic<int>& { return m_reset_reason; }
         auto snapshot() const -> const ViewSnapshot& { return m_snapshot; }
 
-        // Read-only copy of what the hook publishes, for a single-threaded check (the equivalence harness).
+        // Read-only copy of what the hook publishes, for a single-threaded check (tests/unit/session_test.cpp).
         struct Inspect
         {
             double keep_follow, keep_turn;
@@ -238,8 +238,8 @@ namespace dw::camera
         ViewSnapshot m_snapshot; // the API snapshot: published here, read by Lua's view() and live() through the Authority
     };
 
-    // The core's interface (camera/api.hpp) over one Pipeline and its Authority, for Core::api() and the equivalence
-    // harness: forwards only, no state of its own. Any thread, as each method says.
+    // The core's interface (camera/api.hpp) over one Pipeline and its Authority, for Core::api() and the session
+    // test: forwards only, no state of its own. Any thread, as each method says.
     class CoreApi final : public CameraCore
     {
       public:

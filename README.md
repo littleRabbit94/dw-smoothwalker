@@ -52,7 +52,6 @@ will not open while a `ConfigKey` is missing from it.
 | `src/smoothwalker/ui/` | `banner.hpp` / `banner.cpp` (banners), `menu_probe.hpp` / `menu_probe.cpp` (is a Mod Menu page open), `panel.hpp` (`DebugPanel`, `format_panel`), `debug_overlay.hpp` / `debug_overlay.cpp` (the UMG widget) |
 | `src/common/` | Shared by both sides, namespace `dw`: `math.hpp`, `live_ref.hpp` (`LiveRef`), `active_slot.hpp`, `log.hpp` (the verbose flag), `text.hpp` (UTF-8 and wide strings) |
 | `tests/unit/` | Never shipped: CTest suites over the UE4SS-free code, built without the RE-UE4SS tree (Unit tests, below) |
-| `tests/equivalence/` | Never shipped: checks the hook against an earlier commit byte for byte (`run.sh`, README) |
 | `mod/` | Exactly what ships under `ue4ss/Mods/DWSmoothwalker/`: `enabled.txt`, `LICENSE`, `mod_settings.ini` (Mod Menu page), `config/smoothwalker.ini`; `dlls/` is build output |
 | `release/` | `Build-Package.py`, the Nexus page description and metadata, `example-preset/`, `example-consumer/` (a drop-in Lua mod using the camera API) |
 | `docs/design.md` | How the mod works, the game's camera, measurements and version history |
@@ -60,8 +59,8 @@ will not open while a `ConfigKey` is missing from it.
 ## Unit tests
 
 `tests/unit` builds `dw_unit`, the suites over the code that needs no UE4SS: the camera pipeline and authority, the
-follow, settings, ini, presets, the settings store, `position_of` and the panel text. It needs MSVC and CMake, not the
-RE-UE4SS checkout:
+follow, settings, ini, presets, the settings store, `position_of`, the panel text, and seeded sessions through the
+hook hashed against goldens (`session`). It needs MSVC and CMake, not the RE-UE4SS checkout:
 
 ```
 cmake -S . -B build-tests -DDW_BUILD_MOD=OFF -DDW_BUILD_TESTS=ON
@@ -71,7 +70,7 @@ ctest --test-dir build-tests -C Release --output-on-failure
 
 The camera core's clock (`Clock`) and its guarded memory copy (`GuardedCopy`) are injected, and the settings store takes
 its file access as an interface, so a test moves time, fails chosen accesses and keeps files in memory. What `dw_unit`
-compiles and what each suite covers: `docs/design.md`, "Unit tests".
+compiles, what each suite covers and when to re-record the session goldens: `docs/design.md`, "Unit tests".
 
 ## Packaging
 

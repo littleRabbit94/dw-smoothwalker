@@ -68,7 +68,7 @@ namespace dw::camera
             return false;
         }
 
-        // Read-only, no seqlock: for a single-threaded check of the published state (the equivalence harness).
+        // Read-only, no seqlock: for a single-threaded check of the published state (tests/unit/session_test.cpp).
         auto seq() const -> uint64_t { return m_seq.load(); }
         auto data() const -> const Snapshot& { return m_data; }
 

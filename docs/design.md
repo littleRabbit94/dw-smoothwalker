@@ -292,10 +292,10 @@ with and without `keep_layers`, `log_stats`. 8 sessions of 300,000 frames: the w
 every overlay atomic and the stats counters identical to the bit. Planted changes in the follow (the hold's
 0.3 s, rotation not written) failed within the first run. Built with MSVC and played 2026-09-28: follow, the toggle key,
 presets and slots, Mod Menu apply, shoulder swap, the overlay and two DWFreeCam claim / glide cycles, no
-difference seen and no errors in the log.
+difference seen and no errors in the log. Successor check: `tests/unit/session_test.cpp` ("Unit tests").
 
-**Stage 2, checked 2026-09-28.** The stage 1 harness was rebuilt and committed (`tests/equivalence/`, one
-command: `wsl -d archlinux -- sh tests/equivalence/run.sh`). f22aa8e's headers and hook region, and the split's
+**Stage 2, checked 2026-09-28.** The stage 1 harness was rebuilt and committed (`tests/equivalence/`, a Linux
+build, removed 2026-09-29). f22aa8e's headers and hook region, and the split's
 `camera/pipeline.hpp` with `smoothwalker/follow/processor.hpp` joined only through the table, link into one program and take the same
 seeded events in lockstep: everything stage 1 fed, plus odd `DeltaTime` (0, negative, NaN, infinite), other cameras'
 updates, a lost root, camera or translation offset, an injected fault on each guarded memory access, unchanged
@@ -307,16 +307,18 @@ swap), and so is the QPC call count. 8 sessions of 300,000 frames, about 768,000
 session saw every restart reason (startup aside, 28 to 69 teleports, 220 to 358 gaps, 47 to 66 world, 46 to 66
 player, 111 to 134 pawn, 247 to 288 toggles, 293 to 354 API cuts, 166 to 208 lease ends, 488 to 640 lost views),
 630 to 778 crossfades (97 to 136 of them glides), 876 to 917 publishes (132 to 226 with `position_transition` 0)
-and 860 to 935 injected faults. Three planted changes, applied to a copy by `run.sh --mutate`, failed in all 8 sessions: the
+and 860 to 935 injected faults. Three planted changes, applied to a copy of the tree, failed in all 8 sessions: the
 crossfade eased linearly (core, first difference at frame 35 to 1,018), the follow's wall-clamp hold at 0.35 s
 (frame 15,402 to 113,952), mode writes not folded into the processor's generation (frame 114 to 1,341). Built with
-MSVC: the 4 known C4996 warnings, no others. Not yet played.
+MSVC: the 4 known C4996 warnings, no others. Not yet played. Successor check (2026-09-29):
+`tests/unit/session_test.cpp` replays the harness's session generator on the product alone and hashes each session
+against MSVC goldens ("Unit tests"); the same three planted changes fail it.
 
 ### Unit tests
 
 `tests/unit` builds one executable, `dw_unit`, over the UE4SS-free code, with an in-house framework (`check.hpp`:
 `TEST(suite, name)`, `CHECK`, `CHECK_EQ`, `CHECK_NEAR`; a failed check is recorded and the test carries on). It needs
-MSVC and the Windows SDK, but neither the RE-UE4SS tree nor WSL. From the repo root:
+MSVC and the Windows SDK, not the RE-UE4SS tree. From the repo root:
 
 ```
 cmake -S . -B build-tests -DDW_BUILD_MOD=OFF -DDW_BUILD_TESTS=ON
@@ -327,11 +329,12 @@ ctest --test-dir build-tests -C Release --output-on-failure
 `--config Debug` and `-C Debug` work the same way. CTest runs one test per suite (`dw_unit <suite>`); `dw_unit` alone
 runs everything and exits non-zero on a failed check or a suite with no tests. Built at /W4 with `/permissive-`, no warnings.
 
-**What `dw_unit` compiles.** Product sources: `camera/authority.cpp`, `camera/guarded.cpp`, `camera/pipeline.cpp`,
+**What `dw_unit` compiles.** Product sources: `camera/authority.cpp`, `camera/guarded.cpp`, `camera/hook.cpp` (its
+UE4SS log include resolves to a sink in `tests/unit/session/`, on that file's include path only), `camera/pipeline.cpp`,
 `smoothwalker/settings/ini.cpp`, `presets.cpp` and `store.cpp`. Product headers: `follow/*` (`processor.hpp` with
 `publish_view`), `camera/wall.hpp`, `common/math.hpp`, `common/text.hpp`, `modes/position.hpp`, `ui/panel.hpp`. What
-includes UE4SS headers stays out (`hook.cpp`, `core.cpp`, `mod.cpp`, `smoothwalker.cpp`, `mode_tuner.cpp`, `banner.cpp`,
-`menu_probe.cpp`, `debug_overlay.cpp`): the equivalence harness and the game cover those.
+includes other UE4SS headers stays out (`core.cpp`, `mod.cpp`, `smoothwalker.cpp`, `mode_tuner.cpp`, `banner.cpp`,
+`menu_probe.cpp`, `debug_overlay.cpp`): the game covers those.
 
 **Injected seams.** `Clock` (`camera/clock.hpp`) is two function pointers, `now()` and `frequency()`; `Pipeline` and
 `Authority` each take one (`QPC_CLOCK` by default), so a test moves the ticks itself and every clock read stays at its place in
@@ -353,6 +356,27 @@ fails the Nth access to reach each fault path. The store takes `settings::Files`
 | `store` | 44 | startup, reload rules (a) to (e), the Custom pin, slots, cycle, deferred write-back and retry, the pending file |
 | `panel` | 11 | golden strings of `format_panel`, every snap reason and influence name |
 | `position` | 10 | `position_of` over the defaults and each built-in, equality, `written`, the tuned mode classes |
+| `session` | 2 | seeded sessions through the hook against `session_golden.txt`, and their coverage (below) |
+
+**The session suite** (`session_test.cpp`, 2026-09-29) succeeds the equivalence harness (stage 2 above). The
+harness's seeded generator (walking, jumps, teleports, pauses, slow motion, crouches, bad half heights, NaN and
+infinite views, odd `DeltaTime`, other cameras, a lost root, camera or offset, a fault on each guarded access, the
+toggle, publishes, mode writes, the mode flags, cuts for every reason, two API consumers with claims, leases,
+releases, uninstalls, re-keys and layers, log_stats takes and overlay reads) drives a `Pipeline` and an `Authority`
+with `CoreApi` over both, the `FollowProcessor` registered through it, and every camera update through
+`get_camera_view_hook` on a slot of the test's. Each event's record (the view bytes the hook left, everything the hook
+publishes, the API state, the stats and overlay reads, every NaN of a float field as one value) and its count of
+clock reads feed one FNV-1a 64 hash per seed; seeds 1 to 8 x 20,000 frames must equal `tests/unit/session_golden.txt`.
+The second test sums coverage over the eight seeds: every restart reason, crossfades, glides, faults, claims,
+releases, layer sets and re-keys. About 1.2 s in Release, 2.6 s in Debug.
+
+**Re-recording the session goldens.** `dw_unit --record-session` checks coverage, then rewrites the file. The
+goldens are MSVC's (the standard library's random distributions and the CRT's math belong to the compiler): record
+with MSVC only; Debug and Release give the same hashes. An intended change to the pipeline, the authority, the hook
+or the follow re-records in the commit that makes it, and that commit's message says so; a hash that changes
+without one is a regression. Recorded 2026-09-29 while the harness passed on the same tree (8 x 300,000 and
+8 x 20,000 frames). The harness's three planted changes fail it: the crossfade eased linearly (all 8 seeds), the
+follow's wall-clamp hold at 0.35 s (seed 3 only), mode writes not folded into the processor's generation (all 8).
 
 ## Camera modes and position tuning
 
@@ -1761,9 +1785,9 @@ Stage 2, the same day, again with no behaviour change: the boundary drawn inside
 (`src/core/`) and Smoothwalker (`src/sw/`) are separate translation units and components, each with its own UE4SS
 callbacks; Smoothwalker reaches the core only through the C table `dwcc_get_api` returns. `FrameIn` lost the
 aiming, combat and traversal flags and the mode write, the processor reports its own switch, toggle generation and
-transition, and the cut thresholds are pushed to the core on every publish. The equivalence harness is committed
-under `tests/equivalence/`. See "Core and processors".
+transition, and the cut thresholds are pushed to the core on every publish. An equivalence harness checked it
+against f22aa8e byte for byte; `tests/unit/session_test.cpp` replaced it. See "Core and processors".
 
 Fix: a processor or listener call stalled past the unload waits (over 5 s) no longer touches freed memory: `unregister_processor` and `clear_listener` return 1 drained / 0 timed out, and on 0 the Smoothwalker component is left allocated (leaked) with one warning instead of destroyed. See "Core and processors".
 
-Fix: an `install` re-key (a Lua mod restarting on its old state without `on_lua_stop`) now frees the layer slot it held, as an uninstall does; before, the slot and its layer stayed and repeated restarts used up the eight slots. The equivalence harness applies `tests/equivalence/baseline-fixes/0001` to its baseline for that one difference.
+Fix: an `install` re-key (a Lua mod restarting on its old state without `on_lua_stop`) now frees the layer slot it held, as an uninstall does; before, the slot and its layer stayed and repeated restarts used up the eight slots. `authority_test` checks it (`rekey_frees_the_slot`).
