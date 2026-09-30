@@ -17,6 +17,7 @@ add_executable(dw_unit
     presets_test.cpp
     store_test.cpp
     panel_test.cpp
+    position_test.cpp
     "${DW_SRC}/camera/authority.cpp"
     "${DW_SRC}/camera/guarded.cpp"
     "${DW_SRC}/camera/pipeline.cpp"
@@ -31,6 +32,6 @@ if(MSVC)
     target_compile_options(dw_unit PRIVATE /W4 /utf-8 /permissive-)
 endif()
 
-foreach(suite math curves wall follow pipeline authority ini presets store panel)
+foreach(suite math curves wall follow pipeline authority ini presets store panel position)
     add_test(NAME ${suite} COMMAND dw_unit ${suite})
 endforeach()

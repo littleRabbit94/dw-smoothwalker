@@ -26,6 +26,7 @@ if(DW_BUILD_MOD)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/camera/hook.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/camera/pipeline.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/smoothwalker.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/modes/mode_tuner.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/settings/ini.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/settings/presets.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/smoothwalker/settings/store.cpp"

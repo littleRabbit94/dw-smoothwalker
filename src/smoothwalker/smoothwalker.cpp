@@ -314,16 +314,9 @@ struct Smoothwalker::Impl
         // enabled off is the game as shipped, camera modes and its own lag included (position_of).
         auto position = modes::position_of(m_store.settings());
         std::lock_guard guard(m_position_mutex);
-        // With camera_tuning off only the lag switch is written, so a changed position number applies nothing.
-        // The values are kept, so switching it on applies the latest.
-        auto written = [](modes::PositionTuning p) {
-            if (p.active) return p;
-            modes::PositionTuning lag_only;
-            lag_only.active = false;
-            lag_only.own_lag = p.own_lag;
-            return lag_only;
-        };
-        if (!(written(position) == written(m_position))) m_position_generation.fetch_add(1);
+        // Only what modes::written() keeps counts as a change; the values are kept, so switching camera_tuning on
+        // applies the latest.
+        if (!(modes::written(position) == modes::written(m_position))) m_position_generation.fetch_add(1);
         m_position = position;
     }
 
