@@ -605,8 +605,9 @@ out as the character speeds up, and no step between running and sprinting, so an
 game's fixed gaits) get a matching camera. It is not a new camera: the Sprint group's settings arrive with speed
 instead of all at once when the game pushes `Sprint`.
 
-**Speeds** (measured 2026-09-30, vanilla locomotion, `WalkToggle.pak` installed, horizontal speed of the
-movement component's `Velocity` at 250 ms and of the pivot at every frame, outdoors):
+**Speeds** (measured 2026-09-30, vanilla locomotion, horizontal speed of the movement component's `Velocity` at
+250 ms and of the pivot at every frame; the same outdoors and on the Interior camera type, with and without
+`WalkToggle.pak`):
 
 | Gait | cm/s | `PlayerMovementAttributeSet` |
 |---|---|---|
@@ -666,8 +667,8 @@ game blends out over 0.95 s, and the share follows `w`, the game's own curve.
   Presets stay at `speed_blend` 0 until each is reviewed: with it on, Cinematic's sprint +8 FOV and 110 % distance
   show while running.
 
-**Open:** indoor gaits (`DA_Interior_MovementProfile`, unmeasured), walk without `WalkToggle.pak`, and a check with
-an analog-movement mod installed.
+Sprint works indoors, and from a standstill the Sprint camera blends in (0.5 s) before speed reaches 558, so the share
+follows `w` there. **Open:** a check with an analog-movement mod installed.
 
 ## Presets and the Mod Menu page
 
