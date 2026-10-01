@@ -26,7 +26,7 @@ using namespace RC;
 
 namespace
 {
-    constexpr const char* LUA_MOD_VERSION = "0.10.1"; // Smoothwalker.mod_version
+    constexpr const char* LUA_MOD_VERSION = "0.11.0"; // Smoothwalker.mod_version
 } // namespace
 
 class DWSmoothwalker : public CppUserModBase
@@ -36,8 +36,8 @@ class DWSmoothwalker : public CppUserModBase
     {
         m_core = std::make_unique<dw::camera::Core>(); // pins the DLL first, and logs a restart on it
         ModName = STR("DWSmoothwalker");
-        ModVersion = STR("0.10.1");
-        ModDescription = STR("Frame-interpolated third-person camera");
+        ModVersion = STR("0.11.0");
+        ModDescription = STR("Smoothed third-person camera follow");
         ModAuthors = STR("littleRabbit6");
         auto bind_key = [this](int key, std::function<void()> action) { register_keydown_event(static_cast<Input::Key>(key), std::move(action)); };
         m_smoothwalker = std::make_unique<dw::smoothwalker::Smoothwalker>(m_core->api(), bind_key, ModVersion);

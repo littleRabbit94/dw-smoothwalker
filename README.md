@@ -1,7 +1,7 @@
 # Smoothwalker - Third Person Camera
 
 A third-person camera mod for The Blood of Dawnwalker that replaces the game's camera lag with a custom
-implementation that can be configured into presets using pure ini files or the optional in-game Mod Setting Menu.
+implementation that can be configured into presets using plain ini files or the optional in-game Mod Setting Menu.
 Distance, height, shoulder and FOV can be set per mode, with a shoulder swap on `V`. Keybinds for turning
 the mod on/off and cycling presets can be set in the ini for convenience.
 
@@ -10,7 +10,7 @@ the mod on/off and cycling presets can be set in the ini for convenience.
 - The Blood of Dawnwalker, Steam build 1.0.5 (25232147).
 - UE4SS at commit `97b7e501`, from either:
   - Vercadi's UE4SS for Dawnwalker, rc6 (Nexus mod 18), or
-  - Framecore's UE4SS for BoD, 2c or 2b, Performance or Compatibility profile (Nexus mod 283).
+  - Framecore's UE4SS for BoD, 2c, Performance or Compatibility profile (Nexus mod 283).
 - Optional: Mod Setting Menu (Nexus mod 271) for the in-game settings page. Without it, edit
   `config/smoothwalker.ini`.
 
@@ -35,7 +35,7 @@ cmake --build <build dir> --config Game__Shipping__Win64 --target DWSmoothwalker
 The first build compiles UE4SS too. The output is copied to `mod/dlls/main.dll` (and `main.pdb`). Use
 `--parallel`, not `-- /m`: Git Bash rewrites `/m` into a path. To deploy, close the game and copy `mod/`
 to `Dawnwalker/Binaries/Win64/ue4ss/Mods/DWSmoothwalker/`. An installed `config/smoothwalker.ini` holds
-the player's settings: when a new setting is added, add its line there instead of overwriting the file. The Mod Menu page
+the player's settings: don't overwrite it. The DLL adds any missing numeric setting's line (and `debug_key`) at startup; the Mod Menu page
 will not open while a `ConfigKey` is missing from it.
 
 ## Layout
@@ -86,8 +86,8 @@ example mod's Lua syntax (`luac -p`, Lua 5.4), then writes `release/dist/Smoothw
 
 Copy `release/example-preset/Template.ini` into `ue4ss/Mods/DWSmoothwalker/config/presets/` under a new name,
 change the `name` line and the values, and restart the game. Every key is commented with its range and
-default. The preset format and rules (49 keys, clamping, the 54 drop-in limit) are in `docs/design.md`,
-"Presets". Switches are not preset keys; a preset that sets them is ignored on those lines.
+default. The preset format and rules (50 keys, clamping, the 54 drop-in limit) are in `docs/design.md`,
+"Presets". The on/off switches (Smoothwalker, Adjust camera position, banners, logging, debug displays) are not preset keys; a preset that sets them is ignored on those lines.
 
 To start from a camera you tuned in game, set the Preset picker on the Mod Menu page to a slot marked
 `(empty)` and press Apply: the mod writes your live settings to `config/presets/Slot N.ini`. Keep tuning with
@@ -115,4 +115,4 @@ GPL-3.0-or-later. See `LICENSE`.
 ## Credits
 
 Built on [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) by the UE4SS-RE team (MIT).
-Inspired by SmoothCam for Skyrim
+Inspired by SmoothCam for Skyrim.

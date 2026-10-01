@@ -15,13 +15,13 @@ AI-Generated Content (read 2026-09-16).
 | Field | Value |
 |---|---|
 | Mod name | `Smoothwalker - Third Person Camera` |
-| Summary | `A third-person camera that trails your character while turning stays instant, and eases off when you aim. Distance, height, shoulder and FOV per situation. Shoulder swap on V; presets and on/off in ini or Mod Menu. Needs UE4SS and Steam build 25232147.` |
-| Version | `0.10.1` |
+| Summary | `A third-person camera mod that removes the camera lag and replaces it with its own smoothing. The settings can be configured into drop-in presets using plain ini files or the optional in-game Mod Setting Menu. Distance, height, offset, and FOV can be set per mode, with a shoulder swap on V.` (live, read 2026-09-30) |
+| Version | `0.11.0` |
 | Category | `Utilities`, beside FreeCam (mod 350) |
 | Tags | `Camera`, `Quality of Life`, `Utilities for Players`, `AI-Generated Content` |
 | Adult content | No |
-| Requirements | Two entries, either one. UE4SS for Dawnwalker: https://www.nexusmods.com/thebloodofdawnwalker/mods/18 (Vercadi). Note field: `Or Framecore's UE4SS for BoD. Use file Dawnwalker-UE4SS-v1.2.1-rc6-build25232147 (version 1.3).` Current MAIN file on 2026-09-16. UE4SS for BoD: https://www.nexusmods.com/thebloodofdawnwalker/mods/283 (Framecore). Note field: `Or Vercadi's UE4SS for Dawnwalker. Version 2c or 2b, Performance or Compatibility profile.` Its UE4SS.dll is the official RE-UE4SS experimental CI build of 97b7e501 (PE timestamp 2026-09-02 02:02:56 UTC, inside the "Make Experimental Release" run on that commit); tested 2026-09-16 on both profiles. |
-| Optional | Dawnwalker Mod Menu: https://www.nexusmods.com/thebloodofdawnwalker/mods/271 (Nexus title "Mod Setting Menu", mmarcussa, 1.0.6.2 on 2026-09-16). Note field: `Adds the in-game settings page. Without it, edit config/smoothwalker.ini.` |
+| Requirements | Two entries, either one. UE4SS for Dawnwalker: https://www.nexusmods.com/thebloodofdawnwalker/mods/18 (Vercadi). Note field: `Or Framecore's UE4SS for BoD. Use file Dawnwalker-UE4SS-v1.2.1-rc6-build25232147 (version 1.3).` Current MAIN file on 2026-09-16. UE4SS for BoD: https://www.nexusmods.com/thebloodofdawnwalker/mods/283 (Framecore). Note field: `Or Vercadi's UE4SS for Dawnwalker. Version 2c, Performance or Compatibility profile.` (2b archived on the page, read 2026-09-30) Its UE4SS.dll is the official RE-UE4SS experimental CI build of 97b7e501 (PE timestamp 2026-09-02 02:02:56 UTC, inside the "Make Experimental Release" run on that commit); tested 2026-09-16 on both profiles. |
+| Optional | Dawnwalker Mod Menu: https://www.nexusmods.com/thebloodofdawnwalker/mods/271 (Nexus title "Mod Setting Menu", mmarcussa, 1.0.6.2 on 2026-09-16; 1.0.7.1 on 2026-09-30, its choices.lua parser unchanged from 1.0.7). Note field: `Adds the in-game settings page. Without it, edit config/smoothwalker.ini.` |
 | Description | `nexus-description.bbcode` |
 
 ## Files tab
@@ -29,9 +29,9 @@ AI-Generated Content (read 2026-09-16).
 | Field | Value |
 |---|---|
 | File name | `Smoothwalker` |
-| Version | `0.10.1` |
+| Version | `0.11.0` |
 | Category | Main Files |
-| File | `dist/Smoothwalker-0.10.1.zip`, 405,274 bytes, built 2026-09-24 (uploaded; a later rebuild for a comment-only change in 0560dd3 is 405,275 bytes and was not uploaded) |
+| File | `dist/Smoothwalker-0.11.0.zip` (not built yet) |
 | Description | `Close the game, then extract into the folder that holds the ue4ss folder (Dawnwalker/Binaries/Win64, the one with Dawnwalker.exe). The archive carries the folder path, so the mod lands in ue4ss/Mods/DWSmoothwalker by itself. Needs UE4SS (mod 18 or mod 283) and Steam build 25232147. No mods.txt edit.` |
 
 Optional file:
@@ -39,13 +39,14 @@ Optional file:
 | Field | Value |
 |---|---|
 | File name | `Smoothwalker Example Preset` |
-| Version | `0.10.0` |
+| Version | `0.11.0` |
 | Category | Optional Files |
-| File | `dist/Smoothwalker-Example-Preset-0.10.0.zip`, 1,382 bytes, built 2026-09-24 |
+| File | `dist/Smoothwalker-Example-Preset-0.11.0.zip` (not built yet) |
 | Description | `One preset, Over the Shoulder: a closer camera further out over the shoulder, with a quicker follow to match. I commented every key with its range and default, so it doubles as a template for your own. Extract into Dawnwalker/Binaries/Win64 like the main file; it lands in ue4ss/Mods/DWSmoothwalker/config/presets. Restart the game, then pick it from the Mod Menu or with preset in the ini. Needs the main file.` |
 
-Unchanged since 0.10.0: keep the uploaded 0.10.0 archive. Source: `example-preset/`. The build checks it holds a name and all 41 preset keys, each once, inside
-the Mod Menu range and on its step.
+Changed in 0.11.0 (41 to 50 keys: speed_blend, the four interior_ position keys, focus_follow, focus_rotation,
+interior_follow and interior_rotation): upload the new archive. Source: `example-preset/`. The build checks it holds a name and
+every preset key in `PRESET_KEYS` (50), each once, inside the Mod Menu range and on its step.
 
 Second optional file:
 
@@ -93,6 +94,17 @@ Plain text, no BBCode. `Build-Package.py` reads the first version in this block 
 differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 
 ```
+0.11.0 - Indoor camera, speed blend, debug markers
+
+- Indoor camera: inside buildings the game switches to its own indoor camera. interior_distance, interior_height, interior_shoulder and interior_fov adjust it on top of each group's settings (Camera: Indoors on the menu page, and in presets). They apply where the game changes the camera indoors: exploring, sprinting, focus, anti-grav and shadowstep. Combat, aiming and claw ride use one camera everywhere. All neutral by default.
+- Follow in focus and indoors: focus_follow, focus_rotation, interior_follow and interior_rotation set how much of the trail and the turning smoothing stays in focus mode and indoors, like the combat and traversal pairs. All default to 100, the old behavior. Aiming wins over combat, combat over focus, focus over traversal, and traversal over indoors.
+- Speed blend: speed_blend (Camera: Sprinting on the menu page, and in presets) brings the sprinting camera in gradually as you speed up, instead of all at once when the sprint starts. At 100, a run sits most of the way there. 0 by default, which is the game's switch at the sprint. The speeds and easing times are ini only: speed_blend_start, speed_blend_full, speed_blend_rise and speed_blend_fall. Aiming, combat, focus and traversal keep their own cameras.
+- Debug markers: debug_markers (Debug group on the menu page) draws the camera's trail around your character: where the game's camera and Smoothwalker's are anchored, the distance between them, the lag limit and the last second of the path. debug_key now shows and hides the overlay and the markers together.
+- Menu page: a shorter Preset description, Camera: Claw ride and anti-grav renamed Camera: Traversal (it has always covered shadowstep too), Gentle-start strength renamed Starting catch-up speed, and corrected descriptions: the look limits also cover shadowstep, and Adjust camera position also covers the look limits.
+- Camera API: a Lua mod that restarts (Ctrl+R, or a load error) now frees its layer slot and its old layer fades out. Before, the old layer could stay on screen and the restarted mod took a second slot.
+- Under the hood, the code was reorganized into a camera core and Smoothwalker's own settings, follow and display parts, with automated tests. The camera should behave as before; if something doesn't, a report with the DWSmoothwalker lines from UE4SS.log helps.
+- Updating: close the game and extract over the old folder, or skip config/smoothwalker.ini to keep your settings; the new keys are added to it at the next start. Slots and installed presets survive. The Example Preset is updated (it now carries all 50 preset keys, the indoor ones and speed_blend included); the Example API Mod is unchanged.
+
 0.10.1 - Field of view fix
 
 - Field of view settings now hold on every camera the game builds. The game builds a fresh camera each time it switches to one, and 10 of the 23 it uses came out with the game's own FOV instead of yours: three of the five exploring cameras, the armed combat cameras (on every weapon draw) and sprinting in combat, aiming on a ladder and in anti-grav, and the anti-grav camera. A change showed until the next switch, then reverted. The sprint and focus FOVs, claw ride, shadowstep, fist fights and every other setting (distance, height, shoulder, look limits) were not affected.
@@ -139,7 +151,8 @@ differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 
 - Version: `ModVersion` in `mod.cpp`. It also appears in `[Mod] Version` in `mod_settings.ini`,
   the newest changelog entry above (the build checks all three), and in places the build does not
-  check: the BBCode log-line `[code]` block and the version rows in the tables above.
+  check: `LUA_MOD_VERSION` in `mod.cpp` (the API's `mod_version`), the BBCode log-line `[code]` block
+  and the version rows in the tables above.
 - `Build-Package.py` fails when a `ConfigKey` in `mod_settings.ini` is missing from `smoothwalker.ini`
   or appears twice, or a shipped value is outside `Minimum`/`Maximum` or not in `PresetValues`. Any
   of those stops the Mod Menu page opening at all, not just one row.
@@ -148,8 +161,8 @@ differs from `ModVersion` and `[Mod] Version`: add the new entry on top.
 - The description's Settings spoiler lists the shipped defaults by hand; after changing a default
   in `smoothwalker.ini`, update it. Since 0.10.0 `aiming_follow` is a preset key like the other follow
   percentages; the preset authors' key list and the example template carry it.
-- Voice: the description is first person and short, a hobbyist engineer explaining a utility they built, technical but casual. Say what
-  was measured and why a choice was made; no sales language, no em dashes.
+- Voice: second person, technical but casual, with one short first-person paragraph in the intro (the
+  "early build" note). Say what was measured and why a choice was made; no sales language, no em dashes.
 - The description links the GitHub repo: make it public (after the hygiene sweep) before posting, or
   drop the "Source" section.
 - Game build: the DLL hooks `RebelCameraComponent` vtable slot 214 (`docs/design.md`, "The

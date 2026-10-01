@@ -1089,13 +1089,15 @@ freed leaves `g_original` pointing at freed code, and the next camera update cra
 
 ## Performance
 
-Measured 2026-09-16, 0.6.1, rc6, build 25232147. Two measurements, because the cost is far below
-whole-frame noise.
+Build 25232147. Two measurements, because the cost is far below whole-frame noise.
 
-**Inside the hook.** 0.6.1 times `smooth_view` with QPC when `log_stats = 1` (the timing only runs then):
-**3.3-3.6 µs per frame** at 47 and 57 fps, standing and moving, about 0.017 % of a 21 ms frame.
+**Inside the hook.** Timed with QPC when `log_stats = 1` (the timing only runs then). 0.11.0 (measured
+2026-09-30, Mod Menu 1.0.7.1, debug displays hidden): **7.7-10.9 µs per frame**, median 9.8 over 28 five-second
+windows at 52 to 78 fps of exploring, sprinting and combat, about 0.06 % of a 17 ms frame. 0.6.1 (measured
+2026-09-16, rc6): 3.3-3.6 µs at 47 and 57 fps, standing and moving. The rise came with the API layers, the
+core split, the speed blend and the indoor settings; it was not broken down per feature.
 
-**Whole frames, UEBench** (a separate UE4SS frame-time benchmark mod). Same spot and view, hands off, `O`
+**Whole frames, UEBench** (0.6.1, 2026-09-16) (a separate UE4SS frame-time benchmark mod). Same spot and view, hands off, `O`
 toggling the smoothing between captures (so "off" means the DLL loaded with the hook returning after the
 original, the fair A/B for the math), order on, off, on, off. Poll sampler, 20 s per capture after a 2 s
 settle, all four valid with identical stamps (`sg.*` 2, ViewDistance 3, `r.ScreenPercentage` 58):

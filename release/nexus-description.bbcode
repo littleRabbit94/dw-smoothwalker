@@ -14,10 +14,10 @@ This is an early build. The camera works as intended, performance is fine, and I
 [*]UE4SS, either one:
 [list]
 [*][url=https://www.nexusmods.com/thebloodofdawnwalker/mods/18]UE4SS for Dawnwalker[/url] by Vercadi, file Dawnwalker-UE4SS-v1.2.1-rc6-build25232147 (version 1.3 on that page).[/*]
-[*][url=https://www.nexusmods.com/thebloodofdawnwalker/mods/283]UE4SS for BoD[/url] by Framecore, version 2c or 2b, Performance or Compatibility profile.[/*]
+[*][url=https://www.nexusmods.com/thebloodofdawnwalker/mods/283]UE4SS for BoD[/url] by Framecore, version 2c, Performance or Compatibility profile.[/*]
 [/list]
 [/*]
-[*]The Steam version of the game, build 1.0.5 (25232147). On any other build, the mod stays inactive and states this in [font=Courier New]UE4SS.log[/font].[/*]
+[*]The Steam version of the game, build 1.0.5 (25232147). Other builds are untested. If Smoothwalker can't find the camera function it hooks, it stays inactive and says so in [font=Courier New]UE4SS.log[/font].[/*]
 [*]Optional: [url=https://www.nexusmods.com/thebloodofdawnwalker/mods/271]Mod Setting Menu[/url] for the in-game settings page.[/*]
 [/list]
 
@@ -25,7 +25,7 @@ This is an early build. The camera works as intended, performance is fine, and I
 Extract the archive into the folder that holds the [i]ue4ss[/i] folder and Dawnwalker.exe:
 [code]<Steam library>\steamapps\common\The Blood of Dawnwalker\Dawnwalker\Binaries\Win64[/code]
 No mods.txt edit needed. [font=Courier New]UE4SS.log[/font] shows these two lines once it has loaded:
-[code][DWSmoothwalker] v0.10.1 loaded, on, 0 saved slots, 0 presets from the presets folder
+[code][DWSmoothwalker] v0.11.0 loaded, on, 0 saved slots, 0 presets from the presets folder
 [DWSmoothwalker] GetCameraView hooked (slot 214)[/code]
 To uninstall, delete ue4ss\Mods\DWSmoothwalker. Nothing is written to save games.
 
@@ -34,70 +34,72 @@ To uninstall, delete ue4ss\Mods\DWSmoothwalker. Nothing is written to save games
 [b][size=4]Features[/size][/b]
 [list]
 [*]A smoother third-person camera that replaces the game's stiff camera lag.[/*]
-[*]Three built-in presets, Tight, Balanced, and Cinematic, that you can cycle with a hotkey.[/*]
-[*]Distance, height, shoulder offset, and FOV are adjustable per situation (exploring, sprinting, combat, focus, aiming, traversal), with a shoulder swap key (V).[/*]
+[*]Three built-in presets, Tight, Balanced, and Cinematic, picked on the menu page or cycled with a key you bind.[/*]
+[*]Distance, height, shoulder offset, and FOV are adjustable per situation (exploring, sprinting, combat, focus, aiming, traversal), with indoor adjustments on top and a shoulder swap key (V).[/*]
+[*]Speed blend: the sprinting camera can arrive gradually as you speed up, instead of all at once when the sprint starts.[/*]
+[*]Follow while aiming, in combat, in focus, in traversal (claw ride, anti-grav, shadowstep) and indoors: how much of the follow and turning smoothing stays while those cameras are up.[/*]
 [*]Settings can be changed in the in-game Mod Setting Menu (optional) or a plain ini file.[/*]
-[*]A preset is a small ini file with 41 keys, placed in config/presets.[/*]
-[*]A template with every key and its default is included in the optional files.[/*]
-[*]Six in-game save slots that work as profiles: pick one, tune, and every change is saved into it. Export it when you're done.[/*]
-[*]Follow in combat, focus, traversal (claw ride, anti-grav, shadowstep) and indoors: how much of the follow and rotation smoothing stays while those cameras are up. Aiming has had this since the first release.[/*]
+[*]Six in-game save slots that work as profiles: pick one, tune, and every change is saved into it. Each slot is a plain ini file you can copy and share as a preset.[/*]
+[*]Presets from other players: a preset is a small ini file with up to 50 keys, placed in config/presets. A template with every key and its default is included in the optional files.[/*]
 [*]Works with mods that change the game's camera modes: a distance or FOV value set by another mod is kept, Smoothwalker's settings apply on top, and one log line shows which mode and value are in effect.[/*]
 [*]A camera API for other UE4SS Lua mods: read the camera, add an offset, rotation, or FOV layer, or control the camera. See the mod authors section below.[/*]
-[*]A debug overlay (Debug group on the menu page, or [font=Courier New]debug_key[/font]) that shows the live camera state at the top right of the screen.[/*]
+[*]A debug overlay and debug markers (Debug group on the menu page, or [font=Courier New]debug_key[/font]): the live camera state at the top right of the screen, and the camera's trail drawn around your character.[/*]
 [/list]
 [size=4][b]Known issues[/b][/size]
 [list]
-[*]After loading a preset from the Mod Menu, the open page continues to show the old slider values until you reopen it.[/*]
+[*]After loading a preset from the Mod Menu, the page keeps showing the old slider values until you return to the game and open it again. Leaving Mod Settings for the pause menu is not enough.[/*]
+[*]A slot you save still shows as [b](empty)[/b] in the Preset list until the next game start. Picking it before then loads what you saved into it; it does not save over it.[/*]
 [/list]
 
 [size=4][b]Compatibility[/b][/size]
 [list]
 [*]Another mod that replaces the third-person camera update would conflict with it. Run one or the other, unless that mod uses the camera API to take the camera over.[/*]
-[*]Mods that only change the game's camera modes (distance, FOV, look limits) work alongside it: Smoothwalker keeps their values and applies your settings on top.[/*]
+[*]Mods that only change the game's camera modes work alongside it. Smoothwalker keeps their distance and FOV values and applies your settings on top. Their look limits are replaced by yours in the modes Smoothwalker sets limits for; switch off Adjust camera position ([font=Courier New]camera_tuning[/font]) to keep theirs.[/*]
 [*][url=https://www.nexusmods.com/thebloodofdawnwalker/mods/350]FreeCam - UE4SS[/url] ([font=Courier New]F7[/font]) works alongside it. Leaving the free camera snaps the game camera back to your character.[/*]
+[*][url=https://www.nexusmods.com/thebloodofdawnwalker/mods/493]Controller and Keyboard True Analog Movement[/url] works with the speed blend: the in-between speeds its controller file adds give in-between camera positions.[/*]
 [/list]
 
 [size=4][b]Performance[/b][/size]
-The camera math runs once per frame inside the game's own camera update. Measured cost is a few microseconds, with no measurable frame-time difference and no stutters. (This hasn't been measured in a while...)
+The camera math runs once per frame inside the game's own camera update. Measured on 0.11.0 over about two and a half minutes of play at 52 to 78 fps: 7.7 to 10.9 microseconds per frame inside the camera update (median 9.8), about 0.06% of a 60 fps frame. [font=Courier New]log_stats = 1[/font] prints the current cost.
 
 [size=4][b]Presets and keys[/b][/size]
 [spoiler]
 [list]
-[*][font=Courier New]V[/font]: swap shoulders. The camera glides across in half a second.[/*]
-[*]Presets: pick one on the Mod Settings page or with [font=Courier New]preset[/font] in the ini. [b]Tight[/b] barely trails, camera a little closer. [b]Balanced[/b] (default) trails clearly and settles fast. [b]Cinematic[/b] trails heavily, smooths turning, sits further back and higher, and widens the view when you sprint. After those come your six save slots, then any presets installed from other authors.[/*]
-[*]Save slots: pick a slot marked [b](empty)[/b] and your current settings are saved into it. While that slot is shown, every Apply saves into it too, so you can keep tuning. Pick Custom or another preset to stop. Built-in presets and installed ones never change.[/*]
-[*]On and off: the [font=Courier New]enabled[/font] switch, same page or ini. Off is the game's own camera, untouched.[/*]
+[*][font=Courier New]V[/font]: swap shoulders. The camera glides across over Position change speed, half a second by default.[/*]
+[*]Presets: pick one on the Mod Settings page or with [font=Courier New]preset[/font] in the ini. [b]Tight[/b] barely trails, camera a little closer. [b]Balanced[/b] (default) trails clearly and settles fast. [b]Cinematic[/b] trails heavily, smooths turning, sits further back and higher, widens the view a little (more when you sprint), and lets you look further up and down. After those come your saved slots, then any presets installed from other authors, then the empty slots.[/*]
+[*]Save slots: pick a slot marked [b](empty)[/b] and your current settings are saved into it. While that slot is shown, every Apply saves into it too, so you can keep tuning. Pick Custom or another preset to stop. Built-in presets and installed ones never change. To name a slot, change the [b]name[/b] line in [i]config\presets\Slot N.ini[/i]; the new name shows after the next game start.[/*]
+[*]On and off: the [font=Courier New]enabled[/font] switch, same page or ini. Off is the game's own camera; only mods that use Smoothwalker's camera API still apply.[/*]
 [/list]
-Only [font=Courier New]V[/font] is bound by default, and the game leaves that key free. To cycle presets, toggle the mod or show the debug overlay from a key, set [font=Courier New]preset_key[/font], [font=Courier New]toggle_key[/font] or [font=Courier New]debug_key[/font] in the ini. A banner at the left of the screen confirms preset changes and on/off.
+Only [font=Courier New]V[/font] is bound by default, and the game leaves that key free. To cycle presets, toggle the mod or show the debug displays from a key, set [font=Courier New]preset_key[/font], [font=Courier New]toggle_key[/font] or [font=Courier New]debug_key[/font] in the ini: one letter, one digit, or F1 to F12. A short banner at the top left of the screen (the game's own region banner) confirms preset changes, slot saves, and on/off from the key.
 
-A preset carries most of the camera settings; a few can't be changed per preset yet (see the Settings spoiler).
+A preset carries the follow, turning, look limit and camera position settings. The on/off switches (Smoothwalker, Adjust camera position, banners, logging, debug displays), the shoulder side, Position change speed and the ini-only settings stay as you have them (see the Settings spoiler).
 
-[b]With Mod Setting Menu.[/b] Smoothwalker gets its own page under Mod Settings, in both the main and pause menus. It covers everything except the four key bindings and [font=Courier New]log_verbose[/font]. The Preset entry at the top shows which preset your settings match, or Custom. Pick another, press Apply, and it's live within a quarter second. No restart.
+[b]With Mod Setting Menu.[/b] Smoothwalker gets its own page under Mod Settings, in both the main and pause menus. It covers everything except the four key bindings and a few ini-only settings: [font=Courier New]wall_clamp[/font], [font=Courier New]reset_distance[/font], [font=Courier New]reset_gap[/font], the speed blend timings and [font=Courier New]log_verbose[/font]. The Preset entry at the top shows which preset your settings match, or Custom. Pick another, press Apply, and it's live within a quarter second. No restart.
 
 [b]Without it.[/b] Edit [font=Courier New]config\smoothwalker.ini[/font] in the mod folder. Save, tab back in, and the change is live within a quarter second. Key bindings are the exception: they're read at game start.[/spoiler]
 
 [size=4][b]Settings[/b][/size] ([font=Courier New]config\smoothwalker.ini[/font] in the mod folder)
 [spoiler]
-[b]Keys[/b] (read at game start; any UE4SS key name)
+[b]Keys[/b] (read at game start; one letter, one digit, or F1 to F12)
 [list]
 [*][font=Courier New]toggle_key =[/font], [font=Courier New]preset_key =[/font], [font=Courier New]debug_key =[/font] (blank, no key), [font=Courier New]shoulder_key = V[/font][/*]
 [/list]
 [b]Follow[/b] (in presets, except enabled and wall_clamp)
 [list]
-[*][font=Courier New]enabled = 1[/font]: 0 is the game's own camera: no follow, no camera position changes, and the preset and shoulder keys do nothing.[/*]
+[*][font=Courier New]enabled = 1[/font]: 0 is the game's own camera: no follow, no camera position changes, and the preset and shoulder keys do nothing. Mods that use the camera API still apply.[/*]
 [*][font=Courier New]follow_rate_h = 6.5[/font], [font=Courier New]follow_rate_v = 10[/font]: catch-up rate per second, horizontal and vertical. Higher is tighter.[/*]
 [*][font=Courier New]curve_h = 2[/font], [font=Courier New]curve_v = 0[/font]: 0 constant, 1 linear, 2 smoothstep, 3 ease in-out. The curves start gently and reach full rate at [font=Courier New]catchup_distance = 150[/font] cm; [font=Courier New]min_rate_scale = 0.35[/font] is the rate at zero lag.[/*]
 [*][font=Courier New]max_lag_h = 85[/font], [font=Courier New]max_lag_v = 50[/font]: the furthest the camera may fall behind, in cm. 0 turns that axis's trail off, and its follow rate and curve then do nothing.[/*]
 [*][font=Courier New]soft_leash = 1[/font]: eases into the lag limit instead of stopping hard at it.[/*]
 [*][font=Courier New]aiming_follow = 30[/font]: percent of the trail and turning smoothing kept while you aim. 0 locks the camera to your aim, 100 trails as everywhere else.[/*]
 [*][font=Courier New]combat_follow = 100[/font]: percent of the trail kept while the combat camera is up. 0 locks the camera to your character, 100 trails as everywhere else. Eases in and out; while you aim, aiming_follow applies instead.[/*]
-[*][font=Courier New]traversal_follow = 100[/font]: percent of the trail kept during claw ride, anti-grav and shadowstep. 0 locks the camera to your character, 100 trails as everywhere else. Eases in and out; while you aim, aiming_follow applies instead, in combat, combat_follow, and in focus mode, focus_follow.[/*]
-[*][font=Courier New]focus_follow = 100[/font]: percent of the trail kept while focus mode is up. 0 locks the camera to your character, 100 trails as everywhere else. Eases in and out; while you aim, aiming_follow applies instead, and in combat, combat_follow.[/*]
+[*][font=Courier New]traversal_follow = 100[/font]: percent of the trail kept during claw ride, anti-grav and shadowstep. 0 locks the camera to your character, 100 trails as everywhere else. Eases in and out; while you aim, aiming_follow applies instead; in combat, combat_follow; in focus mode, focus_follow.[/*]
+[*][font=Courier New]focus_follow = 100[/font]: percent of the trail kept while focus mode is up. 0 locks the camera to your character, 100 trails as everywhere else. Eases in and out; while you aim, aiming_follow applies instead; in combat, combat_follow.[/*]
 [*][font=Courier New]interior_follow = 100[/font]: percent of the trail kept indoors, where the game switches to its indoor camera. 0 locks the camera to your character, 100 trails as outdoors. Eases in and out; in traversal, focus, combat or aiming, their own setting applies instead.[/*]
 [*][font=Courier New]rotation_smoothing = 0[/font], [font=Courier New]rotation_rate = 20[/font]: smooth turning too, and how fast it catches up. The smoothed turn trails by at most a quarter turn and always catches up the way you turned.[/*]
 [*][font=Courier New]combat_rotation = 100[/font]: percent of the turning smoothing kept while the combat camera is up. Only matters with rotation_smoothing on; while you aim, aiming_follow applies instead.[/*]
-[*][font=Courier New]traversal_rotation = 100[/font]: percent of the turning smoothing kept during claw ride, anti-grav and shadowstep. Only matters with rotation_smoothing on; while you aim, aiming_follow applies instead, in combat, combat_rotation, and in focus mode, focus_rotation.[/*]
-[*][font=Courier New]focus_rotation = 100[/font]: percent of the turning smoothing kept while focus mode is up. Only matters with rotation_smoothing on; while you aim, aiming_follow applies instead, and in combat, combat_rotation.[/*]
+[*][font=Courier New]traversal_rotation = 100[/font]: percent of the turning smoothing kept during claw ride, anti-grav and shadowstep. Only matters with rotation_smoothing on; while you aim, aiming_follow applies instead; in combat, combat_rotation; in focus mode, focus_rotation.[/*]
+[*][font=Courier New]focus_rotation = 100[/font]: percent of the turning smoothing kept while focus mode is up. Only matters with rotation_smoothing on; while you aim, aiming_follow applies instead; in combat, combat_rotation.[/*]
 [*][font=Courier New]interior_rotation = 100[/font]: percent of the turning smoothing kept indoors. Only matters with rotation_smoothing on; in traversal, focus, combat or aiming, their own setting applies instead.[/*]
 [*][font=Courier New]wall_clamp = 1[/font]: keeps the smoothed camera in front of walls the game pulled its camera in for.[/*]
 [/list]
@@ -105,22 +107,25 @@ A preset carries most of the camera settings; a few can't be changed per preset 
 [list]
 [*][font=Courier New]reset_distance = 500[/font]: cm moved in one frame that counts as a teleport and snaps the camera.[/*]
 [*][font=Courier New]reset_gap = 0.25[/font]: seconds without camera updates (cutscene, free camera, load) before a snap.[/*]
-[*][font=Courier New]show_banner = 1[/font]: the preset and on/off banner.[/*]
+[*][font=Courier New]show_banner = 1[/font]: the banner for preset changes, slot saves, and on/off from the key.[/*]
 [*][font=Courier New]log_stats = 0[/font]: 1 writes smoothing statistics and the per-frame cost to [font=Courier New]UE4SS.log[/font] every 5 seconds.[/*]
-[*][font=Courier New]log_verbose = 0[/font]: 1 adds detail to [font=Courier New]UE4SS.log[/font]: player discovery, offsets, camera mode layouts, focus, combat and traversal camera changes and indoor switches. Not on the menu page.[/*]
-[*][font=Courier New]debug_overlay = 0[/font]: 1 shows a panel at the top right of the screen, refreshed four times a second: on or off, the preset, the game's camera type and modes, how much of the trail is kept and why, the lag, the last snap and whether another mod holds the camera. [font=Courier New]debug_key[/font] flips it in game.[/*]
+[*][font=Courier New]log_verbose = 0[/font]: 1 adds detail to [font=Courier New]UE4SS.log[/font]: player discovery, offsets, camera mode layouts, focus, combat and traversal camera changes, and indoor switches. Not on the menu page.[/*]
+[*][font=Courier New]debug_overlay = 0[/font]: 1 shows a panel at the top right of the screen, refreshed four times a second: on or off, the preset, the game's camera type and modes, how much of the trail is kept and why, the lag, the last snap and whether another mod holds the camera.[/*]
+[*][font=Courier New]debug_markers = 0[/font]: 1 draws the camera's trail around your character: an amber dot where the game's camera is anchored, a teal ring where Smoothwalker's is, the line and distance between them, the lag limit and the ring's path over the last second. [font=Courier New]debug_key[/font] shows and hides the markers and the overlay together.[/*]
 [/list]
-[b]Camera position[/b] (100 / 0 / 0 / 0 is the game as shipped; in presets except camera_tuning, shoulder_swap and position_transition)
+[b]Camera position[/b] (100 / 0 / 0 / 0 is the game as shipped; in presets except camera_tuning, shoulder_swap, position_transition and the speed blend timings)
 [list]
-[*][font=Courier New]camera_tuning = 1[/font]: 0 puts every camera mode back as the game ships it.[/*]
-[*]Per group, with the prefix [font=Courier New]exploration_[/font], [font=Courier New]sprint_[/font], [font=Courier New]combat_[/font], [font=Courier New]focus_[/font], [font=Courier New]aiming_[/font] or [font=Courier New]traversal_[/font]: [font=Courier New]distance[/font] (% of the game's, 25 to 250), [font=Courier New]height[/font] (cm), [font=Courier New]shoulder[/font] (cm further out; centered cameras stay centered; not for traversal), [font=Courier New]fov[/font] (degrees added).[/*]
+[*][font=Courier New]camera_tuning = 1[/font]: 0 leaves each camera mode's position, FOV and look limits as the game, or another camera mod, set them. The follow is not affected.[/*]
+[*]Per group, with the prefix [font=Courier New]exploration_[/font], [font=Courier New]sprint_[/font], [font=Courier New]combat_[/font], [font=Courier New]focus_[/font], [font=Courier New]aiming_[/font] or [font=Courier New]traversal_[/font] (claw ride, anti-grav, shadowstep): [font=Courier New]distance[/font] (% of the game's, 25 to 250), [font=Courier New]height[/font] (cm), [font=Courier New]shoulder[/font] (cm further out; centered cameras stay centered; not for traversal), [font=Courier New]fov[/font] (degrees added).[/*]
+[*]Indoors, on top of the groups above: [font=Courier New]interior_distance = 100[/font] (% of the group's distance, 50 to 200), [font=Courier New]interior_height = 0[/font] (cm, -50 to 50), [font=Courier New]interior_shoulder = 0[/font] (cm, -60 to 60), [font=Courier New]interior_fov = 0[/font] (degrees, -30 to 30). They apply only where the game itself changes the camera indoors: exploring, sprinting, focus, anti-grav and shadowstep.[/*]
+[*][font=Courier New]speed_blend = 0[/font]: percent of the difference between the sprint_ and exploration_ settings that arrives gradually with speed, from a walk to a sprint. 0 switches at the sprint, as the game does. Does nothing while aiming, in combat, in focus or in traversal. Ini only: [font=Courier New]speed_blend_start = 150[/font] and [font=Courier New]speed_blend_full = 558[/font], the speeds in cm/s where the blend starts and is complete (measured: walk about 131, run about 460, sprint about 558); [font=Courier New]speed_blend_rise = 0.35[/font] and [font=Courier New]speed_blend_fall = 0.75[/font], seconds per easing stage as speed rises and falls (a higher fall pumps the camera less on turns and settles slower after a stop).[/*]
 [*]Focus has its own group since 0.9.0. Settings files and presets from before take their combat values for focus until you change them.[/*]
-[*]The game's own camera lag is switched off while Smoothwalker is on, so the follow settings above are the only lag. Off puts it back.[/*]
+[*]The game's own camera lag is switched off while Smoothwalker is on, so the follow settings above are the only lag. Off puts it back. camera_tuning does not change this.[/*]
 [*][font=Courier New]shoulder_swap = 0[/font]: 1 is the other shoulder. [font=Courier New]V[/font] switches it.[/*]
 [*][font=Courier New]position_transition = 0.5[/font]: seconds a position change or shoulder swap glides over. 0 snaps.[/*]
-[*][font=Courier New]pitch_min = -60[/font], [font=Courier New]pitch_max = 40[/font]: look down and up limits in the modes the game ships at -60 / 40: exploring, sprinting, focus and the shadowstep base. Aiming, combat, claw ride and anti-grav already allow -89 / 89 and keep their own.[/*]
+[*][font=Courier New]pitch_min = -60[/font], [font=Courier New]pitch_max = 40[/font]: look down and up limits in the modes the game ships at -60 / 40: exploring, sprinting, focus and the shadowstep base. Aiming, combat, claw ride and anti-grav keep their own (-89 / 89; aiming on a ladder -40 / 89).[/*]
 [/list]
-[b]Presets[/b]: [font=Courier New]preset = 102[/font] shows the matching preset (0 Custom, 101 Tight, 102 Balanced, 103 Cinematic, 1 to 6 a slot, 201 and up an installed preset); change it to load one. Set it to a slot you have not used yet and the mod saves your current settings into that slot instead; with a saved slot set, every later change is saved into it too. The mod writes this, and key presses that change it, back to the ini only while you play, never behind an open Mod Menu page. Slots go to [font=Courier New]config\presets\Slot N.ini[/font]; the mod creates the folder.[/spoiler]
+[b]Presets[/b]: [font=Courier New]preset = 102[/font] shows the matching preset (0 Custom, 101 Tight, 102 Balanced, 103 Cinematic, 1 to 6 a slot, 201 and up an installed preset); change it to load one. Set it to a slot you have not used yet and the mod saves your current settings into that slot instead; with a saved slot set, every later change is saved into it too. The mod writes this, and key presses that change it, back to the ini, but never behind an open Mod Menu page. Slots go to [font=Courier New]config\presets\Slot N.ini[/font]; the mod creates the folder.[/spoiler]
 
 [size=4][b]For mod authors: making a preset[/b][/size]
 [spoiler]
@@ -145,19 +150,21 @@ exploration_fov = 5[/code]
 
 [b]Rules[/b]
 [list]
-[*]One [b]key = value[/b] per line. A preset may list only the keys it wants to change; loading it leaves every other setting as the player has it.[/*]
-[*][b]name[/b]: up to 48 bytes, no [b]|[/b], [b];[/b] or [b]#[/b]. Without a name line the file name is used.[/*]
+[*]One [b]key = value[/b] per line. A preset may list only the keys it wants to change; loading it leaves every other setting as the player has it. One exception: a [b]focus_[/b] key left out takes the preset's [b]combat_[/b] value when it has one, so presets from before 0.9.0 keep working.[/*]
+[*][b]name[/b]: up to 48 bytes; a longer name is cut. [b]|[/b] is removed, and [b];[/b] or [b]#[/b] starts a comment, so neither can be part of a name. Without a name line the file name is used.[/*]
 [*]Values outside a setting's range are clamped, and 0/1 settings treat anything but 0 as 1.[/*]
-[*]Keys not listed below are ignored, so a preset can't change the on/off switches, the shoulder side, banners or key bindings.[/*]
-[*]Up to 54 presets are read, in file-name order. Files over 64 KB, or without a single preset key, are skipped. [font=Courier New]UE4SS.log[/font] lists each preset it loaded.[/*]
+[*]Keys not listed below are ignored, so a preset can't change the on/off switches (Smoothwalker, Adjust camera position, banners, logging, debug displays), the shoulder side, Position change speed, the speed blend timings or key bindings.[/*]
+[*]Up to 54 presets are read, in file-name order. Files over 64 KB, or without a single preset key, are skipped. The load line in [font=Courier New]UE4SS.log[/font] counts the presets read; with [font=Courier New]log_verbose = 1[/font] it lists each one.[/*]
 [/list]
 
-[b]Keys[/b] (range, shipped default)
+[b]Keys[/b] (50 in all; range, shipped default)
 [list]
-[*]Follow: [font=Courier New]follow_rate_h[/font] and [font=Courier New]follow_rate_v[/font] (0.5 to 30, 6.5 and 10), [font=Courier New]curve_h[/font] and [font=Courier New]curve_v[/font] (0 constant, 1 linear, 2 smoothstep, 3 ease in-out; 2 and 0), [font=Courier New]catchup_distance[/font] (10 to 500 cm, 150), [font=Courier New]min_rate_scale[/font] (0.05 to 1, 0.35), [font=Courier New]max_lag_h[/font] (0 to 300 cm, 85), [font=Courier New]max_lag_v[/font] (0 to 200 cm, 50), [font=Courier New]soft_leash[/font] (0 or 1, 1), [font=Courier New]aiming_follow[/font] (0 to 100 %, 30), [font=Courier New]combat_follow[/font] (0 to 100 %, 100), [font=Courier New]traversal_follow[/font] (0 to 100 %, 100), [font=Courier New]focus_follow[/font] (0 to 100 %, 100), [font=Courier New]interior_follow[/font] (0 to 100 %, 100)[/*]
-[*]Turning: [font=Courier New]rotation_smoothing[/font] (0 or 1, 0), [font=Courier New]rotation_rate[/font] (1 to 60, 20), [font=Courier New]combat_rotation[/font] (0 to 100 %, 100), [font=Courier New]traversal_rotation[/font] (0 to 100 %, 100), [font=Courier New]focus_rotation[/font] (0 to 100 %, 100), [font=Courier New]interior_rotation[/font] (0 to 100 %, 100)[/*]
+[*]Follow: [font=Courier New]follow_rate_h[/font] and [font=Courier New]follow_rate_v[/font] (0.5 to 30, 6.5 and 10), [font=Courier New]curve_h[/font] and [font=Courier New]curve_v[/font] (0 constant, 1 linear, 2 smoothstep, 3 ease in-out; 2 and 0), [font=Courier New]catchup_distance[/font] (10 to 500 cm, 150), [font=Courier New]min_rate_scale[/font] (0.05 to 1, 0.35), [font=Courier New]max_lag_h[/font] (0 to 300 cm, 85), [font=Courier New]max_lag_v[/font] (0 to 200 cm, 50), [font=Courier New]soft_leash[/font] (0 or 1, 1), [font=Courier New]aiming_follow[/font] (0 to 100 %, 30), [font=Courier New]combat_follow[/font], [font=Courier New]traversal_follow[/font], [font=Courier New]focus_follow[/font] and [font=Courier New]interior_follow[/font] (0 to 100 %, 100)[/*]
+[*]Turning: [font=Courier New]rotation_smoothing[/font] (0 or 1, 0), [font=Courier New]rotation_rate[/font] (1 to 60, 20), [font=Courier New]combat_rotation[/font], [font=Courier New]traversal_rotation[/font], [font=Courier New]focus_rotation[/font] and [font=Courier New]interior_rotation[/font] (0 to 100 %, 100)[/*]
 [*]Look limits: [font=Courier New]pitch_min[/font] (-89 to -30, -60), [font=Courier New]pitch_max[/font] (20 to 89, 40); the modes shipped at -60 / 40 only[/*]
 [*]Per situation, with the prefix [font=Courier New]exploration_[/font], [font=Courier New]sprint_[/font], [font=Courier New]combat_[/font], [font=Courier New]focus_[/font], [font=Courier New]aiming_[/font] or [font=Courier New]traversal_[/font]: [font=Courier New]distance[/font] (25 to 250 %, 100), [font=Courier New]height[/font] (-50 to 100 cm, 0), [font=Courier New]shoulder[/font] (-60 to 100 cm, 0; not for traversal), [font=Courier New]fov[/font] (-30 to 30 degrees, 0)[/*]
+[*]Speed blend: [font=Courier New]speed_blend[/font] (0 to 100 %, 0)[/*]
+[*]Indoors: [font=Courier New]interior_distance[/font] (50 to 200 %, 100), [font=Courier New]interior_height[/font] (-50 to 50 cm, 0), [font=Courier New]interior_shoulder[/font] (-60 to 60 cm, 0), [font=Courier New]interior_fov[/font] (-30 to 30 degrees, 0)[/*]
 [/list]
 
 [b]Sharing a preset on Nexus[/b]
@@ -168,7 +175,8 @@ Pack the file with its folder path, [i]ue4ss\Mods\DWSmoothwalker\config\presets\
 Smoothwalker puts a [font=Courier New]Smoothwalker[/font] table into every UE4SS Lua mod's state before the script's top level runs, so there is nothing to require or copy. [font=Courier New]Smoothwalker == nil[/font] means it is not installed; check [font=Courier New]api_version[/font] (4 in this release, it only grows).
 
 [list]
-[*][font=Courier New]view()[/font], [font=Courier New]live()[/font], [font=Courier New]enabled()[/font]: the camera as the game built it and as shown, the pivot, and whether updates are live. Callable from any thread.[/*]
+[*][font=Courier New]register()[/font]: logs one line naming your mod, the quickest check that your mod saw the table.[/*]
+[*][font=Courier New]view()[/font], [font=Courier New]live()[/font], [font=Courier New]enabled()[/font], [font=Courier New]layers()[/font]: the camera as the game built it and as shown, the pivot, whether updates are live, and which mod holds which layer. Callable from any thread.[/*]
 [*][font=Courier New]layer_set{ offset, rotation, fov, fov_abs, weight, blend, ttl }[/font], [font=Courier New]layer_clear()[/font]: one layer per mod, eight slots, applied after the follow. A lease ([font=Courier New]ttl[/font]) fades it out if your mod stops refreshing it.[/*]
 [*][font=Courier New]claim{ keep_layers, ttl }[/font], [font=Courier New]release("cut" or "glide")[/font], [font=Courier New]owner()[/font]: one owner at a time takes the camera over; on release Smoothwalker cuts or glides back to its follow.[/*]
 [/list]
