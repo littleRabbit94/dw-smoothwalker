@@ -107,13 +107,19 @@ TEST(ini, focus_fallback)
     CHECK_EQ(s.focus_height, 10.0);
     CHECK_EQ(s.focus_shoulder, 5.0);
     CHECK_EQ(s.focus_fov, 3.0);
-    // Any focus key with a value: no fallback, the others keep their defaults.
+    // Any focus position key with a value: no fallback, the others keep their defaults.
     s = parse_settings("combat_distance = 120\nfocus_fov = 2\n");
     CHECK_EQ(s.focus_distance, 100.0);
     CHECK_EQ(s.focus_fov, 2.0);
     // A blank focus key does not count.
     s = parse_settings("combat_distance = 120\nfocus_fov =\n");
     CHECK_EQ(s.focus_distance, 120.0);
+    // focus_follow and focus_rotation are not the position: the fallback still runs, and they keep their values.
+    s = parse_settings("combat_distance = 120\ncombat_fov = 3\nfocus_follow = 50\nfocus_rotation = 40\n");
+    CHECK_EQ(s.focus_distance, 120.0);
+    CHECK_EQ(s.focus_fov, 3.0);
+    CHECK_EQ(s.focus_follow, 50.0);
+    CHECK_EQ(s.focus_rotation, 40.0);
     // Combat clamped, focus too: the fallback runs before sanitize.
     s = parse_settings("combat_distance = 900\n");
     CHECK_EQ(s.focus_distance, 250.0);

@@ -50,9 +50,11 @@ namespace dw::smoothwalker::settings
             // A blank key name is kept, so it unbinds the key instead of falling back to the default.
             bool key_name = key == "toggle_key" || key == "preset_key" || key == "shoulder_key" || key == "debug_key";
             if (!key.empty() && (!value.empty() || key_name)) set_value(s, key, value);
-            if (key.rfind("focus_", 0) == 0 && !value.empty()) focus_seen = true;
+            bool focus_position = key == "focus_distance" || key == "focus_height" || key == "focus_shoulder" || key == "focus_fov";
+            if (focus_position && !value.empty()) focus_seen = true;
         }
-        // The focus group is 0.9.0; a file from before it gets its combat values, which is what focus used.
+        // The focus group's position is 0.9.0; a file without any of its four keys gets the combat values, which is what
+        // focus used. focus_follow and focus_rotation say nothing about the position, so they do not count.
         if (!focus_seen)
         {
             s.focus_distance = s.combat_distance;

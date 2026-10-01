@@ -31,8 +31,12 @@ namespace dw::smoothwalker::ui
         }
         if (m_menu_host && !m_menu_host->IsUnreachable() && m_menu_host->GetClassPrivate() == m_activatable_class && shown(m_menu_host)) return true;
         m_menu_host = nullptr; // closed or gone; every open creates a new host
+        // The class default object has the exact class and a UserWidget's default Visibility (SelfHitTestInvisible), so
+        // without the flag test it reads as a menu that never closes.
         UObjectGlobals::ForEachUObject([&](UObject* object, int32_t, int32_t) {
-            if (!object || object->GetClassPrivate() != m_activatable_class || object->IsUnreachable() || !shown(object)) return LoopAction::Continue;
+            if (!object || object->GetClassPrivate() != m_activatable_class || object->HasAnyFlags(static_cast<EObjectFlags>(RF_ClassDefaultObject | RF_ArchetypeObject)) ||
+                object->IsUnreachable() || !shown(object))
+                return LoopAction::Continue;
             m_menu_host = object;
             return LoopAction::Break;
         });

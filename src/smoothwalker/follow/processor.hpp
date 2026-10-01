@@ -202,10 +202,11 @@ namespace dw::smoothwalker::follow
             out.generation = m_generation;
             out.transition = t.transition;
 
-            if (report.clamped) m_clamped.fetch_add(1, std::memory_order_relaxed);
+            // Clamped frames are following frames: counted with them, so the share stays within 100%.
             if (report.stats && m_log_stats.load(std::memory_order_relaxed))
             {
                 m_frames.fetch_add(1, std::memory_order_relaxed);
+                if (report.clamped) m_clamped.fetch_add(1, std::memory_order_relaxed);
                 m_lag_sum.store(m_lag_sum.load(std::memory_order_relaxed) + report.shown_lag, std::memory_order_relaxed);
             }
         }

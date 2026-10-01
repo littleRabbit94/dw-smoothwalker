@@ -729,7 +729,7 @@ FOV 100 mid-blend) can only shrink the addition, never overshoot it.
 
 - **Live settings without Lua** (0.5.0). `on_update` (UE4SS thread) checks `smoothwalker.ini`'s write time every
   250 ms. The hook copies numbers-only structs (`Tuning` for the core, `dw::smoothwalker::follow::FollowTuning` for the follow; see "Core and
-  processors") under a shared SRW lock, so nothing allocates on the worker thread. `toggle_key` and `preset_key` stay startup-only. UE4SS runs key callbacks on the same
+  processors") under a shared SRW lock, so nothing allocates on the worker thread. The four key names (`toggle_key`, `preset_key`, `shoulder_key`, `debug_key`) are read at startup only. UE4SS runs key callbacks on the same
   thread as `on_update` (`UE4SSProgram.cpp`, `process_event` then `fire_update`).
 - **Robust reads** (0.7.4). Non-finite ini values (`std::stod` takes `nan`/`inf`) are ignored, and a
   non-finite pivot, view or result skips the frame. `DeltaTime` is clamped to 0 to 0.1 s for the follow, but a NaN passes
@@ -775,8 +775,11 @@ FOV 100 mid-blend) can only shrink the addition, never overshoot it.
   which the game's own screens all subclass, so an instance of exactly that class is the menu. Sampled live
   with the bridge: open, `Visibility` 4 (SelfHitTestInvisible), activated, in viewport; closed, the object
   lingers until GC with `Visibility` 1 (Collapsed), disabled, out of the viewport. `MenuProbe::open` keeps the
-  host last seen open and rescans (`ForEachUObject`, exact class, not unreachable, `Visibility` not
-  Collapsed) only when that one is collapsed or gone; it runs only with a write pending and the camera not
+  host last seen open and rescans (`ForEachUObject`, exact class, not the class default object or an
+  archetype, not unreachable, `Visibility` not Collapsed) only when that one is collapsed or gone. The CDO
+  test matters: `Default__CommonActivatableWidget` has the exact class and the `UUserWidget` constructor's
+  `SelfHitTestInvisible` (UE 5.5.4 `UserWidget.cpp` 87), so until 0.11.0 the probe read it as a menu that
+  never closed and a load from the pause menu waited for gameplay (verified 2026-09-30: with the fix, a page reopened from the pause menu shows the load and Applies cleanly); it runs only with a write pending and the camera not
   live, so never during play. If a menu update changes the host the check returns false and the write lands
   under the open page as in 0.8.0: a locked page, never a lost value. The finer check (the page switcher and
   the title text, for a list round-trip without leaving the menu) was left out as two more fragile parts.
@@ -816,7 +819,6 @@ FOV 100 mid-blend) can only shrink the addition, never overshoot it.
 
   | Key | Tight | Balanced | Cinematic |
   |---|---|---|---|
-  | `position_transition` | 0.4 | 0.5 | 0.8 |
   | pitch min / max | -60 / 40 | -60 / 40 | -70 / 55 |
   | exploring distance / height / shoulder / FOV | 90 / 0 / 0 / 0 | 100 / 0 / 0 / 0 | 115 / 10 / 10 / 5 |
   | sprinting | 90 / 0 / 0 / 0 | 100 / 0 / 0 / 0 | 110 / 10 / 10 / 8 |
@@ -841,9 +843,9 @@ FOV 100 mid-blend) can only shrink the addition, never overshoot it.
   Preset picker also carries Custom and the three built-ins, so 60 slots is the ceiling.
 - **Presets folder** (`config/presets/`, replaces `presets.ini`; created at startup if missing). A
   slot save writes `Slot N.ini`: a three-line comment (what wrote it, how to rename it, how to turn it into a
-  drop-in), the `name` line (the slot's display name: `Slot N` on a first save, kept on later saves), the 41
+  drop-in), the `name` line (the slot's display name: `Slot N` on a first save, kept on later saves), the 50
   `PRESET_KEYS`. The mod writes no other file there. Any other `*.ini` is a drop-in preset, parsed like a slot file:
-  `;`/`#` comments, `name = ...` for the label, keys outside the 41 and non-finite values ignored, values
+  `;`/`#` comments, `name = ...` for the label, keys outside the 50 and non-finite values ignored, values
   clamped on load, files with no preset keys or over 64 KiB skipped. Enumeration uses the wide Win32 APIs
   (the game path and file names may be non-ASCII). `release/example-preset/Template.ini` is a commented
   drop-in.
@@ -893,17 +895,18 @@ FOV 100 mid-blend) can only shrink the addition, never overshoot it.
   menu (`choices.lua`, `M.replace`) refuses an Apply when the file's bytes differ from the snapshot it took
   when the page opened. So saving a slot cost the player the page. Adopt and autosave write only the slot
   file, leaving `smoothwalker.ini` exactly as the Apply wrote it, so the page keeps working.
-- **V** cycles built-ins, non-empty slots, then drop-ins, starting after the active preset (the first entry from
+- **The preset key** (`preset_key`, blank by default) cycles built-ins, non-empty slots, then drop-ins, starting after the active preset (the first entry from
   Custom or an id not in the order), through the same load path as the menu. The active id updates in
   memory on each press, so quick presses advance one step each.
 
-### Keys: V and N only while the camera is live
+### Keys: preset and shoulder only while the camera is live
 
-`N` pressed with the Mod Menu open wrote `shoulder_swap` to the ini behind the open page (the swap then
+The shoulder key pressed with the Mod Menu open wrote `shoulder_swap` to the ini behind the open page (the swap then
 played on close), which makes the menu refuse the next Apply on that page. Since 0.7.2 the hook
-stamps the QPC time of every player-camera update, and `V` and `N` act only when the last one is under 0.25 s old: not under a pause, a load, a cutscene or the free
-camera. The log says when a press was ignored. Both are also ignored while the mod is off. `O` stays
-live; its `enabled` change is written back like the others, once the camera is live.
+stamps the QPC time of every player-camera update, and the preset key (`preset_key`, blank by default) and the
+shoulder key (`shoulder_key`, V by default) act only when the last one is under 0.25 s old: not under a pause, a load, a cutscene or the free
+camera. The log says when a press was ignored. Both are also ignored while the mod is off. The toggle key
+(`toggle_key`, blank by default) stays live; its `enabled` change is written back like the others, once the camera is live.
 
 ### Banners
 

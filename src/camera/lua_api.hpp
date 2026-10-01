@@ -5,7 +5,8 @@
 // hook publishes once per player-camera update, so they are safe from any thread: a mod may call them at its
 // top level (UE4SS mod thread), from a key bind or hook (game thread), or from LoopAsync.
 // Slice 2: layer_set(), layer_clear(), layers(). One override layer per consumer, applied in the hook after the
-// follow and the wall clamp. These write state the hook reads and are game thread only ("bad_thread").
+// follow and the wall clamp. layer_set() and layer_clear() write state the hook reads and are game thread only
+// ("bad_thread"); layers() is a diagnostic read and thread-agnostic.
 // Slice 3: claim(), release(mode), owner(). One camera owner at a time. While a claim is held the follow math
 // keeps running on the game's view and the hook writes nothing, so a release can cut or glide back. A claim may
 // take a ttl lease, so a consumer that crashes mid-claim cannot hold the camera forever. claim() and release()
